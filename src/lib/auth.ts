@@ -88,6 +88,9 @@ export async function signInWithConnect(): Promise<Account> {
     code_challenge: challenge,
     code_challenge_method: 'S256',
     scope: 'read write',
+    // Signed in as the account: the extension lists and searches all of
+    // it, not only what it created.
+    reach: 'account',
   }).toString();
 
   let back: string | undefined;
