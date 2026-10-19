@@ -105,6 +105,9 @@ export const MEETING_HOSTS: { re: RegExp; name: string }[] = [
   { re: /^https:\/\/discord\.com\/channels\//i, name: 'Discord' },
 ];
 
+/** Settings: offer to record when a tab joins a meeting (default on). */
+export const OFFER_KEY = 'meetings.offer';
+
 export function meetingOf(url: string | undefined): string | null {
   if (!url) return null;
   return MEETING_HOSTS.find((m) => m.re.test(url))?.name ?? null;

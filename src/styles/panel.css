@@ -167,3 +167,77 @@ button:focus-visible,a:focus-visible,[role="tab"]:focus-visible,input:focus-visi
 @keyframes vs-spin{to{transform:rotate(360deg)}}
 @keyframes vs-pulse{0%,100%{opacity:1}50%{opacity:.35}}
 @media (prefers-reduced-motion:reduce){.dot--pulse,.tab__dot,.spin{animation-duration:3s}}
+
+/* ── Broadcasts (broadcasts agent) ── */
+.bc-err{color:var(--bad);font-weight:400}
+.bc-code{display:flex;align-items:center;gap:6px}
+.bc-code__pre{font:500 13px var(--vs-font-mono);color:var(--ink-35)}
+.bc-url{padding:9px 11px;border-radius:10px;background:var(--sunken);border:1px solid var(--hair);font-size:12px;color:var(--ink-80);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bc-count{display:inline-flex;align-items:center;gap:3px;font-size:11.5px;color:var(--ink-55);font-variant-numeric:tabular-nums}
+.bc-count svg{width:13px;height:13px}
+.bc-chev{width:14px;height:14px;color:var(--ink-30)}
+
+/* ── Voices (voices agent) ── */
+/* A voice's own colour: the dashboard's six voice slots (transcribe:
+   assets/speaker-palette.json, `voices`), the colour its speaker wears in
+   every transcript. */
+:root{--vx-1:#55abe5;--vx-2:#f78472;--vx-3:#7fd6b4;--vx-4:#c5a3f0;--vx-5:#f0c04a;--vx-6:#8fb8f0}
+@media (prefers-color-scheme:light){:root{--vx-1:#2968a3;--vx-2:#b92913;--vx-3:#0f6b52;--vx-4:#6b3fa0;--vx-5:#8a5a00;--vx-6:#1f4e7a}}
+.vc-av{flex:none;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:600 10px var(--vs-font-mono);letter-spacing:.02em;color:var(--vc,var(--ink-45));background:color-mix(in oklab,var(--vc,var(--ink-45)) 16%,transparent)}
+.vc-av--lg{width:38px;height:38px;font-size:12px}
+.vc-chev{width:14px;height:14px;color:var(--ink-30)}
+.vc-meter{flex:1;min-width:0;height:28px;align-items:center}
+.vc-meter i{flex:1;min-width:2px;background:var(--brand)}
+.vc-meter--off i{background:var(--fill-14)}
+.vc-clock{flex:none;font:600 11.5px var(--vs-font-mono);color:var(--ink-55)}
+.vc-passage{font-size:13px;line-height:1.6;font-weight:300;color:var(--ink-70);max-height:170px;overflow-y:auto}
+.vc-line{margin:0;font-size:13px;line-height:1.55;font-weight:300;color:var(--ink-70)}
+.vc-swatches{display:flex;flex-wrap:wrap;gap:8px}
+.vc-swatch{width:28px;height:28px;padding:0;border-radius:50%;border:2px solid transparent;background:color-mix(in oklab,var(--vc) 16%,transparent);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.vc-swatch i{width:12px;height:12px;border-radius:50%;background:var(--vc)}
+.vc-swatch[aria-pressed="true"]{border-color:var(--vc)}
+
+/* ── Page / Library (page agent) ── */
+.pg-row{border-top:1px solid var(--hair)}
+.pg-row:first-child{border-top:0}
+.pg-row>.item{border-top:0}
+label.item{cursor:default}
+label.item--click{cursor:pointer}
+.pg-row .item__main{display:flex;flex-direction:column}
+.pg-check{flex:none;width:14px;height:14px;margin:0;accent-color:var(--brand)}
+.pg-check:disabled{opacity:.3}
+.pg-row__foot{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:0 12px 10px 66px;margin-top:-4px;font-size:11.5px;color:var(--ink-55)}
+.pg-row__foot .spin{width:12px;height:12px}
+.pg-bad{color:var(--bad)}
+.pg-hint{color:var(--warn)}
+.pg-link,.toast__link{border:0;background:none;padding:0;color:var(--brand);font-size:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:3px}
+.pg-link:hover,.toast__link:hover{text-decoration:underline}
+.pg-status{display:flex;align-items:center;gap:6px}
+.pg-status .spin{width:12px;height:12px}
+.pg-progress{margin-top:6px}
+.pg-upload{display:flex;flex-direction:column;gap:6px;padding-top:4px;text-align:center}
+.lib-search{position:relative;display:flex;align-items:center}
+.lib-search>svg{position:absolute;left:11px;width:15px;height:15px;color:var(--ink-45);pointer-events:none}
+.lib-search .input{padding-left:33px;padding-right:34px}
+.lib-search .input::-webkit-search-cancel-button{display:none}
+.lib-search>.spin,.lib-clear{position:absolute;right:10px}
+.lib-clear{border:0;background:none;padding:2px;color:var(--ink-45);cursor:pointer;display:flex}
+.lib-clear:hover{color:var(--ink-96)}
+.lib-clear svg{width:14px;height:14px}
+.lib-hit{align-items:flex-start}
+.lib-hit__text{color:var(--ink-80);font-size:12.5px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.lib-hit__text mark{background:var(--brand-tint);color:var(--brand);border-radius:3px;padding:0 1px}
+.lib-hit .item__sub{margin-top:4px;display:flex;align-items:center;gap:4px}
+.toasts{position:fixed;left:10px;right:10px;bottom:10px;z-index:40;display:flex;flex-direction:column;gap:6px;pointer-events:none}
+.toast{pointer-events:auto;display:flex;align-items:center;gap:10px;padding:9px 6px 9px 12px;border-radius:var(--r-tile);background:var(--surface);border:1px solid var(--line);box-shadow:0 6px 20px rgba(0,0,0,.28);font-size:12px}
+.toast--bad{border-color:color-mix(in oklab,var(--bad) 40%,transparent)}
+.toast>svg{width:15px;height:15px;flex:none}
+.toast__ok{color:var(--ready)}
+.toast__bad{color:var(--bad)}
+.toast__main{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.toast__title{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.toast__sub{color:var(--ink-55);font-size:11.5px}
+.toast--bad .toast__sub{color:var(--bad)}
+.toast__link svg{width:12px;height:12px}
+.toast .icon-btn{width:26px;height:26px}
+.toast .icon-btn svg{width:14px;height:14px}

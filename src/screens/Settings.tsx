@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import type { Account } from '../lib/auth';
 import { ENVS, type Env, type EnvName } from '../lib/env';
 import { rpc } from '../lib/rpc';
-import { DEFAULT_CAPTION_STYLE, type CaptionStyle } from '../lib/live';
+import { DEFAULT_CAPTION_STYLE, OFFER_KEY, type CaptionStyle } from '../lib/live';
 import { Btn, Field, IconBtn, Note, Section, Seg, openApp, useAction } from '../ui/kit';
 import { IconBack, IconExternal, IconMic, IconSignOut, IconUser } from '../ui/icons';
 
@@ -28,13 +28,17 @@ export function Settings({ account, env, onBack }: { account: Account; env: Env 
   const mic = useAction();
   const [micState, setMicState] = useState<PermissionState | 'unknown'>('unknown');
   const [style, setStyle] = useState<CaptionStyle>(DEFAULT_CAPTION_STYLE);
+  const [offerMeetings, setOfferMeetings] = useState(true);
 
   useEffect(() => {
     navigator.permissions.query({ name: 'microphone' as PermissionName }).then((p) => {
       setMicState(p.state);
       p.onchange = () => setMicState(p.state);
     }, () => {});
-    chrome.storage.local.get('captionStyle').then((g) => g.captionStyle && setStyle(g.captionStyle as CaptionStyle));
+    chrome.storage.local.get(['captionStyle', OFFER_KEY]).then((g) => {
+      if (g.captionStyle) setStyle(g.captionStyle as CaptionStyle);
+      setOfferMeetings(g[OFFER_KEY] !== false);
+    });
   }, []);
 
   const saveStyle = (s: CaptionStyle) => { setStyle(s); void rpc('captions.style', s); };
@@ -75,6 +79,10 @@ export function Settings({ account, env, onBack }: { account: Account; env: Env 
         <Field label="Size"><Seg label="Caption size" value={style.size} onChange={(size) => saveStyle({ ...style, size })} options={[{ value: 's', label: 'Small' }, { value: 'm', label: 'Medium' }, { value: 'l', label: 'Large' }]} /></Field>
         <Field label="Position"><Seg label="Caption position" value={style.position} onChange={(position) => saveStyle({ ...style, position })} options={[{ value: 'bottom', label: 'Bottom' }, { value: 'top', label: 'Top' }]} /></Field>
         <label className="check"><input type="checkbox" checked={style.showOriginal} onChange={(e) => saveStyle({ ...style, showOriginal: e.target.checked })} />Show the original line above its translation</label>
+      </Section>
+
+      <Section title="Meetings">
+        <label className="check"><input type="checkbox" checked={offerMeetings} onChange={(e) => { setOfferMeetings(e.target.checked); void chrome.storage.local.set({ [OFFER_KEY]: e.target.checked }); }} />Offer to record when a tab joins a meeting (Google Meet, Microsoft Teams, Zoom and others on the web)</label>
       </Section>
 
       <Section title="Shortcuts">

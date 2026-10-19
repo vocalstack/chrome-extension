@@ -24,6 +24,8 @@ export interface Methods {
   'live.stop': [{ id: string }, void];
   'live.pause': [{ id: string; paused: boolean }, void];
   'live.list': [void, LiveStatus[]];
+  /** The transcript so far of a running session (for a panel opened late). */
+  'live.history': [{ id: string }, LiveEvent[]];
   'captions.style': [CaptionStyle, void];
   'dub.start': [DubStart, DubStatus];
   'dub.stop': [{ tabId: number }, void];
@@ -73,6 +75,8 @@ export function serve(handlers: Handlers) {
 export type Push =
   | { push: 'live.status'; status: LiveStatus }
   | { push: 'live.event'; id: string; tabId?: number; event: LiveEvent }
+  /** The input level (0..1), a few times a second while capturing. */
+  | { push: 'live.level'; id: string; level: number }
   | { push: 'dub.status'; status: DubStatus }
   | { push: 'auth.changed'; account: Account | null };
 
@@ -80,7 +84,9 @@ export type Push =
 export type LiveEvent =
   | { type: 'committed'; seq: number; text: string; startS: number; endS: number; speaker?: string | null }
   | { type: 'draft'; text: string }
-  | { type: 'translated'; seq: number; lang: string; text: string };
+  | { type: 'translated'; seq: number; lang: string; text: string }
+  /** The draft's translation, when the session translates. */
+  | { type: 'draftTranslated'; lang: string; text: string };
 
 export function push(p: Push): void {
   chrome.runtime.sendMessage(p).catch(() => { /* nobody listening */ });

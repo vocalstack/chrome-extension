@@ -24,8 +24,10 @@ export interface PanelIntent {
 export const INTENT = 'panel.intent';
 
 export async function showInPanel(intent: Omit<PanelIntent, 'at'>, windowId?: number): Promise<void> {
+  // Opening the panel must happen inside the user gesture (a click, a
+  // menu, a shortcut), so it goes first, before any await here or in the
+  // caller. The panel reads the intent when it changes, open or not.
+  const opening = windowId !== undefined ? chrome.sidePanel.open({ windowId }).catch(() => {}) : null;
   await chrome.storage.session.set({ [INTENT]: { ...intent, at: Date.now() } satisfies PanelIntent });
-  // Must run inside the user gesture (a click, a menu, a command): no
-  // await may come before it in the caller.
-  if (windowId !== undefined) await chrome.sidePanel.open({ windowId }).catch(() => {});
+  await opening;
 }

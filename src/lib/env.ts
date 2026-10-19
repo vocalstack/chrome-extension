@@ -23,9 +23,13 @@ export const ENVS: Record<EnvName, Env> = {
 
 const KEY = 'env';
 
+/** For a scratch API on another port: `chrome.storage.local.set({ localApi: 'http://localhost:8090' })`. */
+const LOCAL_API = 'localApi';
+
 export async function currentEnv(): Promise<Env> {
-  const got = await chrome.storage.local.get(KEY);
-  return ENVS[got[KEY] as EnvName] ?? ENVS.production;
+  const got = await chrome.storage.local.get([KEY, LOCAL_API]);
+  const env = ENVS[got[KEY] as EnvName] ?? ENVS.production;
+  return env.name === 'local' && typeof got[LOCAL_API] === 'string' ? { ...env, api: got[LOCAL_API] } : env;
 }
 
 export async function setEnv(name: EnvName): Promise<void> {
