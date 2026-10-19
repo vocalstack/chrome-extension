@@ -10,7 +10,7 @@
  *  Every change of state is pushed as `live.status`; transcript events as
  *  `live.event` (the background forwards captions to the tab). */
 
-import { VocalStack, type RealtimeSession } from '@vocalstack/sdk';
+import { VocalStack, type RealtimeSession, type Subscription } from '@vocalstack/sdk';
 import { push, rpc, type LiveEvent } from '../lib/rpc';
 import type { LiveStatus } from '../lib/live';
 import type { OffCmd } from '../lib/offscreen';
@@ -25,6 +25,9 @@ interface Live {
   status: LiveStatus;
   vs: VocalStack;
   session?: RealtimeSession;
+  /** Recording modes: the transcript comes on an owner subscription (a
+   *  publisher socket carries audio up, not the transcript down). */
+  sub?: Subscription;
   streams: MediaStream[];
   ctx?: AudioContext;
   playback?: HTMLAudioElement;
@@ -113,6 +116,7 @@ export async function startLive(cmd: Extract<OffCmd, { off: 'live.start' }>): Pr
     }
     set(l, { state: 'live' });
     l.reading = read(l);
+    if (l.status.recordingId) void follow(l, l.status.recordingId);
     return l.status;
   } catch (e) {
     const code = (e as { code?: string }).code;
@@ -227,6 +231,10 @@ async function read(l: Live) {
           const tr = ev.segments.map((x) => x.translations?.[lang] ?? '').join(' ').trim();
           if (tr) emit(l, { type: 'draftTranslated', lang, text: tr });
         }
+      } else if (ev.type === 'transcript.sentence') {
+        const st = ev.sentence;
+        const tr = lang ? st.translations?.[lang] : undefined;
+        if (tr && st.seqs.length) emit(l, { type: 'translated', seq: Math.max(...st.seqs), seqs: st.seqs, sentenceId: st.sentenceId, lang: lang!, text: tr });
       } else if (ev.type === 'transcript.translated') {
         const tr = lang ? ev.translations[lang] : undefined;
         if (tr) emit(l, { type: 'translated', seq: ev.seq, lang: lang!, text: tr });
@@ -241,6 +249,33 @@ async function read(l: Live) {
     const why = l.session?.doneReason === 'max_duration' ? 'The recording reached its maximum length.' : l.status.error || 'The connection to VocalStack ended.';
     await finish(l, why);
   }
+}
+
+/** A recording's transcript, as the dashboard reads it: committed and
+ *  draft lines from the owner's subscription. */
+async function follow(l: Live, rid: string) {
+  try {
+    l.sub = await l.vs.recordings.subscribe(rid, { ...(l.status.translateTo ? { lang: l.status.translateTo } : {}) });
+    const seen = new Set<number>();
+    for await (const ev of l.sub) {
+      if (ev.type === 'snapshot') {
+        for (const g of ev.snapshot.segments) {
+          if (seen.has(g.seq)) continue;
+          seen.add(g.seq);
+          emit(l, { type: 'committed', seq: g.seq, text: g.text, startS: g.start, endS: g.end, speaker: String(g.speaker) });
+        }
+      } else if (ev.type === 'frame') {
+        const f = ev.frame as { type: string; segment?: { seq: number; text: string; start: number; end: number; speaker: number }; segments?: { text: string }[] };
+        if (f.type === 'transcript.committed' && f.segment && !seen.has(f.segment.seq)) {
+          seen.add(f.segment.seq);
+          const g = f.segment;
+          emit(l, { type: 'committed', seq: g.seq, text: g.text, startS: g.start, endS: g.end, speaker: String(g.speaker) });
+        } else if (f.type === 'transcript.draft' && f.segments) {
+          emit(l, { type: 'draft', text: f.segments.map((x) => x.text).join(' ').trim() });
+        }
+      } else if (ev.type === 'closed') break;
+    }
+  } catch { /* the transcript stays in the dashboard */ }
 }
 
 export async function pauseLive(id: string, paused: boolean) {
@@ -271,8 +306,13 @@ async function finish(l: Live, error: string | null) {
   const rid = l.status.recordingId;
   if (rid) {
     // A live recording stops only from paused, as in the dashboard.
-    if (l.status.state !== 'paused' && !l.paused) await l.vs.recordings.pause(rid).catch(() => {});
-    await l.vs.recordings.stop(rid).catch(() => {});
+    // The pause can take a moment to land: retry, and say so if it never does.
+    let stopErr: unknown = null;
+    for (let i = 0; i < 4; i++) {
+      if (i > 0 || !l.paused) await l.vs.recordings.pause(rid).catch(() => {});
+      try { await l.vs.recordings.stop(rid); stopErr = null; break; } catch (e) { stopErr = e; await new Promise((r) => setTimeout(r, 800)); }
+    }
+    if (stopErr && !error) error = `The recording could not be stopped: ${(stopErr as Error).message ?? stopErr}. Stop it in the dashboard.`;
   } else {
     l.session?.eof();
     await Promise.race([l.reading, new Promise((r) => setTimeout(r, 4000))]);
@@ -285,6 +325,7 @@ async function finish(l: Live, error: string | null) {
 
 async function teardown(l: Live) {
   try { l.session?.close(); } catch { /* closed */ }
+  try { l.sub?.close(); } catch { /* closed */ }
   for (const st of l.streams) st.getTracks().forEach((t) => t.stop());
   l.streams = [];
   if (l.playback) { l.playback.srcObject = null; l.playback = undefined; }

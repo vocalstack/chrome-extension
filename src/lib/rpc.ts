@@ -84,7 +84,9 @@ export type Push =
 export type LiveEvent =
   | { type: 'committed'; seq: number; text: string; startS: number; endS: number; speaker?: string | null }
   | { type: 'draft'; text: string }
-  | { type: 'translated'; seq: number; lang: string; text: string }
+  /** A translation: of one line (`seq`), or of a whole sentence (`seqs`,
+   *  `sentenceId`), which is how live sessions translate. */
+  | { type: 'translated'; seq: number; seqs?: number[]; sentenceId?: number; lang: string; text: string }
   /** The draft's translation, when the session translates. */
   | { type: 'draftTranslated'; lang: string; text: string };
 

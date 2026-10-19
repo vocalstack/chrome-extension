@@ -53,7 +53,7 @@ export function Settings({ account, env, onBack }: { account: Account; env: Env 
             <span className="item__icon"><IconUser /></span>
             <div className="item__main">
               <div className="item__title">{account.name}</div>
-              <div className="item__sub">{account.via === 'connect' ? 'Signed in with VocalStack' : 'API key'} · {account.scopes.join(', ') || 'read, write'}</div>
+              <div className="item__sub">{account.via === 'connect' ? 'Signed in with VocalStack' : 'API key'} · {account.scopes.includes('*') ? 'full access' : account.scopes.join(' and ') || 'read and write'}</div>
             </div>
           </div>
         </div>

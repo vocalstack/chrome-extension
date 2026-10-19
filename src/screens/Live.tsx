@@ -115,7 +115,7 @@ function Session({ s }: { s: LiveStatus }) {
     const apply = (e: LiveEvent) => {
       if (e.type === 'committed') { setLines((l) => [...l.filter((x) => x.seq !== e.seq), { seq: e.seq, text: e.text }].slice(-200)); setDraft(''); }
       else if (e.type === 'draft') setDraft(e.text);
-      else if (e.type === 'translated') setLines((l) => l.map((x) => (x.seq === e.seq ? { ...x, tr: e.text } : x)));
+      else if (e.type === 'translated') setLines((l) => l.map((x) => (x.seq === e.seq ? { ...x, tr: e.text } : e.seqs?.includes(x.seq) ? { ...x, tr: undefined } : x)));
     };
     rpc('live.history', { id: s.id }).then((h) => h.forEach(apply), () => {});
     return onPush((p) => {

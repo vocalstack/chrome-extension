@@ -19,7 +19,7 @@ import { LibraryScreen } from '../screens/Library';
 import { FileDrop } from '../screens/FileDrop';
 
 const TABS: { view: Exclude<View, 'settings'>; label: string; Icon: typeof IconPage }[] = [
-  { view: 'page', label: 'This page', Icon: IconPage },
+  { view: 'page', label: 'Page', Icon: IconPage },
   { view: 'live', label: 'Live', Icon: IconLive },
   { view: 'broadcasts', label: 'Broadcasts', Icon: IconBroadcast },
   { view: 'voices', label: 'Voices', Icon: IconVoice },

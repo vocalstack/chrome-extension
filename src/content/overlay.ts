@@ -7,7 +7,8 @@ import type { LiveEvent } from '../lib/rpc';
 import { DEFAULT_CAPTION_STYLE, type CaptionStyle } from '../lib/live';
 import { mainVideo, visibleArea } from './video';
 
-interface Line { seq: number; text: string; tr?: string }
+interface Line { seq: number; text: string }
+interface Said { key: number; seq: number; tr: string }
 
 const CSS = `
 :host{all:initial}
@@ -28,6 +29,8 @@ export function startOverlay() {
   let root: ShadowRoot | null = null;
   let sessionId: string | null = null;
   let lines: Line[] = [];
+  /** Translations, newest last: a sentence's replaces any earlier version. */
+  let said: Said[] = [];
   let draft = '';
   let draftTr = '';
   let lang: string | null = null;
@@ -66,6 +69,7 @@ export function startOverlay() {
     host = root = null;
     sessionId = null;
     lines = [];
+    said = [];
     draft = draftTr = '';
     lang = null;
   };
@@ -119,26 +123,29 @@ export function startOverlay() {
     x.textContent = '×';
     x.onclick = () => { if (sessionId) void chrome.runtime.sendMessage({ rpc: 'live.stop', args: { id: sessionId } }); unmount(); };
     box.appendChild(x);
-    // The last two finished lines and the line being heard.
-    const shown = lines.slice(-2);
     const add = (text: string, cls?: string) => {
       const d = document.createElement('div');
       if (cls) d.className = cls;
       d.textContent = text;
       box.appendChild(d);
     };
-    if (!shown.length && !draft) add('Listening…', 'wait');
-    for (const l of shown) {
-      if (lang) {
-        if (style.showOriginal) add(l.text, 'orig');
-        add(l.tr ?? l.text);
-      } else add(l.text);
-    }
-    if (draft) {
-      if (lang) {
-        if (style.showOriginal) add(draft, 'orig');
-        if (draftTr) add(draftTr, 'draft');
-      } else add(draft, 'draft');
+    if (lang) {
+      // Translated: the last two translated sentences, the newest original
+      // line above them when asked, and the line being heard.
+      // Two sentences, unless they would fill the picture.
+      const two = said.slice(-2);
+      const shown = two.reduce((n, x) => n + x.tr.length, 0) > 170 ? two.slice(-1) : two;
+      const orig = lines[lines.length - 1];
+      if (!shown.length && !draft && !draftTr) add('Listening…', 'wait');
+      if (style.showOriginal && (draft || orig)) add(draft || orig!.text, 'orig');
+      for (const x of shown) add(x.tr);
+      if (draftTr) add(draftTr, 'draft');
+    } else {
+      // The last two finished lines and the line being heard.
+      const shown = lines.slice(-2);
+      if (!shown.length && !draft) add('Listening…', 'wait');
+      for (const l of shown) add(l.text);
+      if (draft) add(draft, 'draft');
     }
     wrap.appendChild(box);
     place();
@@ -162,8 +169,9 @@ export function startOverlay() {
     else if (ev.type === 'draftTranslated') { lang = ev.lang; draftTr = ev.text; }
     else if (ev.type === 'translated') {
       lang = ev.lang;
-      const l = lines.find((x) => x.seq === ev.seq);
-      if (l) l.tr = ev.text;
+      const key = ev.sentenceId ?? -1 - ev.seq;
+      said = [...said.filter((x) => x.key !== key), { key, seq: ev.seq, tr: ev.text }].sort((a, b) => a.seq - b.seq).slice(-6);
+      draftTr = '';
     }
     render();
     return false;
