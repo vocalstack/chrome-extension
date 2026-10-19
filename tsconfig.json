@@ -1,0 +1,16 @@
+{
+  "extends": "./.wxt/tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": ["chrome", "node"],
+    "paths": {
+      "@vocalstack/sdk": ["./sdk/src/index.ts"],
+      "@vocalstack/contract": ["./sdk/contract/src/index.ts"],
+      "ws": ["./src/lib/ws-shim.ts"]
+    }
+  },
+  "include": [".wxt/wxt.d.ts", "src", "wxt.config.ts"]
+}
