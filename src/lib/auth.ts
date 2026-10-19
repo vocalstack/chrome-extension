@@ -173,7 +173,9 @@ export async function accessToken(): Promise<string> {
   const env = await currentEnv();
   const got = await chrome.storage.session.get(TOKEN);
   const kt = got[TOKEN] as KeyToken | undefined;
-  if (kt && kt.env === env.name && kt.expiresAt - Date.now() > MARGIN_MS) return kt.token;
+  // A token written by an exchange that finished after sign-out is not
+  // used: no stored key, no token.
+  if (kt && kt.env === env.name && kt.expiresAt - Date.now() > MARGIN_MS && (await stored())) return kt.token;
   // One exchange at a time, however many calls ask at once.
   pending ??= (async () => {
     try {

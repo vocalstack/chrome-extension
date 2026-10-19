@@ -14,6 +14,7 @@ const OFFSCREEN = 'offscreen.html';
 let creating: Promise<void> | null = null;
 
 export async function ensureOffscreen(): Promise<void> {
+  if (creating) return creating;
   const url = chrome.runtime.getURL(OFFSCREEN);
   const have = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT], documentUrls: [url] });
   if (have.length) return;
@@ -66,8 +67,8 @@ async function streamIdFor(tab: chrome.tabs.Tab): Promise<string> {
   }
 }
 
-/** Where captions go: the frame with the largest visible video, else the top. */
-async function captionFrame(tabId: number): Promise<number> {
+/** The frame with the largest visible video (captions and dubs go there), else the top. */
+export async function videoFrame(tabId: number): Promise<number> {
   const frames = (await chrome.webNavigation.getAllFrames({ tabId }).catch(() => null)) ?? [{ frameId: 0 }];
   let best = { frameId: 0, area: 0 };
   await Promise.all(frames.map(async (f) => {
@@ -97,7 +98,7 @@ export async function startLive(start: LiveStart, invokedTab?: chrome.tabs.Tab):
   const streamId = tab && start.input.tab ? await streamIdFor(tab) : undefined;
   const id = crypto.randomUUID();
   if (start.mode === 'captions' && tab?.id !== undefined) {
-    captionTargets.set(id, { tabId: tab.id, frameId: await captionFrame(tab.id) });
+    captionTargets.set(id, { tabId: tab.id, frameId: await videoFrame(tab.id) });
   }
   const cmd: OffCmd = { off: 'live.start', id, api: env.api, start: { ...start, tabId: tab?.id ?? start.tabId }, name: defaultName(start, tab), streamId, tabTitle: tab?.title };
   try {
@@ -106,6 +107,11 @@ export async function startLive(start: LiveStart, invokedTab?: chrome.tabs.Tab):
     captionTargets.delete(id);
     throw e;
   }
+}
+
+/** Any session still capturing (the environment may not change under it). */
+export async function anyRunning(): Promise<boolean> {
+  return (await listLive().catch(() => [])).some((s) => !['done', 'failed'].includes(s.state));
 }
 
 async function listLive(): Promise<LiveStatus[]> {

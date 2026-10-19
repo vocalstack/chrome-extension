@@ -17,7 +17,7 @@ export function startDubSync() {
   const EVENTS = ['play', 'pause', 'seeked', 'ratechange', 'waiting', 'playing', 'ended'] as const;
 
   const on = () => {
-    const v = mainVideo() ?? document.querySelector('video');
+    const v = mainVideo();
     if (!v || video === v) return;
     off();
     video = v;

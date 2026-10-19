@@ -42,6 +42,10 @@ export function startOverlay() {
   const mount = () => {
     if (host) return;
     host = document.createElement('vocalstack-captions');
+    // A popover sits in the top layer, so it shows above a fullscreen
+    // video too (shown again after each fullscreen change to stay on top).
+    host.setAttribute('popover', 'manual');
+    host.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;max-width:none;max-height:none;margin:0;padding:0;border:0;background:transparent;overflow:visible;pointer-events:none;color-scheme:normal';
     root = host.attachShadow({ mode: 'closed' });
     const st = document.createElement('style');
     st.textContent = CSS;
@@ -49,7 +53,8 @@ export function startOverlay() {
     const wrap = document.createElement('div');
     wrap.className = 'wrap';
     root.appendChild(wrap);
-    (document.fullscreenElement ?? document.documentElement).appendChild(host);
+    document.documentElement.appendChild(host);
+    showOnTop();
     timer = window.setInterval(place, 250);
     document.addEventListener('fullscreenchange', reparent);
   };
@@ -65,10 +70,17 @@ export function startOverlay() {
     lang = null;
   };
 
-  function reparent() {
+  function showOnTop() {
     if (!host) return;
-    (document.fullscreenElement ?? document.documentElement).appendChild(host);
-    place();
+    try {
+      if (host.matches(':popover-open')) host.hidePopover();
+      host.showPopover();
+    } catch { /* no popover support: stays a fixed element */ }
+  }
+
+  function reparent() {
+    // Entering fullscreen puts the video above us: come back on top.
+    setTimeout(() => { showOnTop(); place(); }, 50);
   }
 
   function place() {

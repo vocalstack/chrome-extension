@@ -80,33 +80,55 @@ export async function startLive(cmd: Extract<OffCmd, { off: 'live.start' }>): Pr
   };
   lives.set(cmd.id, l);
   set(l, {});
+  // Stop may be pressed while this is still starting (a cold engine takes
+  // a while): every step checks, and what was made so far is undone.
+  const alive = () => { if (l.stopping) throw new Coded('Stopped before it started.', 'cancelled'); };
   try {
     // The inputs first: a refused microphone fails before anything is
     // created on the account.
     await openInputs(l, cmd.streamId);
+    alive();
     set(l, { state: 'warming' });
     const onLoading = () => { if (l.status.state !== 'warming') set(l, { state: 'warming' }); };
     const lang = s.spokenLanguage ?? null;
     if (s.mode === 'captions') {
       l.session = await vs.realtime.connect({ spokenLanguage: lang, ...(s.translateTo ? { translate: [s.translateTo] } : {}) }, { onLoading });
+      alive();
     } else if (s.mode === 'broadcast') {
       if (!s.broadcastId) throw new Coded('No broadcast was chosen.', 'invalid_options');
       const grant = await vs.broadcasts.startRecording(s.broadcastId, { takeover: s.takeover ?? false, ...(s.spokenLanguage !== undefined ? { settings: { spokenLanguage: lang } } : {}) });
       set(l, { recordingId: grant.recording.id });
+      alive();
       l.session = await vs.recordings.publish(grant, { onLoading });
+      alive();
     } else {
       const tx = await vs.transcriptions.createLive({ name: cmd.name, settings: { spokenLanguage: lang }, source: { kind: 'mic' } });
       set(l, { transcriptionId: tx.id });
+      alive();
       const grant = await vs.transcriptions.startRecording(tx.id, {});
       set(l, { recordingId: grant.recording.id });
+      alive();
       l.session = await vs.recordings.publish(grant, { onLoading });
+      alive();
     }
     set(l, { state: 'live' });
     l.reading = read(l);
     return l.status;
   } catch (e) {
-    await teardown(l);
     const code = (e as { code?: string }).code;
+    if (code === 'cancelled') {
+      // Stopped while starting: close what the start had already opened.
+      const rid = l.status.recordingId;
+      if (rid) {
+        await vs.recordings.pause(rid).catch(() => {});
+        await vs.recordings.stop(rid).catch(() => {});
+      }
+      await teardown(l);
+      set(l, { state: 'done' });
+      forgetLater(l);
+      return l.status;
+    }
+    await teardown(l);
     set(l, { state: 'failed', error: e instanceof Error ? e.message : String(e), errorCode: code });
     forgetLater(l);
     throw e;
@@ -240,8 +262,11 @@ export async function stopLive(id: string) {
 }
 
 async function finish(l: Live, error: string | null) {
+  const starting = l.status.state === 'starting' || l.status.state === 'warming';
   l.stopping = true;
   set(l, { state: 'stopping' });
+  // Still starting: startLive sees `stopping` at its next step and undoes it.
+  if (starting && !l.session) return;
   flush(l);
   const rid = l.status.recordingId;
   if (rid) {

@@ -8,7 +8,7 @@ import type { Handlers } from '../lib/rpc';
 import { meetingOf, OFFER_KEY } from '../lib/live';
 import { showInPanel } from './panel';
 
-const offered = new Set<string>();
+const OFFERED = 'meetings.offered';
 
 async function offering(): Promise<boolean> {
   const g = await chrome.storage.local.get(OFFER_KEY);
@@ -23,9 +23,12 @@ async function onTab(tabId: number, url: string | undefined, title: string | und
   }
   await chrome.action.setTitle({ tabId, title: `VocalStack: record this ${name} meeting` }).catch(() => {});
   if (!(await offering())) return;
+  // Once per meeting, across service-worker restarts.
   const key = `${tabId}:${new URL(url!).pathname}`;
-  if (offered.has(key)) return;
-  offered.add(key);
+  const g = await chrome.storage.session.get(OFFERED);
+  const offered = (g[OFFERED] as string[] | undefined) ?? [];
+  if (offered.includes(key)) return;
+  await chrome.storage.session.set({ [OFFERED]: [...offered.slice(-50), key] });
   chrome.notifications.create(`meeting:${tabId}`, {
     type: 'basic',
     iconUrl: chrome.runtime.getURL('/icon/128.png'),

@@ -14,14 +14,37 @@ import { accessToken } from '../lib/auth';
 import { currentEnv } from '../lib/env';
 import { push, RpcError, type Handlers } from '../lib/rpc';
 import type { DubStart, DubStatus } from '../lib/live';
-import { off } from './live';
+import { off, videoFrame } from './live';
 
 const KNOWN = 'dub.known';
-const statuses = new Map<number, DubStatus>();
-const cancelled = new Set<number>();
+/** Per tab: the dub's status and the frame whose video it follows. Kept in
+ *  chrome.storage.session, because a dub outlives the service worker (a
+ *  paused video sends nothing, and the worker is suspended meanwhile). */
+const STATE = 'dub.state';
+interface TabDub { status: DubStatus; frameId: number; run: number }
 
-function set(s: DubStatus) {
-  statuses.set(s.tabId, s);
+async function all(): Promise<Record<string, TabDub>> {
+  return ((await chrome.storage.session.get(STATE))[STATE] as Record<string, TabDub> | undefined) ?? {};
+}
+async function get(tabId: number): Promise<TabDub | null> {
+  return (await all())[tabId] ?? null;
+}
+async function put(tabId: number, d: TabDub | null) {
+  const a = await all();
+  if (d) a[tabId] = d; else delete a[tabId];
+  await chrome.storage.session.set({ [STATE]: a });
+}
+
+/** This run is still the tab's dub (not stopped, not replaced by a newer one). */
+async function current(tabId: number, run: number): Promise<boolean> {
+  return (await get(tabId))?.run === run;
+}
+
+async function set(s: DubStatus, run: number) {
+  const d = await get(s.tabId);
+  // Stopped, or replaced by a newer dub: this run reports nothing more.
+  if (!d || d.run !== run) return;
+  await put(s.tabId, { ...d, status: s });
   push({ push: 'dub.status', status: s });
 }
 
@@ -45,10 +68,10 @@ async function remember(url: string, v: { transcriptionId: string; recordingId: 
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function run(req: DubStart) {
+async function run(req: DubStart, run: number) {
   const { tabId, lang } = req;
   const base: DubStatus = { tabId, lang, title: req.title, state: 'transcribing', progress: 0 };
-  set(base);
+  await set(base, run);
   const vs = await vsClient();
   let ids = await known(req.url);
   if (ids) {
@@ -62,55 +85,66 @@ async function run(req: DubStart) {
     if (!rid) throw new RpcError('VocalStack did not start transcribing this video.');
     ids = { transcriptionId: t.id, recordingId: rid };
   }
-  set({ ...base, transcriptionId: ids.transcriptionId, recordingId: ids.recordingId });
+  const withIds = { ...base, transcriptionId: ids.transcriptionId, recordingId: ids.recordingId };
+  await set(withIds, run);
   // Transcribe: a job, read every few seconds until done.
   for (;;) {
-    if (cancelled.has(tabId)) return;
+    if (!(await current(tabId, run))) return;
     const job = await vs.jobs.get(ids.recordingId).catch(() => null);
     if (!job || job.state === 'done') break;
     if (job.state === 'failed' || job.state === 'stopped') throw new RpcError(job.error || 'VocalStack could not transcribe this video.');
-    set({ ...base, transcriptionId: ids.transcriptionId, recordingId: ids.recordingId, progress: (job.progress?.pct ?? 0) / 100 });
+    await set({ ...withIds, progress: (job.progress?.pct ?? 0) / 100 }, run);
     await sleep(3000);
   }
   await remember(req.url, ids);
-  if (cancelled.has(tabId)) return;
-  set({ ...base, state: 'translating', transcriptionId: ids.transcriptionId, recordingId: ids.recordingId, progress: undefined });
+  if (!(await current(tabId, run))) return;
+  await set({ ...withIds, state: 'translating', progress: undefined }, run);
   if (req.voice) await vs.recordings.settings(ids.recordingId, { voiceByLang: { [lang]: req.voice } }).catch(() => {});
   const snap = await vs.recordings.transcript(ids.recordingId, { lang });
   const sentences = snap.sentences.filter((s) => !s.suppressed && s.text.trim()).map((s) => ({ id: s.sentenceId, start: s.start, end: s.end }));
   if (!sentences.length) throw new RpcError('No speech was found in this video.');
-  set({ ...base, state: 'voicing', transcriptionId: ids.transcriptionId, recordingId: ids.recordingId });
+  await set({ ...withIds, state: 'voicing' }, run);
   const env = await currentEnv();
   await off({ off: 'dub.load', tabId, api: env.api, recordingId: ids.recordingId, lang, voice: req.voice ?? null, sentences });
-  if (cancelled.has(tabId)) return;
-  // The content script turns the video down and starts reporting its clock.
-  await chrome.tabs.sendMessage(tabId, { dub: 'on' }).catch(() => {});
-  set({ ...base, state: 'playing', transcriptionId: ids.transcriptionId, recordingId: ids.recordingId });
+  if (!(await current(tabId, run))) { await off({ off: 'dub.stop', tabId }).catch(() => {}); return; }
+  // One frame's video leads: the one with the largest visible video. It
+  // turns the video down and reports its clock.
+  const frameId = await videoFrame(tabId);
+  const d = await get(tabId);
+  if (d) await put(tabId, { ...d, frameId });
+  await chrome.tabs.sendMessage(tabId, { dub: 'on' }, { frameId }).catch(() => {});
+  await set({ ...withIds, state: 'playing' }, run);
 }
 
 export function registerDub(): Handlers {
-  // The video's clock, from the content script, to the offscreen player.
+  // The video's clock, from the leading frame, to the offscreen player.
   chrome.runtime.onMessage.addListener((m: { dubSync?: { t: number; paused: boolean; rate: number; at: number } }, sender) => {
-    if (m?.dubSync && sender.tab?.id !== undefined && statuses.get(sender.tab.id)?.state === 'playing') {
-      void off({ off: 'dub.sync', tabId: sender.tab.id, ...m.dubSync }).catch(() => {});
-    }
+    const tabId = sender.tab?.id;
+    if (!m?.dubSync || tabId === undefined) return false;
+    void get(tabId).then((d) => {
+      if (d?.status.state === 'playing' && d.frameId === (sender.frameId ?? 0)) void off({ off: 'dub.sync', tabId, ...m.dubSync! }).catch(() => {});
+    });
     return false;
   });
   const stop = async (tabId: number) => {
-    cancelled.add(tabId);
-    statuses.delete(tabId);
-    await chrome.tabs.sendMessage(tabId, { dub: 'off' }).catch(() => {});
+    const d = await get(tabId);
+    await put(tabId, null);
+    await chrome.tabs.sendMessage(tabId, { dub: 'off' }, { frameId: d?.frameId ?? 0 }).catch(() => {});
     await off({ off: 'dub.stop', tabId }).catch(() => {});
   };
-  chrome.tabs.onRemoved.addListener((tabId) => { if (statuses.has(tabId)) void stop(tabId); });
-  chrome.tabs.onUpdated.addListener((tabId, info) => { if (info.url && statuses.has(tabId)) void stop(tabId); });
+  chrome.tabs.onRemoved.addListener((tabId) => { void get(tabId).then((d) => d && stop(tabId)); });
+  chrome.tabs.onUpdated.addListener((tabId, info) => { if (info.url) void get(tabId).then((d) => d && stop(tabId)); });
   return {
     'dub.start': async (req) => {
-      cancelled.delete(req.tabId);
-      run(req).catch((e) => set({ tabId: req.tabId, lang: req.lang, title: req.title, state: 'failed', error: e instanceof Error ? e.message : String(e) }));
-      return { tabId: req.tabId, lang: req.lang, title: req.title, state: 'transcribing', progress: 0 };
+      const prev = await get(req.tabId);
+      if (prev) await stop(req.tabId);
+      const runId = Date.now();
+      const first: DubStatus = { tabId: req.tabId, lang: req.lang, title: req.title, state: 'transcribing', progress: 0 };
+      await put(req.tabId, { status: first, frameId: 0, run: runId });
+      run(req, runId).catch((e) => set({ ...first, state: 'failed', error: e instanceof Error ? e.message : String(e) }, runId));
+      return first;
     },
     'dub.stop': ({ tabId }) => stop(tabId),
-    'dub.status': ({ tabId }) => statuses.get(tabId) ?? null,
+    'dub.status': async ({ tabId }) => (await get(tabId))?.status ?? null,
   };
 }
