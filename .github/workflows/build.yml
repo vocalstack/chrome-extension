@@ -1,0 +1,75 @@
+# Every push and pull request: typecheck, unit tests, and the builds you load
+# unpacked (Chrome and Edge), kept as run artifacts.
+#
+# On main it also refreshes the `unpacked` release, whose zips have links
+# that never change (the website's Chrome page points at them):
+#   https://github.com/vocalstack/chrome-extension/releases/download/unpacked/vocalstack-chrome.zip
+#   https://github.com/vocalstack/chrome-extension/releases/download/unpacked/vocalstack-edge.zip
+# Unzip, then chrome://extensions (edge://extensions) → Developer mode →
+# Load unpacked → the unzipped folder.
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          # The version's last part counts the commits (scripts/package.sh).
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+
+      - name: build and zip (Chrome, Edge)
+        run: scripts/package.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vocalstack-chrome
+          path: output/chrome
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vocalstack-edge
+          path: output/edge
+          if-no-files-found: error
+
+      - name: refresh the unpacked release
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./output/chrome/manifest.json').version")
+          notes="Built from ${GITHUB_SHA::12}, version $version. Unzip, then chrome://extensions (or edge://extensions) → Developer mode → Load unpacked → the unzipped folder."
+          if gh release view unpacked >/dev/null 2>&1; then
+            # Move the tag, then swap the zips in place: the links stay the same.
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/unpacked" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+            gh release upload unpacked output/vocalstack-chrome.zip output/vocalstack-edge.zip --clobber
+            gh release edit unpacked --title "Unpacked build $version" --notes "$notes"
+          else
+            gh release create unpacked output/vocalstack-chrome.zip output/vocalstack-edge.zip \
+              --target "$GITHUB_SHA" --prerelease --title "Unpacked build $version" --notes "$notes"
+          fi

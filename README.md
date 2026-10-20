@@ -22,6 +22,8 @@ npm run build:edge               # Edge:   output/edge
 npm run dev                      # Chrome with reload on save
 ```
 
+Or download a build: see PUBLISHING.md (fixed links to the latest main build; Chrome Web Store setup).
+
 Load it: `chrome://extensions` (or `edge://extensions`) → Developer mode → Load unpacked → the `output/chrome` folder (Edge: `output/edge`).
 
 Settings → Environment switches between production, e2e and this computer (`localhost:8080` / `:5176`; for a scratch API on another port, run `chrome.storage.local.set({ localApi: 'http://localhost:8090' })` in the service worker console).

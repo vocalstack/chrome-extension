@@ -4,3 +4,4 @@ output
 .keys
 *.pem
 .DS_Store
+.env.local

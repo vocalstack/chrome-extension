@@ -1,0 +1,66 @@
+# Publishes the extension to the Chrome Web Store. Not live yet: run by hand
+# (Actions → publish-webstore → Run workflow). With no store credentials the
+# script says what is missing and the run stays green. Setup: PUBLISHING.md.
+#
+# When the listing is live, add `push: branches: [main]` here to publish
+# every main build. The PUBLISH_EXTENSION repo variable set to "false"
+# (`gh variable set PUBLISH_EXTENSION --body false`) pauses publishing with
+# no code change.
+name: publish-webstore
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Audience
+        type: choice
+        options: [default, trustedTesters]
+        default: trustedTesters
+      publish:
+        description: Publish after the upload (off uploads a draft only)
+        type: boolean
+        default: false
+
+# Never two uploads to the same store item at once.
+concurrency:
+  group: publish-webstore
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run check
+
+      - name: build, upload, publish
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          CHROME_PUBLISHER_ID: ${{ secrets.CHROME_PUBLISHER_ID }}
+          CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+          CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+          CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+          WEBSTORE_TARGET: ${{ inputs.target }}
+          WEBSTORE_PUBLISH: ${{ inputs.publish }}
+          PUBLISH_EXTENSION: ${{ vars.PUBLISH_EXTENSION }}
+        run: npm run publish:webstore
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vocalstack-webstore
+          path: output/vocalstack-webstore.zip
+          if-no-files-found: error
