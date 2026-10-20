@@ -7,7 +7,7 @@ import { currentEnv, type Env } from '../lib/env';
 import type { LiveStatus } from '../lib/live';
 import type { View } from '../background/panel';
 import { usePanelIntent } from './intent';
-import { IconBroadcast, IconLibrary, IconLive, IconPage, IconSettings, IconVoice, Mark } from './icons';
+import { IconBroadcast, IconLibrary, IconLive, IconPage, IconSettings, IconVoice } from './icons';
 import { IconBtn } from './kit';
 import { SignIn } from '../screens/SignIn';
 import { Settings } from '../screens/Settings';
@@ -53,20 +53,19 @@ export function App() {
   const anyLive = live.some((s) => s.state === 'live' || s.state === 'warming' || s.state === 'paused');
   return (
     <div className="shell">
-      <header className="top">
-        <Mark className="top__mark" />
-        <span className="top__name">VocalStack</span>
+      {/* The browser's side panel header already shows the logo and name:
+          the areas start at the top, settings at their right. */}
+      <div className="bar">
+        <nav className="tabs" role="tablist" aria-label="Areas">
+          {TABS.map(({ view: v, label, Icon }) => (
+            <button key={v} type="button" role="tab" className="tab" aria-selected={view === v} onClick={() => setView(v)}>
+              <Icon />{label}{v === 'live' && anyLive && <i className="tab__dot" aria-label="recording" />}
+            </button>
+          ))}
+        </nav>
         {env && env.name !== 'production' && <span className="top__env">{env.label}</span>}
-        <span className="top__sp" />
         <IconBtn label="Settings" onClick={() => setView('settings')} aria-pressed={view === 'settings'}><IconSettings /></IconBtn>
-      </header>
-      <nav className="tabs" role="tablist" aria-label="Areas">
-        {TABS.map(({ view: v, label, Icon }) => (
-          <button key={v} type="button" role="tab" className="tab" aria-selected={view === v} onClick={() => setView(v)}>
-            <Icon />{label}{v === 'live' && anyLive && <i className="tab__dot" aria-label="recording" />}
-          </button>
-        ))}
-      </nav>
+      </div>
       <main className="body">
         {view === 'page' && <PageScreen intent={intent?.view === 'page' ? intent : null} onIntentDone={clearIntent} />}
         {view === 'live' && <LiveScreen live={live} intent={intent?.view === 'live' ? intent : null} onIntentDone={clearIntent} />}

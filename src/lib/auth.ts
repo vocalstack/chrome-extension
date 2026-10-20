@@ -26,6 +26,8 @@ export interface Account {
   keyId: string;
   via: 'connect' | 'key';
   scopes: string[];
+  /** `own`: only what the extension created; `account`: everything. */
+  reach?: 'own' | 'account';
 }
 
 interface Stored {
@@ -87,9 +89,10 @@ export async function signInWithConnect(): Promise<Account> {
     state,
     code_challenge: challenge,
     code_challenge_method: 'S256',
+    // The widest the extension asks for; the person chooses on the consent
+    // screen (see and change, or see only; only what it creates, the
+    // default, or the whole account) and the token says what was granted.
     scope: 'read write',
-    // Signed in as the account: the extension lists and searches all of
-    // it, not only what it created.
     reach: 'account',
   }).toString();
 
@@ -116,7 +119,7 @@ export async function signInWithConnect(): Promise<Account> {
   if (!res.ok || !body.access_token) {
     throw new AuthError(body.error_description ?? body.error?.message ?? `Sign-in failed (${res.status}).`);
   }
-  const acct: Account = { name: body.account?.name ?? 'VocalStack', keyId: body.key_id ?? '', via: 'connect', scopes: String(body.scope ?? '').split(/\s+/).filter(Boolean) };
+  const acct: Account = { name: body.account?.name ?? 'VocalStack', keyId: body.key_id ?? '', via: 'connect', scopes: String(body.scope ?? '').split(/\s+/).filter(Boolean), reach: body.reach === 'own' ? 'own' : 'account' };
   await save(env, body.access_token, acct);
   // Prove the key works now, and hold the first token.
   await exchange(env, body.access_token);
