@@ -17,12 +17,12 @@ Also: right-click "Transcribe this link / video / page", `vs <words>` in the add
 ```sh
 git submodule update --init      # sdk/ = github.com/vocalstack/js-sdk
 npm install
-npm run build                    # Chrome: .output/chrome-mv3
-npm run build:edge               # Edge:   .output/edge-mv3
+npm run build                    # Chrome: output/chrome-mv3
+npm run build:edge               # Edge:   output/edge-mv3
 npm run dev                      # Chrome with reload on save
 ```
 
-Load it: `chrome://extensions` (or `edge://extensions`) → Developer mode → Load unpacked → the `.output/…-mv3` folder.
+Load it: `chrome://extensions` (or `edge://extensions`) → Developer mode → Load unpacked → the `output/…-mv3` folder.
 
 Settings → Environment switches between production, e2e and this computer (`localhost:8080` / `:5176`; for a scratch API on another port, run `chrome.storage.local.set({ localApi: 'http://localhost:8090' })` in the service worker console).
 
