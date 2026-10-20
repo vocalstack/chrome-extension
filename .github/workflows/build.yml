@@ -64,11 +64,15 @@ jobs:
           set -euo pipefail
           version=$(node -p "require('./output/chrome/manifest.json').version")
           notes="Built from ${GITHUB_SHA::12}, version $version. Unzip, then chrome://extensions (or edge://extensions) → Developer mode → Load unpacked → the unzipped folder."
+          # GitHub's release API answers a 5xx now and then (a 502 on an
+          # asset upload, 2026-10-20): try each call a few times.
+          retry() { for i in 1 2 3 4; do "$@" && return 0; echo "retry $i: $*"; sleep $((i * 10)); done; "$@"; }
           if gh release view unpacked >/dev/null 2>&1; then
             # Move the tag, then swap the zips in place: the links stay the same.
-            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/unpacked" -f sha="$GITHUB_SHA" -F force=true >/dev/null
-            gh release upload unpacked output/vocalstack-chrome.zip output/vocalstack-edge.zip --clobber
-            gh release edit unpacked --title "Unpacked build $version" --notes "$notes"
+            retry gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/unpacked" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+            retry gh release upload unpacked output/vocalstack-chrome.zip --clobber
+            retry gh release upload unpacked output/vocalstack-edge.zip --clobber
+            retry gh release edit unpacked --title "Unpacked build $version" --notes "$notes"
           else
             gh release create unpacked output/vocalstack-chrome.zip output/vocalstack-edge.zip \
               --target "$GITHUB_SHA" --prerelease --title "Unpacked build $version" --notes "$notes"
