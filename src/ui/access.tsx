@@ -1,11 +1,13 @@
 /** What a limited sign-in cannot do, said before anything is clicked, and
  *  the API's refusals worded for a person (screens/page/errors.ts). */
 
+import { useState } from 'react';
 import type { Account } from '../lib/auth';
 import { can, whyNot, type Need } from '../lib/access';
 import { rpc } from '../lib/rpc';
 import { problemOf } from '../screens/page/errors';
 import { Btn, Note, openApp, useAction } from './kit';
+import { IconMic } from './icons';
 
 /** Nothing when the sign-in may do `need`; else why not, and the way out. */
 export function AccessNote({ account, need, onSettings }: { account: Account; need: Need; onSettings?: () => void }) {
@@ -36,7 +38,22 @@ export function ProblemNote({ error, code, onSettings, children }: { error: stri
     <Note kind="bad">
       {p.text}
       {p.billing && <div style={{ marginTop: 8 }}><Btn size="sm" onClick={() => openApp('/billing')}>Billing</Btn></div>}
+      {(code === 'mic_permission' || (/microphone/i.test(error) && /allow/i.test(error))) && <MicButton />}
       {children}
     </Note>
+  );
+}
+
+/** "Allow the microphone": Chrome asks in a small tab (offscreen documents
+ *  cannot), once for the whole extension. */
+function MicButton() {
+  const ask = useAction();
+  const [granted, setGranted] = useState<boolean>();
+  return (
+    <div style={{ marginTop: 8 }}>
+      <Btn size="sm" busy={ask.busy} disabled={granted} icon={<IconMic />} onClick={() => ask.run(async () => setGranted(await rpc('mic.ask')))}>{granted ? 'Allowed: try again above' : 'Allow the microphone'}</Btn>
+      {granted === false && <div style={{ marginTop: 6 }}>Still not allowed. Allow the microphone in the tab that opened, or in Chrome's site settings for VocalStack.</div>}
+      {ask.error && <div style={{ marginTop: 6 }}>{ask.error}</div>}
+    </div>
   );
 }

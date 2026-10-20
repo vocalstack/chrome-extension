@@ -167,7 +167,7 @@ async function openInputs(l: Live, streamId: string | undefined) {
   if (l.status.input.mic) {
     const mic = await md.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
       .catch((e: DOMException) => {
-        if (e.name === 'NotAllowedError' || e.name === 'SecurityError') throw new Coded('VocalStack may not use the microphone yet. Allow it with the button below (it opens a small tab where Chrome asks).', 'mic_permission');
+        if (e.name === 'NotAllowedError' || e.name === 'SecurityError') throw new Coded('VocalStack may not use the microphone yet. Allow it, then try again.', 'mic_permission');
         if (e.name === 'NotFoundError') throw new Coded('No microphone was found.', 'mic_missing');
         throw new Coded(`The microphone could not be opened: ${e.message}`, 'mic_error');
       });

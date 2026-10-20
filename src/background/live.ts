@@ -151,6 +151,11 @@ function defaultName(start: LiveStart, tab: chrome.tabs.Tab | null): string {
 
 export async function startLive(start: LiveStart, invokedTab?: chrome.tabs.Tab): Promise<LiveStatus> {
   const env = await currentEnv();
+  // The offscreen document cannot ask for the microphone: ask first, here,
+  // so Go live and Start recording just work the first time.
+  if (start.input.mic && (await micState()) !== 'granted' && !(await askMic())) {
+    throw new RpcError('VocalStack may not use the microphone. Allow it, then try again.', 'mic_permission');
+  }
   let tab: chrome.tabs.Tab | null = null;
   if (start.input.tab || start.mode === 'captions') {
     tab = invokedTab ?? (start.tabId !== undefined ? await chrome.tabs.get(start.tabId) : await activeTab());
@@ -293,6 +298,16 @@ export function registerLive(): Handlers {
 
 function notifyError(e: unknown) {
   chrome.notifications.create({ type: 'basic', iconUrl: chrome.runtime.getURL('/icon/128.png'), title: 'VocalStack', message: e instanceof Error ? e.message : String(e) });
+}
+
+/** Whether the extension may use the microphone; 'unknown' when the
+ *  browser cannot say (the capture then reports a refusal itself). */
+async function micState(): Promise<PermissionState | 'unknown'> {
+  try {
+    return (await navigator.permissions.query({ name: 'microphone' as PermissionName })).state;
+  } catch {
+    return 'unknown';
+  }
 }
 
 /** Offscreen documents cannot ask for the microphone: a small tab does,

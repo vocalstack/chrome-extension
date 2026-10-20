@@ -115,7 +115,7 @@ export function LiveScreen({ account, live, intent, onIntentDone, onSettings }: 
     const e = st.error;
     if (!e) return null;
     if (live.some((s) => s.state === 'failed' && s.startedAt >= e.at - 50)) return null;
-    return <ProblemNote error={e.text} code={e.code} onSettings={onSettings}><MicButton error={e.text} code={e.code} /></ProblemNote>;
+    return <ProblemNote error={e.text} code={e.code} onSettings={onSettings} />;
   };
   const tabNote = (needsTab: boolean) => (needsTab && tab && !tabOk ? <p className="hint" style={{ margin: 0 }}>{BROWSER_PAGE}</p> : null);
 
@@ -215,18 +215,6 @@ export function LiveScreen({ account, live, intent, onIntentDone, onSettings }: 
           {errorOf(captionsStart)}
         </div>
       </Section>
-    </div>
-  );
-}
-
-/** "Allow the microphone", under an error that says it is not allowed. */
-function MicButton({ error, code }: { error: string; code?: string }) {
-  const ask = useAction();
-  if (code !== 'mic_permission' && !(/microphone/i.test(error) && /allow/i.test(error))) return null;
-  return (
-    <div style={{ marginTop: 8 }}>
-      <Btn size="sm" busy={ask.busy} icon={<IconMic />} onClick={() => ask.run(() => rpc('mic.ask'))}>Allow the microphone</Btn>
-      {ask.error && <div style={{ marginTop: 6 }}>{ask.error}</div>}
     </div>
   );
 }
@@ -336,9 +324,7 @@ function Session({ s, account, onSettings }: { s: LiveStatus; account: Account; 
         // Refused for a permission the sign-in has since been given.
         <Note>This failed because the sign-in wasn’t allowed to {s.mode === 'captions' ? 'show captions' : 'record'} at the time. It is now: try again.</Note>
       ) : s.state === 'failed' && s.error && (
-        <ProblemNote error={s.error} code={s.errorCode} onSettings={onSettings}>
-          <MicButton error={s.error} code={s.errorCode} />
-        </ProblemNote>
+        <ProblemNote error={s.error} code={s.errorCode} onSettings={onSettings} />
       )}
       {s.state === 'failed' && (
         <div className="row row--wrap">
