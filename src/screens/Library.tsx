@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SearchHit, Transcription } from '@vocalstack/contract';
 import type { PanelIntent } from '../background/panel';
+import type { Account } from '../lib/auth';
 import { client } from '../lib/client';
 import { Badge, Btn, Empty, Note, Section, ago, clock, errorText, openApp, useLoad } from '../ui/kit';
 import { IconClose, IconExternal, IconFile, IconLibrary, IconLive, IconSearch } from '../ui/icons';
@@ -35,7 +36,7 @@ function Marked({ text, q }: { text: string; q: string }) {
   return <>{out}</>;
 }
 
-export function LibraryScreen({ intent, onIntentDone }: { intent: PanelIntent | null; onIntentDone: () => void }) {
+export function LibraryScreen({ account, intent, onIntentDone }: { account: Account; intent: PanelIntent | null; onIntentDone: () => void }) {
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -112,7 +113,7 @@ export function LibraryScreen({ intent, onIntentDone }: { intent: PanelIntent | 
           </Section>
         ) : !searching && <Empty icon={<IconSearch />}>No line says “{term}”.</Empty>)
       ) : (
-        <Recent />
+        <Recent own={account.reach === 'own'} />
       )}
     </div>
   );
@@ -135,7 +136,7 @@ function state(t: Transcription): React.ReactNode {
   return null;
 }
 
-function Recent() {
+function Recent({ own }: { own: boolean }) {
   const { data, error, loading, reload } = useLoad(async () => (await (await client()).transcriptions.listPage({ limit: 20 })).transcriptions);
   const working = (data ?? []).some((t) => t.currentRecording?.state === 'live' || (t.job && ['queued', 'fetching', 'transcribing'].includes(t.job.state)));
   // Keep the badges current while something is in progress.
@@ -147,9 +148,9 @@ function Recent() {
 
   if (error) return <Note kind="bad">{error} <Btn size="sm" onClick={() => void reload()}>Try again</Btn></Note>;
   if (!data) return loading ? <Empty><span className="spin" style={{ margin: '0 auto' }} /></Empty> : null;
-  if (!data.length) return <Empty icon={<IconLibrary />}>No transcriptions yet. Transcribe something on the This page tab.</Empty>;
+  if (!data.length) return <Empty icon={<IconLibrary />}>No transcriptions yet. Transcribe something from the Page tab, or record in Live.{own && <><br />This sign-in sees only what the extension made.</>}</Empty>;
   return (
-    <Section title="Recent" side={<Btn size="sm" kind="ghost" icon={<IconExternal />} onClick={() => openApp('/transcriptions')}>All</Btn>}>
+    <Section title={own ? 'Recent, made by the extension' : 'Recent'} side={<Btn size="sm" kind="ghost" icon={<IconExternal />} onClick={() => openApp('/transcriptions')}>All</Btn>}>
       <div className="list">
         {data.map((t) => {
           const when = t.lastRecordedAt ?? t.createdAt;

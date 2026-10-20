@@ -16,6 +16,8 @@ export type OffCmd =
   | { off: 'live.pause'; id: string; paused: boolean }
   | { off: 'live.list' }
   | { off: 'live.history'; id: string }
+  | { off: 'live.set'; id: string; translateTo?: string | null; overlay?: boolean }
+  | { off: 'live.forget'; id: string }
   | { off: 'dub.load'; tabId: number; api: string; recordingId: string; lang: string; voice?: string | null; sentences: DubSentence[] }
   /** The page video's clock: `t` media seconds at `at` (ms since epoch). */
   | { off: 'dub.sync'; tabId: number; t: number; paused: boolean; rate: number; at: number }

@@ -19,6 +19,7 @@
  *  carries the key's account and scopes, and call /v1 with that. */
 
 import { currentEnv, type Env } from './env';
+import { push } from './rpc';
 
 export interface Account {
   /** The account's display name, as Connect or the key exchange named it. */
@@ -90,9 +91,11 @@ export async function signInWithConnect(): Promise<Account> {
     code_challenge: challenge,
     code_challenge_method: 'S256',
     // The widest the extension asks for; the person chooses on the consent
-    // screen (see and change, or see only; only what it creates, the
-    // default, or the whole account) and the token says what was granted.
-    scope: 'read write',
+    // screen (see, change and record; see and change; or see only; only
+    // what it creates, the default, or the whole account) and the token
+    // says what was granted. Recording needs recordings:publish, which
+    // Connect grants to this extension alone.
+    scope: 'read write recordings:publish',
     reach: 'account',
   }).toString();
 
@@ -153,6 +156,8 @@ interface Exchanged {
   apiKeyId: string;
   keyName: string;
   scopes: string[];
+  /** Not sent by every API version. */
+  reach?: 'own' | 'account';
 }
 
 async function exchange(env: Env, key: string): Promise<Exchanged> {
@@ -168,7 +173,37 @@ async function exchange(env: Env, key: string): Promise<Exchanged> {
   }
   const kt: KeyToken = { token: body.token, expiresAt: Date.parse(body.expiresAt), env: env.name };
   await chrome.storage.session.set({ [TOKEN]: kt });
+  await refreshAccount(env, key, body as Exchanged);
   return body as Exchanged;
+}
+
+/** Every exchange says what the key may do now (it can be changed in the
+ *  dashboard at any time): keep the stored account in step, and tell the
+ *  panel when it changed. */
+async function refreshAccount(env: Env, key: string, x: Exchanged) {
+  const s = await stored();
+  if (!s || s.key !== key || s.env !== env.name || !Array.isArray(x.scopes)) return;
+  const reach = x.reach === 'own' || x.reach === 'account' ? x.reach : s.account.reach;
+  const same = s.account.scopes.length === x.scopes.length && x.scopes.every((sc) => s.account.scopes.includes(sc)) && reach === s.account.reach;
+  if (same) return;
+  const account: Account = { ...s.account, scopes: x.scopes, ...(reach ? { reach } : {}) };
+  await save(env, key, account);
+  push({ push: 'auth.changed', account });
+}
+
+/** Exchange again now (Settings, or after the API refused a scope), so a
+ *  permission changed in the dashboard shows at once. */
+export async function refresh(): Promise<Account | null> {
+  const env = await currentEnv();
+  const s = await stored();
+  if (!s) return null;
+  try {
+    await exchange(env, s.key);
+  } catch (e) {
+    if (e instanceof AuthError && e.code === 'invalid_key') await signOut();
+    throw e;
+  }
+  return account();
 }
 
 let pending: Promise<string> | null = null;

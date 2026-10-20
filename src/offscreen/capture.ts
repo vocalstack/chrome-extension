@@ -78,6 +78,7 @@ export async function startLive(cmd: Extract<OffCmd, { off: 'live.start' }>): Pr
     status: {
       id: cmd.id, mode: s.mode, state: 'starting', input: s.input, name: cmd.name, tabId: s.tabId, tabTitle: cmd.tabTitle,
       startedAt: Date.now(), broadcastId: s.broadcastId, translateTo: s.translateTo ?? null, sentS: 0,
+      spokenLanguage: s.spokenLanguage ?? null, overlay: !!s.overlay,
     },
     vs, streams: [], paused: false, stopping: false, buf: new Float32Array(CHUNK), fill: 0, sent: 0, peak: 0, levelAt: 0, history: [],
   };
@@ -120,6 +121,13 @@ export async function startLive(cmd: Extract<OffCmd, { off: 'live.start' }>): Pr
     return l.status;
   } catch (e) {
     const code = (e as { code?: string }).code;
+    // A live transcription made for this start but never recorded into
+    // stays empty in the account: delete it.
+    const empty = l.status.transcriptionId && !l.status.recordingId ? l.status.transcriptionId : null;
+    if (empty) {
+      await vs.transcriptions.archive(empty).then(() => vs.transcriptions.purge(empty)).catch(() => {});
+      set(l, { transcriptionId: undefined });
+    }
     if (code === 'cancelled') {
       // Stopped while starting: close what the start had already opened.
       const rid = l.status.recordingId;
@@ -159,7 +167,7 @@ async function openInputs(l: Live, streamId: string | undefined) {
   if (l.status.input.mic) {
     const mic = await md.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
       .catch((e: DOMException) => {
-        if (e.name === 'NotAllowedError' || e.name === 'SecurityError') throw new Coded('VocalStack may not use the microphone yet. Allow it in Settings → Microphone.', 'mic_permission');
+        if (e.name === 'NotAllowedError' || e.name === 'SecurityError') throw new Coded('VocalStack may not use the microphone yet. Allow it with the button below (it opens a small tab where Chrome asks).', 'mic_permission');
         if (e.name === 'NotFoundError') throw new Coded('No microphone was found.', 'mic_missing');
         throw new Coded(`The microphone could not be opened: ${e.message}`, 'mic_error');
       });
@@ -217,9 +225,10 @@ function flush(l: Live) {
 }
 
 async function read(l: Live) {
-  const lang = l.status.translateTo;
   try {
     for await (const ev of l.session!) {
+      // The language can change while it runs (live.set).
+      const lang = l.status.translateTo;
       if (ev.type === 'transcript.committed') {
         const g = ev.segment;
         emit(l, { type: 'committed', seq: g.seq, text: g.text, startS: g.start, endS: g.end, speaker: String(g.speaker) });
@@ -251,31 +260,88 @@ async function read(l: Live) {
   }
 }
 
+type Seg = { seq: number; text: string; start: number; end: number; speaker: number; translations?: Record<string, string> };
+type Sent = { sentenceId: number; seqs: number[]; translations?: Record<string, string> };
+
 /** A recording's transcript, as the dashboard reads it: committed and
- *  draft lines from the owner's subscription. */
+ *  draft lines from the owner's subscription, and their translation when
+ *  the session translates (the subscription's `lang`). Called again with
+ *  the new language when it changes. */
 async function follow(l: Live, rid: string) {
+  const lang = l.status.translateTo ?? null;
+  const mine = (sub: unknown) => l.sub === sub && !l.stopping;
   try {
-    l.sub = await l.vs.recordings.subscribe(rid, { ...(l.status.translateTo ? { lang: l.status.translateTo } : {}) });
+    const sub = await l.vs.recordings.subscribe(rid, { ...(lang ? { lang } : {}) });
+    // Stopped, or the language changed again, while this one opened.
+    if (l.stopping || (l.status.translateTo ?? null) !== lang) { sub.close(); return; }
+    try { l.sub?.close(); } catch { /* closed */ }
+    l.sub = sub;
     const seen = new Set<number>();
-    for await (const ev of l.sub) {
+    const segment = (g: Seg) => {
+      if (!seen.has(g.seq)) {
+        seen.add(g.seq);
+        emit(l, { type: 'committed', seq: g.seq, text: g.text, startS: g.start, endS: g.end, speaker: String(g.speaker) });
+      }
+      const tr = lang ? g.translations?.[lang] : undefined;
+      if (tr) emit(l, { type: 'translated', seq: g.seq, lang: lang!, text: tr });
+    };
+    const sentence = (st: Sent) => {
+      const tr = lang ? st.translations?.[lang] : undefined;
+      if (tr && st.seqs.length) emit(l, { type: 'translated', seq: Math.max(...st.seqs), seqs: st.seqs, sentenceId: st.sentenceId, lang: lang!, text: tr });
+    };
+    for await (const ev of sub) {
+      if (!mine(sub)) break;
       if (ev.type === 'snapshot') {
-        for (const g of ev.snapshot.segments) {
-          if (seen.has(g.seq)) continue;
-          seen.add(g.seq);
-          emit(l, { type: 'committed', seq: g.seq, text: g.text, startS: g.start, endS: g.end, speaker: String(g.speaker) });
-        }
+        for (const g of ev.snapshot.segments) segment(g as Seg);
+        for (const st of ev.snapshot.sentences ?? []) sentence(st as Sent);
       } else if (ev.type === 'frame') {
-        const f = ev.frame as { type: string; segment?: { seq: number; text: string; start: number; end: number; speaker: number }; segments?: { text: string }[] };
-        if (f.type === 'transcript.committed' && f.segment && !seen.has(f.segment.seq)) {
-          seen.add(f.segment.seq);
-          const g = f.segment;
-          emit(l, { type: 'committed', seq: g.seq, text: g.text, startS: g.start, endS: g.end, speaker: String(g.speaker) });
-        } else if (f.type === 'transcript.draft' && f.segments) {
+        const f = ev.frame as { type: string; segment?: Seg; segments?: { text: string; translations?: Record<string, string> }[]; sentence?: Sent; seq?: number; translations?: Record<string, string> };
+        if (f.type === 'transcript.committed' && f.segment) segment(f.segment);
+        else if (f.type === 'transcript.draft' && f.segments) {
           emit(l, { type: 'draft', text: f.segments.map((x) => x.text).join(' ').trim() });
+          if (lang) {
+            const tr = f.segments.map((x) => x.translations?.[lang] ?? '').join(' ').trim();
+            if (tr) emit(l, { type: 'draftTranslated', lang, text: tr });
+          }
+        } else if (f.type === 'transcript.sentence' && f.sentence) sentence(f.sentence);
+        else if (f.type === 'transcript.translated' && lang && typeof f.seq === 'number') {
+          const tr = f.translations?.[lang];
+          if (tr) emit(l, { type: 'translated', seq: f.seq, lang, text: tr });
         }
       } else if (ev.type === 'closed') break;
     }
   } catch { /* the transcript stays in the dashboard */ }
+}
+
+/** Change what a running session translates into, or whether its
+ *  transcript shows on the tab (the background draws it there). */
+export async function setLive(id: string, patch: { translateTo?: string | null; overlay?: boolean }) {
+  const l = lives.get(id);
+  if (!l) return;
+  if (patch.overlay !== undefined) set(l, { overlay: patch.overlay });
+  if (patch.translateTo === undefined || (patch.translateTo ?? null) === (l.status.translateTo ?? null)) return;
+  if (l.stopping || !['live', 'paused'].includes(l.status.state)) throw new Coded('Wait until it is live, then change the language.', 'not_live');
+  const lang = patch.translateTo;
+  if (l.status.mode === 'captions') {
+    // A realtime session translates on its own socket.
+    l.session?.update({ translate: lang ? [lang] : [] });
+    set(l, { translateTo: lang });
+  } else if (l.status.recordingId) {
+    // A recording's transcript comes on the subscription: open it again in
+    // the new language (the old one closes once the new one is in).
+    set(l, { translateTo: lang });
+    void follow(l, l.status.recordingId);
+  }
+}
+
+/** Drop a finished session from the list (Dismiss). */
+export function forgetLive(id: string) {
+  const l = lives.get(id);
+  if (l && !['done', 'failed'].includes(l.status.state)) return;
+  lives.delete(id);
+  // Pushed even when it was already forgotten (after ten minutes): a panel
+  // open since then still lists it.
+  push({ push: 'live.gone', id });
 }
 
 export async function pauseLive(id: string, paused: boolean) {

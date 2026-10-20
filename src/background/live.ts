@@ -4,9 +4,9 @@
  *  relays. Captions go to the frame of the tab that holds the main video.
  *  The toolbar badge says REC while anything records. */
 
-import { push, RpcError, type Handlers, type Push } from '../lib/rpc';
+import { push, RpcError, type Handlers, type LiveEvent, type Push } from '../lib/rpc';
 import { currentEnv } from '../lib/env';
-import { meetingOf, type LiveStart, type LiveStatus, type CaptionStyle } from '../lib/live';
+import { capturable, meetingOf, tabHolder, RECORDING_MODES, type LiveStart, type LiveStatus, type CaptionStyle } from '../lib/live';
 import type { OffAnswer, OffCmd } from '../lib/offscreen';
 import { showInPanel } from './panel';
 
@@ -47,8 +47,35 @@ async function activeTab(): Promise<chrome.tabs.Tab> {
   return t;
 }
 
-function capturable(url: string | undefined): boolean {
-  return !!url && /^(https?|file):/.test(url) && !/^https:\/\/(chrome\.google\.com\/webstore|chromewebstore\.google\.com|microsoftedge\.microsoft\.com\/addons)/.test(url);
+/* ── Invoked tabs ──────────────────────────────────────────────────
+ * Chrome lets an extension capture a tab only after the person invoked it
+ * on that tab (the toolbar icon, a shortcut, a context menu), until the
+ * tab goes to another site. The panel cannot ask Chrome, so the
+ * invocations are noted here (in session storage: the worker sleeps) and
+ * the panel says what to do before a start fails. */
+
+const INVOKED = 'live.invoked';
+const originOf = (url: string | undefined) => { try { return new URL(url ?? '').origin; } catch { return ''; } };
+
+async function invokedList(): Promise<{ tabId: number; origin: string }[]> {
+  return ((await chrome.storage.session.get(INVOKED))[INVOKED] as { tabId: number; origin: string }[] | undefined) ?? [];
+}
+
+export async function markInvoked(tab: chrome.tabs.Tab | undefined) {
+  if (tab?.id === undefined) return;
+  const all = (await invokedList()).filter((x) => x.tabId !== tab.id);
+  await chrome.storage.session.set({ [INVOKED]: [...all.slice(-100), { tabId: tab.id, origin: originOf(tab.url) }] });
+}
+
+async function forgetInvoked(tabId: number, url?: string) {
+  const all = await invokedList();
+  const keep = all.filter((x) => x.tabId !== tabId || (url !== undefined && x.origin === originOf(url)));
+  if (keep.length !== all.length) await chrome.storage.session.set({ [INVOKED]: keep });
+}
+
+async function wasInvoked(tabId: number): Promise<boolean> {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  return !!tab && (await invokedList()).some((x) => x.tabId === tabId && x.origin === originOf(tab.url));
 }
 
 /** The tab's capture stream id. Chrome grants it only after the person
@@ -56,13 +83,15 @@ function capturable(url: string | undefined): boolean {
 async function streamIdFor(tab: chrome.tabs.Tab): Promise<string> {
   if (!capturable(tab.url)) throw new RpcError('Browser pages and the extension store cannot be captured.', 'tab_capture');
   try {
-    return await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id! });
+    const id = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id! });
+    void markInvoked(tab);
+    return id;
   } catch (e) {
     const m = String((e as Error)?.message ?? e);
     if (/invoked|activeTab/i.test(m)) {
       throw new RpcError('Chrome lets VocalStack capture a tab only after you click the VocalStack icon on that tab. Click the icon in the toolbar, then start again.', 'invoke');
     }
-    if (/active stream|already/i.test(m)) throw new RpcError('This tab is already being captured.', 'tab_busy');
+    if (/active stream|already/i.test(m)) throw new RpcError('Another extension or browser feature is already using this tab’s sound. Stop it there, then start again.', 'tab_busy');
     throw new RpcError(`The tab could not be captured: ${m}`, 'tab_capture');
   }
 }
@@ -78,8 +107,39 @@ export async function videoFrame(tabId: number): Promise<number> {
   return best.frameId;
 }
 
-/** Where each running session's captions go. */
-const captionTargets = new Map<string, { tabId: number; frameId: number }>();
+/** Where each running session's captions go: captions sessions, and
+ *  recordings shown as captions on their tab. Kept in session storage too,
+ *  so captions survive the service worker going to sleep. */
+/** `hide`: a recording shown as captions: closing them hides them, it does not stop it. */
+type Target = { tabId: number; frameId: number; hide?: boolean };
+const captionTargets = new Map<string, Target>();
+const TARGETS = 'live.captionTargets';
+const targetsLoaded = chrome.storage.session.get(TARGETS).then((g) => {
+  for (const [id, t] of Object.entries((g[TARGETS] as Record<string, Target>) ?? {})) if (!captionTargets.has(id)) captionTargets.set(id, t);
+}, () => {});
+function saveTargets() { void chrome.storage.session.set({ [TARGETS]: Object.fromEntries(captionTargets) }); }
+function setTarget(id: string, t: Target) { captionTargets.set(id, t); saveTargets(); }
+function dropTarget(id: string) {
+  const t = captionTargets.get(id);
+  if (!t) return;
+  captionTargets.delete(id);
+  saveTargets();
+  chrome.tabs.sendMessage(t.tabId, { caption: 'off', id }, { frameId: t.frameId }).catch(() => {});
+}
+
+/** Show (or hide) a running session's transcript as captions on its tab,
+ *  starting with what was said last. */
+async function overlay(s: LiveStatus, on: boolean) {
+  if (!on) { dropTarget(s.id); await off({ off: 'live.set', id: s.id, overlay: false }); return; }
+  if (s.tabId === undefined) throw new RpcError('This session has no tab to show captions on.');
+  const t: Target = { tabId: s.tabId, frameId: await videoFrame(s.tabId), hide: s.mode !== 'captions' };
+  setTarget(s.id, t);
+  await off({ off: 'live.set', id: s.id, overlay: true });
+  const history = ((await off<LiveEvent[]>({ off: 'live.history', id: s.id })).value ?? []).slice(-6);
+  for (const event of history) await chrome.tabs.sendMessage(t.tabId, { caption: event, id: s.id, hide: t.hide }, { frameId: t.frameId }).catch(() => {});
+}
+
+function wait(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 
 function defaultName(start: LiveStart, tab: chrome.tabs.Tab | null): string {
   const when = new Date().toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -95,16 +155,48 @@ export async function startLive(start: LiveStart, invokedTab?: chrome.tabs.Tab):
   if (start.input.tab || start.mode === 'captions') {
     tab = invokedTab ?? (start.tabId !== undefined ? await chrome.tabs.get(start.tabId) : await activeTab());
   }
-  const streamId = tab && start.input.tab ? await streamIdFor(tab) : undefined;
+  if (invokedTab) void markInvoked(invokedTab);
+  // One capture per tab: say who holds it, or work with it.
+  const holder = start.input.tab ? tabHolder(await listLive().catch(() => []), tab?.id) : undefined;
+  if (holder) {
+    if (start.mode === 'captions' && holder.mode !== 'captions') {
+      // Captions of a tab that is being recorded: the recording's own
+      // transcript, shown on the tab.
+      if (start.translateTo !== undefined && (start.translateTo ?? null) !== (holder.translateTo ?? null)) await off({ off: 'live.set', id: holder.id, translateTo: start.translateTo ?? null });
+      await overlay(holder, true);
+      return { ...holder, overlay: true, translateTo: start.translateTo ?? holder.translateTo };
+    }
+    if (holder.mode === 'captions' && start.mode !== 'captions') {
+      // Recording a tab that shows captions: the recording takes the tab's
+      // sound over, and its transcript keeps showing as the captions.
+      await off({ off: 'live.stop', id: holder.id });
+      start = { ...start, overlay: true, translateTo: start.translateTo ?? holder.translateTo ?? null };
+    } else if (holder.mode === 'captions') {
+      throw new RpcError('Captions are already on for this tab. Turn them off first.', 'tab_busy');
+    } else {
+      throw new RpcError(`This tab is already being recorded (“${holder.name}”). Its transcript is in Live; you can show it as captions on the tab from there.`, 'tab_busy');
+    }
+  }
+  let streamId: string | undefined;
+  if (tab && start.input.tab) {
+    // A capture just stopped may take a moment to let the tab go.
+    for (let i = 0; ; i++) {
+      try { streamId = await streamIdFor(tab); break; } catch (e) {
+        if (!(e instanceof RpcError) || e.code !== 'tab_busy' || !holder || i >= 6) throw e;
+        await wait(250);
+      }
+    }
+  }
   const id = crypto.randomUUID();
-  if (start.mode === 'captions' && tab?.id !== undefined) {
-    captionTargets.set(id, { tabId: tab.id, frameId: await videoFrame(tab.id) });
+  const showOnTab = start.mode === 'captions' || (!!start.overlay && start.input.tab);
+  if (showOnTab && tab?.id !== undefined && capturable(tab.url)) {
+    setTarget(id, { tabId: tab.id, frameId: await videoFrame(tab.id), hide: start.mode !== 'captions' });
   }
   const cmd: OffCmd = { off: 'live.start', id, api: env.api, start: { ...start, tabId: tab?.id ?? start.tabId }, name: defaultName(start, tab), streamId, tabTitle: tab?.title };
   try {
     return (await off<LiveStatus>(cmd)).value!;
   } catch (e) {
-    captionTargets.delete(id);
+    dropTarget(id);
     throw e;
   }
 }
@@ -119,12 +211,17 @@ async function listLive(): Promise<LiveStatus[]> {
   return (await off({ off: 'live.list' })).statuses ?? [];
 }
 
+/** The toolbar badge: REC while anything records, II while a recording
+ *  is paused, CC while only captions run (they record nothing). */
 async function badge() {
   const all = await listLive().catch(() => []);
-  const rec = all.some((s) => s.state === 'live' || s.state === 'warming' || s.state === 'starting');
-  const paused = !rec && all.some((s) => s.state === 'paused');
-  await chrome.action.setBadgeBackgroundColor({ color: paused ? '#f0b429' : '#f78472' });
-  await chrome.action.setBadgeText({ text: rec ? 'REC' : paused ? 'II' : '' });
+  const on = (s: LiveStatus) => s.state === 'live' || s.state === 'warming' || s.state === 'starting';
+  const recording = all.filter((s) => RECORDING_MODES.includes(s.mode));
+  const rec = recording.some(on);
+  const paused = !rec && recording.some((s) => s.state === 'paused');
+  const cc = !rec && !paused && all.some((s) => s.mode === 'captions' && on(s));
+  await chrome.action.setBadgeBackgroundColor({ color: paused ? '#f0b429' : cc ? '#55abe5' : '#f78472' });
+  await chrome.action.setBadgeText({ text: rec ? 'REC' : paused ? 'II' : cc ? 'CC' : '' });
 }
 
 /** The captured tab is gone: its sessions end with it. */
@@ -136,8 +233,10 @@ async function stopForTab(tabId: number) {
 
 async function captionsOn(tab: chrome.tabs.Tab) {
   const all = await listLive().catch(() => []);
-  const running = all.find((s) => s.mode === 'captions' && s.tabId === tab.id && !['done', 'failed', 'stopping'].includes(s.state));
-  if (running) { await off({ off: 'live.stop', id: running.id }); return; }
+  const holder = tabHolder(all, tab.id);
+  // A recording of this tab: its transcript as the captions, on or off.
+  if (holder && holder.mode !== 'captions') { await overlay(holder, !holder.overlay); return; }
+  if (holder) { await off({ off: 'live.stop', id: holder.id }); return; }
   const { captionLang } = await chrome.storage.local.get('captionLang');
   await startLive({ mode: 'captions', input: { tab: true, mic: false }, tabId: tab.id, translateTo: (captionLang as string) || null }, tab);
 }
@@ -146,23 +245,23 @@ export function registerLive(): Handlers {
   chrome.runtime.onMessage.addListener((msg: Push) => {
     if (msg?.push === 'live.status') {
       void badge();
-      if (['done', 'failed'].includes(msg.status.state)) {
-        const t = captionTargets.get(msg.status.id);
-        if (t) chrome.tabs.sendMessage(t.tabId, { caption: 'off', id: msg.status.id }, { frameId: t.frameId }).catch(() => {});
-        captionTargets.delete(msg.status.id);
-      }
+      if (['done', 'failed'].includes(msg.status.state)) void targetsLoaded.then(() => dropTarget(msg.status.id));
     }
     if (msg?.push === 'live.event') {
-      const t = captionTargets.get(msg.id);
-      if (t) chrome.tabs.sendMessage(t.tabId, { caption: msg.event, id: msg.id }, { frameId: t.frameId }).catch(() => {});
+      void targetsLoaded.then(() => {
+        const t = captionTargets.get(msg.id);
+        if (t) chrome.tabs.sendMessage(t.tabId, { caption: msg.event, id: msg.id, hide: t.hide }, { frameId: t.frameId }).catch(() => {});
+      });
     }
     return false;
   });
-  chrome.tabs.onRemoved.addListener((tabId) => { void stopForTab(tabId); });
+  chrome.tabs.onRemoved.addListener((tabId) => { void stopForTab(tabId); void forgetInvoked(tabId); });
+  chrome.tabs.onUpdated.addListener((tabId, info) => { if (info.url) void forgetInvoked(tabId, info.url); });
   chrome.commands.onCommand.addListener((command, tab) => {
     if (!tab?.id) return;
     // Inside the shortcut's gesture: open the panel first, then capture.
     void showInPanel({ view: 'live', tabId: tab.id }, tab.windowId);
+    void markInvoked(tab);
     if (command === 'record-tab') void startLive({ mode: meetingOf(tab.url) ? 'meeting' : 'record', input: { tab: true, mic: !!meetingOf(tab.url) }, tabId: tab.id }, tab).catch((e) => notifyError(e));
     if (command === 'captions') void captionsOn(tab).catch((e) => notifyError(e));
   });
@@ -172,6 +271,17 @@ export function registerLive(): Handlers {
     'live.stop': async ({ id }) => { await off({ off: 'live.stop', id }); },
     'live.pause': async ({ id, paused }) => { await off({ off: 'live.pause', id, paused }); },
     'live.list': () => listLive(),
+    'live.forget': async ({ id }) => {
+      if (await hasOffscreen()) await off({ off: 'live.forget', id });
+      else push({ push: 'live.gone', id });
+    },
+    'live.overlay': async ({ id, on }) => {
+      const s = (await listLive()).find((x) => x.id === id);
+      if (!s) throw new RpcError('That session has ended.');
+      await overlay(s, on);
+    },
+    'live.translate': async ({ id, lang }) => { await off({ off: 'live.set', id, translateTo: lang }); },
+    'tab.invoked': ({ tabId }) => wasInvoked(tabId),
     'live.history': async ({ id }) => (await hasOffscreen() ? ((await off<never>({ off: 'live.history', id })).value ?? []) : []),
     'captions.style': async (style: CaptionStyle) => {
       await chrome.storage.local.set({ captionStyle: style });

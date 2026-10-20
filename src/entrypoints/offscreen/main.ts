@@ -4,7 +4,7 @@
  *  The background creates it on first need and talks to it with `OffCmd`. */
 
 import { isOffCmd, type OffAnswer, type OffCmd } from '../../lib/offscreen';
-import { listLive, liveHistory, pauseLive, startLive, stopLive } from '../../offscreen/capture';
+import { forgetLive, listLive, liveHistory, pauseLive, setLive, startLive, stopLive } from '../../offscreen/capture';
 import { dubLoad, dubStop, dubSync } from '../../offscreen/dub';
 
 async function handle(cmd: OffCmd): Promise<OffAnswer> {
@@ -14,6 +14,8 @@ async function handle(cmd: OffCmd): Promise<OffAnswer> {
     case 'live.pause': await pauseLive(cmd.id, cmd.paused); return { ok: true };
     case 'live.list': return { ok: true, statuses: listLive() };
     case 'live.history': return { ok: true, value: liveHistory(cmd.id) };
+    case 'live.set': await setLive(cmd.id, cmd); return { ok: true };
+    case 'live.forget': forgetLive(cmd.id); return { ok: true };
     case 'dub.load': await dubLoad(cmd); return { ok: true };
     case 'dub.sync': dubSync(cmd); return { ok: true };
     case 'dub.stop': dubStop(cmd.tabId); return { ok: true };

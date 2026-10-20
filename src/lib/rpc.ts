@@ -16,6 +16,8 @@ export interface Methods {
   'auth.key': [{ key: string }, Account];
   'auth.signOut': [void, void];
   'auth.token': [void, string];
+  /** Exchange the key again now: the account's scopes as the API sees them. */
+  'auth.refresh': [void, Account | null];
   'env.set': [{ name: EnvName }, void];
   /** The media the active tab (all its frames) plays or links to. */
   'page.scan': [{ tabId?: number }, { tabId: number; url: string; title: string; media: FoundMedia[] }];
@@ -24,6 +26,15 @@ export interface Methods {
   'live.stop': [{ id: string }, void];
   'live.pause': [{ id: string; paused: boolean }, void];
   'live.list': [void, LiveStatus[]];
+  /** Drop a finished or failed session from the list. */
+  'live.forget': [{ id: string }, void];
+  /** Show (or hide) a running session's transcript as captions on its tab. */
+  'live.overlay': [{ id: string; on: boolean }, void];
+  /** Translate a running session into another language (null: stop translating). */
+  'live.translate': [{ id: string; lang: string | null }, void];
+  /** Whether the person invoked the extension on this tab (clicked its icon,
+   *  a shortcut, a menu), which Chrome requires before a tab is captured. */
+  'tab.invoked': [{ tabId: number }, boolean];
   /** The transcript so far of a running session (for a panel opened late). */
   'live.history': [{ id: string }, LiveEvent[]];
   'captions.style': [CaptionStyle, void];
@@ -74,6 +85,8 @@ export function serve(handlers: Handlers) {
 /** Messages nobody answers: state and events, fanned out. */
 export type Push =
   | { push: 'live.status'; status: LiveStatus }
+  /** A session was dismissed: it leaves the list. */
+  | { push: 'live.gone'; id: string }
   | { push: 'live.event'; id: string; tabId?: number; event: LiveEvent }
   /** The input level (0..1), a few times a second while capturing. */
   | { push: 'live.level'; id: string; level: number }

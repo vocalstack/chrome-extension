@@ -2,13 +2,18 @@
 
 import type { Broadcast } from '@vocalstack/contract';
 import type { LiveStatus } from '../../lib/live';
+import type { Account } from '../../lib/auth';
+import { can } from '../../lib/access';
+import { AccessNote } from '../../ui/access';
 import { Badge, Btn, Empty, Note, Seg, ago } from '../../ui/kit';
 import { IconBroadcast, IconChevron, IconPlus, IconUser } from '../../ui/icons';
 import { isActive, sessionOf } from './shared';
 
 export type Lifecycle = 'active' | 'archived';
 
-export function BroadcastList({ lifecycle, onLifecycle, items, loading, error, live, onOpen, onNew }: {
+export function BroadcastList({ account, onSettings, lifecycle, onLifecycle, items, loading, error, live, onOpen, onNew }: {
+  account: Account;
+  onSettings: () => void;
   lifecycle: Lifecycle;
   onLifecycle: (l: Lifecycle) => void;
   items: Broadcast[] | undefined;
@@ -24,14 +29,16 @@ export function BroadcastList({ lifecycle, onLifecycle, items, loading, error, l
         <div className="grow">
           <Seg<Lifecycle> label="Show" value={lifecycle} onChange={onLifecycle} options={[{ value: 'active', label: 'Active' }, { value: 'archived', label: 'Archived' }]} />
         </div>
-        <Btn kind="primary" size="sm" icon={<IconPlus />} onClick={onNew}>New</Btn>
+        <Btn kind="primary" size="sm" icon={<IconPlus />} disabled={!can(account, 'change')} title={can(account, 'change') ? undefined : 'This sign-in may not make changes'} onClick={onNew}>New</Btn>
       </div>
+      <AccessNote account={account} need="change" onSettings={onSettings} />
 
       {error && <Note kind="bad">{error}</Note>}
       {!items && loading && <div className="empty"><span className="spin" style={{ margin: '0 auto' }} /></div>}
       {items && items.length === 0 && (
         <Empty icon={<IconBroadcast />}>
           {lifecycle === 'active' ? 'No broadcasts yet. A broadcast is a link listeners open to follow you live.' : 'No archived broadcasts.'}
+          {account.reach === 'own' && <><br />This sign-in sees only the broadcasts the extension made.</>}
         </Empty>
       )}
       {items && items.length > 0 && (

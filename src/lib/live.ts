@@ -32,6 +32,8 @@ export interface LiveStart {
   broadcastId?: string;
   /** Take over a broadcast another device is recording. */
   takeover?: boolean;
+  /** Record / meeting of a tab: also show the transcript as captions on it. */
+  overlay?: boolean;
 }
 
 export type LiveState = 'starting' | 'warming' | 'live' | 'paused' | 'stopping' | 'done' | 'failed';
@@ -53,6 +55,10 @@ export interface LiveStatus {
   broadcastId?: string;
   recordingId?: string;
   translateTo?: string | null;
+  /** The spoken language it was started with (null: detected), for Try again. */
+  spokenLanguage?: string | null;
+  /** The transcript shows as captions on the tab. */
+  overlay?: boolean;
   /** Meeting: the summary, once the recording is done. */
   summary?: string | null;
   /** 0..1 input level, for the meter. */
@@ -107,6 +113,25 @@ export const MEETING_HOSTS: { re: RegExp; name: string }[] = [
 
 /** Settings: offer to record when a tab joins a meeting (default on). */
 export const OFFER_KEY = 'meetings.offer';
+
+/** Modes that record (stored in the account); captions do not. */
+export const RECORDING_MODES: LiveMode[] = ['record', 'meeting', 'broadcast'];
+
+/** Still running: starting, live, paused or stopping. */
+export function isRunning(s: LiveStatus): boolean {
+  return !['done', 'failed'].includes(s.state);
+}
+
+/** The running session that holds a tab's audio (one capture per tab). */
+export function tabHolder(all: LiveStatus[], tabId: number | undefined): LiveStatus | undefined {
+  if (tabId === undefined) return undefined;
+  return all.find((s) => s.tabId === tabId && s.input.tab && isRunning(s) && s.state !== 'stopping');
+}
+
+/** Pages Chrome lets no extension capture. */
+export function capturable(url: string | undefined): boolean {
+  return !!url && /^(https?|file):/.test(url) && !/^https:\/\/(chrome\.google\.com\/webstore|chromewebstore\.google\.com|microsoftedge\.microsoft\.com\/addons)/.test(url);
+}
 
 export function meetingOf(url: string | undefined): string | null {
   if (!url) return null;

@@ -4,6 +4,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { LinkProbe } from '@vocalstack/contract';
 import type { PanelIntent } from '../background/panel';
+import type { Account } from '../lib/auth';
+import { can } from '../lib/access';
+import type { LiveStatus } from '../lib/live';
+import { AccessNote } from '../ui/access';
 import { client } from '../lib/client';
 import { rpc, type Answer } from '../lib/rpc';
 import { KIND_LABEL, type FoundMedia } from '../lib/media';
@@ -59,7 +63,14 @@ async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
   return t;
 }
 
-export function PageScreen({ intent, onIntentDone }: { intent: PanelIntent | null; onIntentDone: () => void }) {
+export function PageScreen({ account, live, intent, onIntentDone, onSettings }: {
+  account: Account;
+  live: LiveStatus[];
+  intent: PanelIntent | null;
+  onIntentDone: () => void;
+  onSettings: () => void;
+}) {
+  const mayRecord = can(account, 'record');
   const [scan, setScan] = useState<Scan | null>(null);
   const [scanError, setScanError] = useState('');
   const [scanning, setScanning] = useState(true);
@@ -216,7 +227,8 @@ export function PageScreen({ intent, onIntentDone }: { intent: PanelIntent | nul
 
   return (
     <div className="stack">
-      {scan && <PlayerTools tabId={scan.tabId} url={scan.url} title={scan.title} hasVideo={hasVideo} />}
+      {scan && <PlayerTools account={account} live={live} tabId={scan.tabId} url={scan.url} title={scan.title} hasVideo={hasVideo} onSettings={onSettings} />}
+      <AccessNote account={account} need="record" onSettings={onSettings} />
 
       <div className="row">
         <div className="grow">
@@ -242,12 +254,12 @@ export function PageScreen({ intent, onIntentDone }: { intent: PanelIntent | nul
                 started={started.has(r.url)}
                 onToggle={() => toggle(r.url)}
                 onProbe={() => runProbe(r.url)}
-                onLive={isLive(r) ? () => void transcribeLive(r) : undefined}
+                onLive={isLive(r) && mayRecord ? () => void transcribeLive(r) : undefined}
                 liveBusy={liveBusy === r.url}
               />
             ))}
           </div>
-          <Btn kind="primary" block disabled={!chosen.length} busy={starting} onClick={() => void transcribe()}>
+          <Btn kind="primary" block disabled={!chosen.length || !mayRecord} busy={starting} onClick={() => void transcribe()}>
             {chosen.length > 1 ? `Transcribe ${chosen.length}` : 'Transcribe'}
           </Btn>
         </Section>
@@ -256,13 +268,13 @@ export function PageScreen({ intent, onIntentDone }: { intent: PanelIntent | nul
 
       {tracked.length > 0 && (
         <Section title="Started here">
-          <div className="list">{[...tracked].reverse().map((t) => <StartedRow key={t.key} t={t} />)}</div>
+          <div className="list">{[...tracked].reverse().map((t) => <StartedRow key={t.key} t={t} onSettings={onSettings} />)}</div>
         </Section>
       )}
 
       <div className="pg-upload">
         <input ref={picker} type="file" accept="audio/*,video/*" multiple hidden onChange={(e) => { const f = Array.from(e.target.files ?? []); e.target.value = ''; void uploadFiles(f); }} />
-        <Btn block icon={<IconUpload />} onClick={() => picker.current?.click()}>Upload a file</Btn>
+        <Btn block icon={<IconUpload />} disabled={!mayRecord} onClick={() => picker.current?.click()}>Upload a file</Btn>
         <p className="hint">Or drop audio and video files anywhere on this panel.</p>
       </div>
     </div>
@@ -284,7 +296,7 @@ function MediaRow({ r, page, probe: p, selectable, selected, started, onToggle, 
   let status: React.ReactNode = null;
   if (p?.state === 'loading') status = <><span className="spin" />Checking…</>;
   else if (p?.state === 'error') status = <span className="pg-bad">{p.text}</span>;
-  else if (v?.kind === 'live') status = <><Badge kind="live" dot="pulse">Live</Badge><span>Live now: transcribe it as it plays.</span><Btn size="sm" kind="live" icon={<IconLive />} busy={liveBusy} onClick={onLive}>Transcribe live</Btn></>;
+  else if (v?.kind === 'live') status = <><Badge kind="live" dot="pulse">Live</Badge><span>Live now: transcribe it as it plays.</span><Btn size="sm" kind="live" icon={<IconLive />} busy={liveBusy} disabled={!onLive} onClick={onLive}>Transcribe live</Btn></>;
   else if (v?.ok) status = <Badge kind="ok">Can transcribe</Badge>;
   else if (v && v.media?.length) status = <span>{v.media.length === 1 ? 'One recording found on it, listed below.' : `${v.media.length} recordings found on it, listed below.`}</span>;
   else if (v && !r.streamOnly) status = <span className="pg-bad">{v.problem || 'VocalStack can’t fetch this.'}</span>;
@@ -308,7 +320,7 @@ function MediaRow({ r, page, probe: p, selectable, selected, started, onToggle, 
         <div className="pg-row__foot">
           {status}
           {cantFetch && (
-            <span className="pg-hint">Can’t be fetched. Play it and use Live → Record this tab.
+            <span className="pg-hint">Can’t be fetched. Play it and record it in Live (What to record: This tab).
               {page && !p && <> <button type="button" className="pg-link" onClick={onProbe}>Look for recordings anyway</button></>}
             </span>
           )}
@@ -318,7 +330,7 @@ function MediaRow({ r, page, probe: p, selectable, selected, started, onToggle, 
   );
 }
 
-function StartedRow({ t }: { t: Tracked }) {
+function StartedRow({ t, onSettings }: { t: Tracked; onSettings: () => void }) {
   const tx = t.transcription;
   let line: React.ReactNode;
   let pct: number | null = null;
@@ -333,11 +345,12 @@ function StartedRow({ t }: { t: Tracked }) {
         <span className="item__icon">{t.origin === 'file' ? <IconFile /> : <IconLink />}</span>
         <div className="item__main">
           <div className="item__title" title={t.name}>{t.name}</div>
-          <div className="item__sub pg-status">{line}</div>
+          <div className={`item__sub pg-status${t.phase === 'error' || t.phase === 'failed' ? ' item__sub--wrap' : ''}`}>{line}</div>
           {pct !== null && <div className="progress pg-progress"><i style={{ width: `${pct}%` }} /></div>}
         </div>
         <div className="item__side">
           {t.problem?.billing && <Btn size="sm" onClick={() => openApp('/billing')}>Billing</Btn>}
+          {t.problem?.access && <Btn size="sm" onClick={onSettings}>Settings</Btn>}
           {tx && <IconBtn label="Open in the dashboard" onClick={() => openApp(txPath(t.phase === 'live' ? { ...tx, live: true } : tx))}><IconExternal /></IconBtn>}
         </div>
       </div>

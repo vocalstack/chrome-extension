@@ -6,13 +6,18 @@ import type { Broadcast, ShareLink } from '@vocalstack/contract';
 import { client } from '../../lib/client';
 import { rpc, RpcError } from '../../lib/rpc';
 import type { LiveStatus } from '../../lib/live';
+import type { Account } from '../../lib/auth';
+import { can } from '../../lib/access';
+import { AccessNote, ProblemNote } from '../../ui/access';
 import { Badge, Btn, Empty, Field, IconBtn, LanguageSelect, Note, Section, ago, clock, copy, openApp, useAction, useLoad } from '../../ui/kit';
 import { IconArchive, IconBack, IconCheck, IconClose, IconCopy, IconExternal, IconLink, IconMic, IconPause, IconPlay, IconPlus, IconRestore, IconStop, IconTrash, IconUser } from '../../ui/icons';
 import { BroadcastForm } from './Form';
 import { isActive, sessionOf } from './shared';
 
-export function BroadcastDetail({ initial, live, onLive, onBack, onChanged }: {
+export function BroadcastDetail({ initial, account, onSettings, live, onLive, onBack, onChanged }: {
   initial: Broadcast;
+  account: Account;
+  onSettings: () => void;
   live: LiveStatus[];
   onLive: (s: LiveStatus) => void;
   onBack: () => void;
@@ -48,7 +53,7 @@ export function BroadcastDetail({ initial, live, onLive, onBack, onChanged }: {
           <div className="item__sub"><span className="mono">/{b.code}</span> · {b.access === 'private' ? 'Private' : 'Public'}</div>
         </div>
         {archived && <Badge>Archived</Badge>}
-        {!archived && !editing && <Btn size="sm" onClick={() => setEditing(true)}>Edit</Btn>}
+        {!archived && !editing && can(account, 'change') && <Btn size="sm" onClick={() => setEditing(true)}>Edit</Btn>}
       </div>
       {bc.error && <Note kind="bad">{bc.error}</Note>}
 
@@ -60,7 +65,7 @@ export function BroadcastDetail({ initial, live, onLive, onBack, onChanged }: {
         <>
           {archived
             ? <Note kind="warn">This broadcast is archived. Its link does not open. Restore it to record or edit.</Note>
-            : <GoLive b={b} here={here} last={session} onLive={onLive} />}
+            : <GoLive b={b} account={account} onSettings={onSettings} here={here} last={session} onLive={onLive} />}
           {!archived && <ListenerLink b={b} />}
           {!archived && <ShareLinks id={id} />}
           <Recordings b={b} refreshKey={takeKey} />
@@ -82,7 +87,7 @@ export function BroadcastDetail({ initial, live, onLive, onBack, onChanged }: {
 }
 
 /** Record this device's microphone into the broadcast. */
-function GoLive({ b, here, last, onLive }: { b: Broadcast; here: LiveStatus | undefined; last: LiveStatus | undefined; onLive: (s: LiveStatus) => void }) {
+function GoLive({ b, account, onSettings, here, last, onLive }: { b: Broadcast; account: Account; onSettings: () => void; here: LiveStatus | undefined; last: LiveStatus | undefined; onLive: (s: LiveStatus) => void }) {
   const [lang, setLang] = useState<string | null>(b.settings.spokenLanguage ?? null);
   const [conflict, setConflict] = useState(false);
   const act = useAction();
@@ -116,21 +121,23 @@ function GoLive({ b, here, last, onLive }: { b: Broadcast; here: LiveStatus | un
   if (here) {
     const paused = here.state === 'paused';
     const elapsed = here.sentS ?? (Date.now() - here.startedAt) / 1000;
-    const label = here.state === 'live' ? 'Live' : paused ? 'Paused' : here.state === 'stopping' ? 'Stopping' : 'Starting';
+    const badge = here.state === 'live' ? <Badge kind="live" dot="pulse">Live</Badge>
+      : paused ? <Badge kind="warn" dot>Paused</Badge>
+      : <Badge><span className="spin" style={{ width: 9, height: 9, borderWidth: 1.5 }} />{here.state === 'stopping' ? 'Stopping' : 'Starting'}</Badge>;
     return (
       <div className={`card stack ${paused ? '' : 'card--live'}`}>
         <div className="row">
-          <Badge kind={paused ? 'warn' : 'live'} dot={paused ? true : 'pulse'}>{label}</Badge>
+          {badge}
           <span className="tabular">{clock(elapsed)}</span>
           <span className="grow" />
           {(b.listenersNow ?? 0) > 0 && <span className="bc-count" title="Listening now"><IconUser />{b.listenersNow}</span>}
         </div>
-        <p className="hint" style={{ margin: 0 }}>Your microphone is live on <span className="mono">/{b.code}</span>.</p>
+        <p className="hint" style={{ margin: 0 }}>{here.state === 'live' || paused ? <>Your microphone is live on <span className="mono">/{b.code}</span>.</> : here.state === 'stopping' ? 'Ending the recording…' : 'Getting ready. Listeners see the transcript once it is live.'}</p>
         <div className="row">
           <Btn icon={paused ? <IconPlay /> : <IconPause />} busy={act.busy} disabled={here.state !== 'live' && !paused} onClick={() => act.run(() => rpc('live.pause', { id: here.id, paused: !paused }))}>{paused ? 'Resume' : 'Pause'}</Btn>
-          <Btn kind="danger" icon={<IconStop />} disabled={here.state === 'stopping'} onClick={() => act.run(() => rpc('live.stop', { id: here.id }))}>Stop</Btn>
+          <Btn kind="danger" icon={<IconStop />} busy={here.state === 'stopping'} onClick={() => act.run(() => rpc('live.stop', { id: here.id }))}>Stop</Btn>
         </div>
-        {act.error && <Note kind="bad">{act.error}</Note>}
+        {act.error && <ProblemNote error={act.error} onSettings={onSettings} />}
       </div>
     );
   }
@@ -142,7 +149,8 @@ function GoLive({ b, here, last, onLive }: { b: Broadcast; here: LiveStatus | un
       <Field label="Spoken language">
         <LanguageSelect label="Spoken language" list="transcription" auto value={lang} onChange={setLang} />
       </Field>
-      <Btn kind="live" size="lg" block icon={<IconMic />} busy={act.busy} onClick={() => start(false)}>Go live</Btn>
+      <AccessNote account={account} need="record" onSettings={onSettings} />
+      <Btn kind="live" size="lg" block icon={<IconMic />} busy={act.busy} disabled={!can(account, 'record')} onClick={() => start(false)}>Go live</Btn>
       <p className="hint" style={{ margin: 0 }}>Records your microphone. Listeners follow the transcript on the broadcast link.</p>
       {conflict && (
         <Note kind="warn">
@@ -153,8 +161,8 @@ function GoLive({ b, here, last, onLive }: { b: Broadcast; here: LiveStatus | un
           </div>
         </Note>
       )}
-      {act.error && <Note kind="bad">{act.error}</Note>}
-      {!act.error && last?.state === 'failed' && last.error && <Note kind="bad">{last.error}</Note>}
+      {act.error && <ProblemNote error={act.error} onSettings={onSettings} />}
+      {!act.error && last?.state === 'failed' && last.error && <ProblemNote error={last.error} code={last.errorCode} onSettings={onSettings} />}
     </Section>
   );
 }

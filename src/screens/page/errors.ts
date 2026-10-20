@@ -6,12 +6,35 @@ export interface Problem {
   text: string;
   /** The fix is in Billing (credit, plan, payment method). */
   billing?: boolean;
+  /** The fix is the sign-in's permissions (Settings). */
+  access?: boolean;
+}
+
+/** What each API scope lets the extension do, in plain words. */
+const SCOPE_WORDS: Record<string, string> = {
+  'recordings:publish': 'record or transcribe',
+  write: 'create or change things',
+  read: 'see your account',
+};
+
+/** "API key lacks the recordings:publish scope" (the API's 403), in plain
+ *  words, or null when `said` is something else. */
+export function scopeProblem(said: string): Problem | null {
+  const m = /lacks the "?([\w:*]+)"?(?:,\s*"?([\w:*]+)"?)? scopes?/i.exec(said);
+  if (!m) return null;
+  const words = [m[1], m[2]].filter(Boolean).map((sc) => SCOPE_WORDS[sc!] ?? sc).join(' or ');
+  return {
+    text: `This sign-in isn’t allowed to ${words}. Open Settings to see what it may do and how to change it.`,
+    access: true,
+  };
 }
 
 export function problemOf(e: unknown): Problem {
   const err = e as { code?: string; status?: number; message?: string } | null;
   const code = err?.code;
   const said = errorText(e);
+  const scope = scopeProblem(said);
+  if (scope) return scope;
   switch (code) {
     case 'insufficient_credit': return { text: 'Not enough credit left for this. Top up or change your plan in Billing.', billing: true };
     case 'usage_cap_reached': return { text: 'Your usage cap for this period is reached. Raise it in Billing, or wait for the next period.', billing: true };

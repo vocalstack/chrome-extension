@@ -2,9 +2,11 @@
  *  "Upload a file" on the Page screen) and each becomes a transcription of
  *  the whole file. Progress shows in a small stack of toasts. */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Transcription } from '@vocalstack/contract';
 import { currentEnv } from '../lib/env';
+import type { Account } from '../lib/auth';
+import { can, whyNot } from '../lib/access';
 import { rpc } from '../lib/rpc';
 import { IconBtn, openApp } from '../ui/kit';
 import { IconAlert, IconCheck, IconClose, IconExternal, IconUpload } from '../ui/icons';
@@ -74,7 +76,7 @@ export async function uploadFiles(files: Iterable<File>): Promise<void> {
   for (const f of files) await uploadOne(f);
 }
 
-function Toast({ t }: { t: Tracked }) {
+function Toast({ t, onSettings }: { t: Tracked; onSettings: () => void }) {
   const close = <IconBtn label="Close" onClick={() => patch(t.key, { hidden: true })}><IconClose /></IconBtn>;
   const open = t.transcription && <button type="button" className="toast__link" onClick={() => openApp(txPath(t.transcription!))}>Open<IconExternal /></button>;
   let line: React.ReactNode;
@@ -99,7 +101,7 @@ function Toast({ t }: { t: Tracked }) {
       {icon}
       <div className="toast__main">
         <div className="toast__title">{t.name}</div>
-        <div className="toast__sub">{line}{t.problem?.billing && <> <button type="button" className="toast__link" onClick={() => openApp('/billing')}>Billing</button></>}</div>
+        <div className="toast__sub">{line}{t.problem?.billing && <> <button type="button" className="toast__link" onClick={() => openApp('/billing')}>Billing</button></>}{t.problem?.access && <> <button type="button" className="toast__link" onClick={onSettings}>Settings</button></>}</div>
         {pct !== null && <div className="progress"><i style={{ width: `${pct}%` }} /></div>}
       </div>
       {open}
@@ -108,9 +110,12 @@ function Toast({ t }: { t: Tracked }) {
   );
 }
 
-export function FileDrop() {
+export function FileDrop({ account, onSettings }: { account: Account; onSettings: () => void }) {
   const [over, setOver] = useState(false);
+  const [all, setAll] = useState(false);
   const toasts = useTracked('file').filter((t) => !t.hidden);
+  const accountRef = useRef(account);
+  accountRef.current = account;
 
   useEffect(() => {
     let depth = 0;
@@ -123,7 +128,13 @@ export function FileDrop() {
       e.preventDefault();
       depth = 0;
       setOver(false);
-      void uploadFiles(Array.from(e.dataTransfer!.files));
+      const files = Array.from(e.dataTransfer!.files);
+      // A sign-in that may not transcribe: say so once, upload nothing.
+      if (!can(accountRef.current, 'record')) {
+        track({ origin: 'file', name: files.length === 1 ? files[0]!.name : `${files.length} files`, phase: 'error', problem: { text: whyNot(accountRef.current, 'record'), access: true } });
+        return;
+      }
+      void uploadFiles(files);
     };
     window.addEventListener('dragenter', enter);
     window.addEventListener('dragover', overL);
@@ -140,7 +151,14 @@ export function FileDrop() {
   return (
     <>
       {over && <div className="drop"><IconUpload />Drop audio or video to transcribe it</div>}
-      {toasts.length > 0 && <div className="toasts" aria-live="polite">{toasts.slice(-4).map((t) => <Toast key={t.key} t={t} />)}</div>}
+      {toasts.length > 0 && (
+        <div className={`toasts${all ? ' toasts--all' : ''}`} aria-live="polite">
+          {/* The newest four; the rest behind one button, not dropped unseen. */}
+          {toasts.length > 4 && !all && <button type="button" className="toasts__more" onClick={() => setAll(true)}>{toasts.length - 4} more {toasts.length - 4 === 1 ? 'upload' : 'uploads'}</button>}
+          {(all ? toasts : toasts.slice(-4)).map((t) => <Toast key={t.key} t={t} onSettings={onSettings} />)}
+          {all && toasts.length > 4 && <button type="button" className="toasts__more" onClick={() => setAll(false)}>Show fewer</button>}
+        </div>
+      )}
     </>
   );
 }

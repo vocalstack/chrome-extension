@@ -7,6 +7,7 @@ import type { FoundMedia } from '../lib/media';
 import { accessToken } from '../lib/auth';
 import { currentEnv } from '../lib/env';
 import { showInPanel } from './panel';
+import { markInvoked } from './live';
 import { hitPath } from './page/paths';
 
 /* ── page.scan ─────────────────────────────────────────────────────── */
@@ -113,6 +114,7 @@ function onMenu(info: chrome.contextMenus.OnClickData, tab?: chrome.tabs.Tab) {
   } else if (info.menuItemId !== MENU.page) return;
   // First, inside the click's user gesture: the panel may only open from it.
   void showInPanel({ view: 'page', url, title, tabId: tab?.id }, tab?.windowId);
+  void markInvoked(tab);
 }
 
 /* ── Omnibox ───────────────────────────────────────────────────────── */

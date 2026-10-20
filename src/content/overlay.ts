@@ -28,6 +28,8 @@ export function startOverlay() {
   let host: HTMLElement | null = null;
   let root: ShadowRoot | null = null;
   let sessionId: string | null = null;
+  /** A recording shown as captions: × hides them and the recording goes on. */
+  let hideOnly = false;
   let lines: Line[] = [];
   /** Translations, newest last: a sentence's replaces any earlier version. */
   let said: Said[] = [];
@@ -119,9 +121,12 @@ export function startOverlay() {
     box.appendChild(tag);
     const x = document.createElement('button');
     x.className = 'x';
-    x.title = 'Turn captions off';
+    x.title = hideOnly ? 'Hide captions (the recording goes on)' : 'Turn captions off';
     x.textContent = '×';
-    x.onclick = () => { if (sessionId) void chrome.runtime.sendMessage({ rpc: 'live.stop', args: { id: sessionId } }); unmount(); };
+    x.onclick = () => {
+      if (sessionId) void chrome.runtime.sendMessage(hideOnly ? { rpc: 'live.overlay', args: { id: sessionId, on: false } } : { rpc: 'live.stop', args: { id: sessionId } });
+      unmount();
+    };
     box.appendChild(x);
     const add = (text: string, cls?: string) => {
       const d = document.createElement('div');
@@ -160,10 +165,11 @@ export function startOverlay() {
     if (msg.caption === 'off') { if (msg.id === sessionId) unmount(); return false; }
     const ev = msg.caption as LiveEvent;
     if (sessionId !== msg.id) { unmount(); sessionId = msg.id; }
+    hideOnly = msg.hide === true;
     mount();
     if (ev.type === 'committed') {
-      lines.push({ seq: ev.seq, text: ev.text });
-      if (lines.length > 6) lines.shift();
+      // A line sent again (a subscription reopened) replaces itself.
+      lines = [...lines.filter((x) => x.seq !== ev.seq), { seq: ev.seq, text: ev.text }].sort((a, b) => a.seq - b.seq).slice(-6);
       draft = draftTr = '';
     } else if (ev.type === 'draft') draft = ev.text;
     else if (ev.type === 'draftTranslated') { lang = ev.lang; draftTr = ev.text; }

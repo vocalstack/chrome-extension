@@ -6,7 +6,7 @@ import { serve, push, RpcError, type Handlers } from '../lib/rpc';
 import * as auth from '../lib/auth';
 import { setEnv } from '../lib/env';
 import { registerPage } from '../background/page';
-import { anyRunning, registerLive } from '../background/live';
+import { anyRunning, markInvoked, registerLive } from '../background/live';
 import { registerDub } from '../background/dub';
 import { registerMeetings } from '../background/meetings';
 import { showInPanel } from '../background/panel';
@@ -18,6 +18,7 @@ export default defineBackground(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
   chrome.action.onClicked.addListener((tab) => {
     if (tab.windowId !== undefined) chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => {});
+    void markInvoked(tab);
   });
 
   const signedIn = async (a: auth.Account | null) => {
@@ -31,6 +32,14 @@ export default defineBackground(() => {
     'auth.key': async ({ key }) => (await signedIn(await auth.signInWithKey(key)))!,
     'auth.signOut': async () => { await auth.signOut(); await signedIn(null); },
     'auth.token': () => auth.accessToken(),
+    'auth.refresh': async () => {
+      try {
+        return await auth.refresh();
+      } catch (e) {
+        if (!(await auth.account())) await signedIn(null);
+        throw e;
+      }
+    },
     'env.set': async ({ name }) => {
       // A running session keeps calling the environment it started in.
       if (await anyRunning()) throw new RpcError('Stop the recording or captions first, then change the environment.');
