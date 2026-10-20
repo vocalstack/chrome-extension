@@ -1,6 +1,5 @@
 node_modules
 output
-output-edge
 .wxt
 .keys
 *.pem

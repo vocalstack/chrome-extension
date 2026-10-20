@@ -11,10 +11,9 @@ const KEY = 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA6JfceS4w36TjFU6pBfwh8Vy
 
 export default defineConfig({
   srcDir: 'src',
-  // Load unpacked from output/ (Chrome) or output-edge/ (Edge): the
-  // manifest sits right in the folder.
-  outDir: process.argv.includes('edge') ? 'output-edge' : 'output',
-  outDirTemplate: '',
+  // Load unpacked from output/chrome or output/edge.
+  outDir: 'output',
+  outDirTemplate: '{{browser}}',
   modules: ['@wxt-dev/module-react'],
   manifest: {
     name: 'VocalStack',
