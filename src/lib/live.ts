@@ -34,6 +34,11 @@ export interface LiveStart {
   takeover?: boolean;
   /** Record / meeting of a tab: also show the transcript as captions on it. */
   overlay?: boolean;
+  /** Speaker labels (`auto`: When Needed). */
+  speakerLabels?: 'auto' | 'on' | 'off';
+  /** Set by the background from the tab: its meeting service and host. */
+  meeting?: MeetingKey;
+  host?: string;
 }
 
 export type LiveState = 'starting' | 'warming' | 'live' | 'paused' | 'stopping' | 'done' | 'failed';
@@ -59,6 +64,9 @@ export interface LiveStatus {
   spokenLanguage?: string | null;
   /** The transcript shows as captions on the tab. */
   overlay?: boolean;
+  speakerLabels?: 'auto' | 'on' | 'off';
+  meeting?: MeetingKey;
+  host?: string;
   /** Meeting: the summary, once the recording is done. */
   summary?: string | null;
   /** 0..1 input level, for the meter. */
@@ -92,6 +100,8 @@ export interface DubStatus {
   state: DubState;
   lang: string;
   title?: string;
+  /** What was transcribed (to dub it again in another language). */
+  url?: string;
   /** 0..1 while preparing. */
   progress?: number;
   error?: string;
@@ -99,16 +109,43 @@ export interface DubStatus {
   recordingId?: string;
 }
 
-/** Meetings the extension offers to record: the tab's address says so. */
-export const MEETING_HOSTS: { re: RegExp; name: string }[] = [
-  { re: /^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}/i, name: 'Google Meet' },
-  { re: /^https:\/\/teams\.(microsoft|live)\.com\//i, name: 'Microsoft Teams' },
-  { re: /^https:\/\/([\w-]+\.)?zoom\.us\/(wc|j)\//i, name: 'Zoom' },
-  { re: /^https:\/\/app\.zoom\.us\/wc\//i, name: 'Zoom' },
-  { re: /^https:\/\/([\w-]+\.)?webex\.com\/(meet|wbxmjs|webappng)/i, name: 'Webex' },
-  { re: /^https:\/\/whereby\.com\/[\w-]+/i, name: 'Whereby' },
-  { re: /^https:\/\/app\.gather\.town\//i, name: 'Gather' },
-  { re: /^https:\/\/discord\.com\/channels\//i, name: 'Discord' },
+/** Captions on a page's video, from its transcription (background/vcap.ts). */
+export interface VcapStart {
+  tabId: number;
+  /** The page or media address VocalStack transcribes. */
+  url: string;
+  title?: string;
+  /** The reading language; null: as spoken. */
+  lang?: string | null;
+  /** Started by Settings → Captions on videos. */
+  auto?: boolean;
+}
+
+export interface VcapStatus {
+  tabId: number;
+  state: 'transcribing' | 'translating' | 'on' | 'failed';
+  lang: string | null;
+  url: string;
+  title?: string;
+  progress?: number;
+  error?: string;
+  transcriptionId?: string;
+  recordingId?: string;
+  auto?: boolean;
+}
+
+/** Meetings the extension offers to record: the tab's address says so.
+ *  `key` names the service's logo (styles/meetings/<key>.svg). */
+export type MeetingKey = 'meet' | 'teams' | 'zoom' | 'webex' | 'whereby' | 'gather' | 'discord';
+export const MEETING_HOSTS: { re: RegExp; name: string; key: MeetingKey }[] = [
+  { re: /^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}/i, name: 'Google Meet', key: 'meet' },
+  { re: /^https:\/\/teams\.(microsoft|live)\.com\//i, name: 'Microsoft Teams', key: 'teams' },
+  { re: /^https:\/\/([\w-]+\.)?zoom\.us\/(wc|j)\//i, name: 'Zoom', key: 'zoom' },
+  { re: /^https:\/\/app\.zoom\.us\/wc\//i, name: 'Zoom', key: 'zoom' },
+  { re: /^https:\/\/([\w-]+\.)?webex\.com\/(meet|wbxmjs|webappng)/i, name: 'Webex', key: 'webex' },
+  { re: /^https:\/\/whereby\.com\/[\w-]+/i, name: 'Whereby', key: 'whereby' },
+  { re: /^https:\/\/app\.gather\.town\//i, name: 'Gather', key: 'gather' },
+  { re: /^https:\/\/discord\.com\/channels\//i, name: 'Discord', key: 'discord' },
 ];
 
 /** Settings: offer to record when a tab joins a meeting (default on). */
@@ -134,6 +171,10 @@ export function capturable(url: string | undefined): boolean {
 }
 
 export function meetingOf(url: string | undefined): string | null {
+  return meetingHost(url)?.name ?? null;
+}
+
+export function meetingHost(url: string | undefined): { name: string; key: MeetingKey } | null {
   if (!url) return null;
-  return MEETING_HOSTS.find((m) => m.re.test(url))?.name ?? null;
+  return MEETING_HOSTS.find((m) => m.re.test(url)) ?? null;
 }

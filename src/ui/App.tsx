@@ -1,40 +1,60 @@
-/** The side panel: sign-in, then five areas in a tab strip. */
+/** The side panel (design 3): sign-in, then a header (the reading
+ *  language, a running recording's timer, Dashboard, Settings) over six
+ *  areas in an icon tab strip. */
 
 import { useEffect, useState } from 'react';
 import type { Account } from '../lib/auth';
 import { onPush, rpc } from '../lib/rpc';
 import { currentEnv, type Env } from '../lib/env';
-import { RECORDING_MODES, type LiveStatus } from '../lib/live';
+import { RECORDING_MODES, isRunning, type LiveStatus } from '../lib/live';
 import type { View } from '../background/panel';
 import { usePanelIntent } from './intent';
-import { IconBroadcast, IconLibrary, IconLive, IconPage, IconSettings, IconVoice } from './icons';
-import { IconBtn } from './kit';
+import { HiBack, HiBroadcast, HiDoc, HiExternal, HiGear, HiGlobe, HiMic, HiUpload, HiVoices } from './icons';
+import { clock } from './kit';
+import { ReadInChip, useReadLang } from './langs';
 import { SignIn } from '../screens/SignIn';
 import { Settings } from '../screens/Settings';
 import { PageScreen } from '../screens/Page';
 import { LiveScreen } from '../screens/Live';
+import { UploadScreen } from '../screens/Upload';
 import { BroadcastsScreen } from '../screens/Broadcasts';
 import { VoicesScreen } from '../screens/Voices';
 import { LibraryScreen } from '../screens/Library';
 import { FileDrop } from '../screens/FileDrop';
 
-const TABS: { view: Exclude<View, 'settings'>; label: string; Icon: typeof IconPage }[] = [
-  { view: 'page', label: 'Page', Icon: IconPage },
-  { view: 'live', label: 'Live', Icon: IconLive },
-  { view: 'broadcasts', label: 'Broadcasts', Icon: IconBroadcast },
-  { view: 'voices', label: 'Voices', Icon: IconVoice },
-  { view: 'library', label: 'Library', Icon: IconLibrary },
+type Area = Exclude<View, 'settings'>;
+const TABS: { view: Area; label: string; Icon: typeof HiGlobe }[] = [
+  { view: 'page', label: 'Page', Icon: HiGlobe },
+  { view: 'live', label: 'Live', Icon: HiMic },
+  { view: 'upload', label: 'Upload', Icon: HiUpload },
+  { view: 'broadcasts', label: 'Broadcasts', Icon: HiBroadcast },
+  { view: 'voices', label: 'Voices', Icon: HiVoices },
+  { view: 'library', label: 'Library', Icon: HiDoc },
 ];
+
+const on = (s: LiveStatus) => s.state === 'live' || s.state === 'warming' || s.state === 'paused';
+
+/** Seconds since `from`, ticking. */
+function useElapsed(from: number | undefined): number {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (from === undefined) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [from]);
+  return from === undefined ? 0 : (now - from) / 1000;
+}
 
 export function App() {
   const [account, setAccount] = useState<Account | null | undefined>(undefined);
   const [env, setEnvState] = useState<Env | null>(null);
   const [view, setViewState] = useState<View>('page');
   /** Where Settings goes back to. */
-  const [lastArea, setLastArea] = useState<Exclude<View, 'settings'>>('page');
+  const [lastArea, setLastArea] = useState<Area>('page');
   const setView = (v: View) => { if (v !== 'settings') setLastArea(v); setViewState(v); };
   const [live, setLive] = useState<LiveStatus[]>([]);
   const [intent, clearIntent] = usePanelIntent();
+  const [readLang] = useReadLang();
 
   useEffect(() => {
     rpc('auth.account').then(setAccount, () => setAccount(null));
@@ -53,38 +73,67 @@ export function App() {
     if (intent) setView(intent.view);
   }, [intent]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (account === undefined) return null;
-  if (!account) return <SignIn env={env} />;
+  // The reading language is the panel's: a running session reads in it too.
+  useEffect(() => {
+    for (const s of live) {
+      if (s.mode !== 'broadcast' && (s.state === 'live' || s.state === 'paused') && (s.translateTo ?? null) !== readLang) void rpc('live.translate', { id: s.id, lang: readLang }).catch(() => {});
+    }
+  }, [readLang, live]);
 
-  const on = (s: LiveStatus) => s.state === 'live' || s.state === 'warming' || s.state === 'paused';
-  const recording = live.some((s) => on(s) && RECORDING_MODES.includes(s.mode));
-  const captioning = !recording && live.some((s) => on(s) && s.mode === 'captions');
+  if (account === undefined) return null;
+  if (!account) return <div className="shell"><SignIn env={env} /></div>;
+
+  const recordings = live.filter((s) => on(s) && RECORDING_MODES.includes(s.mode)).sort((a, b) => a.startedAt - b.startedAt);
+  const recording = recordings[0];
+  const area: Area = view === 'settings' ? lastArea : view;
   return (
     <div className="shell">
-      {/* The browser's side panel header already shows the logo and name:
-          the areas start at the top, settings at their right. */}
-      <div className="bar">
-        <nav className="tabs" role="tablist" aria-label="Areas">
-          {TABS.map(({ view: v, label, Icon }) => (
-            <button key={v} type="button" role="tab" className="tab" aria-selected={view === v} onClick={() => setView(v)}>
-              <Icon />{label}
-              {v === 'live' && recording && <i className="tab__dot" role="img" aria-label="recording" title="Recording" />}
-              {v === 'live' && captioning && <i className="tab__dot tab__dot--cc" role="img" aria-label="captions on" title="Captions on" />}
-            </button>
-          ))}
-        </nav>
-        {env && env.name !== 'production' && <span className="top__env" title={`Environment: ${env.label}`}>{env.name === 'local' ? 'Local' : env.label}</span>}
-        <IconBtn label="Settings" onClick={() => setView('settings')} aria-pressed={view === 'settings'}><IconSettings /></IconBtn>
+      <div className="hd">
+        {view === 'settings' ? (
+          <>
+            <button type="button" className="hd__back" aria-label="Back" onClick={() => setView(lastArea)}><HiBack /></button>
+            <div className="hd__title">Settings</div>
+          </>
+        ) : (
+          <>
+            <ReadInChip />
+            {recording && area !== 'live' && <RecPill since={recording.startedAt} onClick={() => setView('live')} />}
+            {env && env.name !== 'production' && <span className="env-pill" title={`Environment: ${env.label}`}>{env.name === 'local' ? 'Local' : env.label}</span>}
+            <div className="hd__end">
+              {env && <a className="hd__link" href={env.app} target="_blank" rel="noopener" title="Open Dashboard in a new tab">Dashboard<HiExternal /></a>}
+              <button type="button" className="hd__icon" aria-label="Settings" title="Settings" onClick={() => setView('settings')}><HiGear /></button>
+            </div>
+          </>
+        )}
       </div>
-      <main className="body">
-        {view === 'page' && <PageScreen account={account} live={live} intent={intent?.view === 'page' ? intent : null} onIntentDone={clearIntent} onSettings={() => setView('settings')} />}
+      {view !== 'settings' && (
+        <div className="tabs2-wrap">
+          <nav className="tabs2" role="tablist" aria-label="Areas">
+            {TABS.map(({ view: v, label, Icon }) => (
+              <button key={v} type="button" role="tab" className="tab2" aria-selected={view === v} title={label} aria-label={label} onClick={() => setView(v)}>
+                <Icon />
+                {view === v && <span className="tab2__label">{label}</span>}
+                {v === 'live' && view !== v && live.some((s) => on(s) && isRunning(s)) && <i className="tab2__dot" role="img" aria-label="recording" />}
+              </button>
+            ))}
+          </nav>
+        </div>
+      )}
+      <main className="body2">
+        {view === 'page' && <PageScreen account={account} live={live} intent={intent?.view === 'page' ? intent : null} onIntentDone={clearIntent} onSettings={() => setView('settings')} onLive={() => setView('live')} onLibrary={() => setView('library')} onUpload={() => setView('upload')} />}
         {view === 'live' && <LiveScreen account={account} live={live} intent={intent?.view === 'live' ? intent : null} onIntentDone={clearIntent} onSettings={() => setView('settings')} />}
+        {view === 'upload' && <UploadScreen account={account} onSettings={() => setView('settings')} onLibrary={() => setView('library')} />}
         {view === 'broadcasts' && <BroadcastsScreen account={account} onSettings={() => setView('settings')} />}
         {view === 'voices' && <VoicesScreen />}
         {view === 'library' && <LibraryScreen account={account} intent={intent?.view === 'library' ? intent : null} onIntentDone={clearIntent} />}
         {view === 'settings' && <Settings account={account} env={env} onBack={() => setView(lastArea)} />}
       </main>
-      <FileDrop account={account} onSettings={() => setView('settings')} />
+      <FileDrop account={account} onSettings={() => setView('settings')} onDropped={() => setView('upload')} />
     </div>
   );
+}
+
+function RecPill({ since, onClick }: { since: number; onClick: () => void }) {
+  const s = useElapsed(since);
+  return <button type="button" className="rec-pill" title="Recording: open Live" onClick={onClick}><i />{clock(s)}</button>;
 }

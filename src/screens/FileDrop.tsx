@@ -1,6 +1,7 @@
-/** Local files: drop audio or video anywhere on the panel (or pick it with
- *  "Upload a file" on the Page screen) and each becomes a transcription of
- *  the whole file. Progress shows in a small stack of toasts. */
+/** Local files: drop audio or video anywhere on the panel and it joins
+ *  Upload's list (screens/Upload.tsx); Transcribe sends each as a
+ *  transcription of the whole file. Upload progress shows in a small
+ *  stack of toasts. */
 
 import { useEffect, useRef, useState } from 'react';
 import type { Transcription } from '@vocalstack/contract';
@@ -13,12 +14,13 @@ import { IconAlert, IconCheck, IconClose, IconExternal, IconUpload } from '../ui
 import { problemOf } from './page/errors';
 import { created, jobPct, jobText, patch, track, useTracked, type Tracked } from './page/tracker';
 import { txPath } from '../background/page/paths';
+import { queueFiles } from './Upload';
 
 const MEDIA_EXT = /\.(mp3|m4a|aac|wav|ogg|oga|opus|flac|weba|webm|mp4|m4v|mov|mkv|avi|wma|amr|3gp)$/i;
 export const isMedia = (f: File) => f.type.startsWith('audio/') || f.type.startsWith('video/') || MEDIA_EXT.test(f.name);
 
 /** Seconds, read by the browser; undefined when it can't tell. */
-function measure(file: File): Promise<number | undefined> {
+export function measure(file: File): Promise<number | undefined> {
   return new Promise((resolve) => {
     const el = document.createElement(file.type.startsWith('video/') ? 'video' : 'audio');
     const url = URL.createObjectURL(file);
@@ -55,7 +57,10 @@ async function send(file: File, options: object, onProgress: (sent: number, tota
   });
 }
 
-async function uploadOne(file: File): Promise<void> {
+/** What every file of one Transcribe is sent with. */
+export interface UploadOptions { settings?: { spokenLanguage?: string | null; speakerLabels?: 'auto' | 'on' | 'off' } }
+
+async function uploadOne(file: File, opts: UploadOptions): Promise<void> {
   const name = file.name.replace(/\.[^.]+$/, '').slice(0, 120) || 'Upload';
   if (!isMedia(file)) {
     track({ origin: 'file', name: file.name, phase: 'error', problem: { text: 'Not an audio or video file.' } });
@@ -64,7 +69,7 @@ async function uploadOne(file: File): Promise<void> {
   const key = track({ origin: 'file', name, phase: 'uploading', sent: 0, total: file.size });
   try {
     const durationS = await measure(file);
-    const t = await send(file, { name, crop: false, durationS }, (sent, total) => patch(key, { sent, total }));
+    const t = await send(file, { name, crop: false, durationS, ...opts }, (sent, total) => patch(key, { sent, total }));
     created(key, t);
   } catch (e) {
     patch(key, { phase: 'error', problem: problemOf(e) });
@@ -72,8 +77,8 @@ async function uploadOne(file: File): Promise<void> {
 }
 
 /** Transcribe local files, one upload after another. */
-export async function uploadFiles(files: Iterable<File>): Promise<void> {
-  for (const f of files) await uploadOne(f);
+export async function uploadFiles(files: Iterable<File>, opts: UploadOptions = {}): Promise<void> {
+  for (const f of files) await uploadOne(f, opts);
 }
 
 function Toast({ t, onSettings }: { t: Tracked; onSettings: () => void }) {
@@ -110,12 +115,14 @@ function Toast({ t, onSettings }: { t: Tracked; onSettings: () => void }) {
   );
 }
 
-export function FileDrop({ account, onSettings }: { account: Account; onSettings: () => void }) {
+export function FileDrop({ account, onSettings, onDropped }: { account: Account; onSettings: () => void; onDropped: () => void }) {
   const [over, setOver] = useState(false);
   const [all, setAll] = useState(false);
   const toasts = useTracked('file').filter((t) => !t.hidden);
   const accountRef = useRef(account);
   accountRef.current = account;
+  const droppedRef = useRef(onDropped);
+  droppedRef.current = onDropped;
 
   useEffect(() => {
     let depth = 0;
@@ -134,7 +141,8 @@ export function FileDrop({ account, onSettings }: { account: Account; onSettings
         track({ origin: 'file', name: files.length === 1 ? files[0]!.name : `${files.length} files`, phase: 'error', problem: { text: whyNot(accountRef.current, 'record'), access: true } });
         return;
       }
-      void uploadFiles(files);
+      queueFiles(files);
+      droppedRef.current();
     };
     window.addEventListener('dragenter', enter);
     window.addEventListener('dragover', overL);
@@ -150,7 +158,7 @@ export function FileDrop({ account, onSettings }: { account: Account; onSettings
 
   return (
     <>
-      {over && <div className="drop"><IconUpload />Drop audio or video to transcribe it</div>}
+      {over && <div className="drop"><IconUpload />Drop audio or video to add it to Upload</div>}
       {toasts.length > 0 && (
         <div className={`toasts${all ? ' toasts--all' : ''}`} aria-live="polite">
           {/* The newest four; the rest behind one button, not dropped unseen. */}

@@ -19,5 +19,15 @@ export default defineContentScript({
     });
     startOverlay();
     startDubSync();
+    // Settings → Captions on videos: tell the background a video started
+    // playing here (once per page address).
+    let told = '';
+    document.addEventListener('play', (e) => {
+      const v = e.target;
+      if (!(v instanceof HTMLVideoElement) || told === location.href) return;
+      if (Number.isFinite(v.duration) && v.duration < 20) return;
+      told = location.href;
+      void chrome.runtime.sendMessage({ videoPlaying: true }).catch(() => {});
+    }, true);
   },
 });

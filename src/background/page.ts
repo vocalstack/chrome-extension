@@ -76,7 +76,7 @@ export function mergeMedia(pageUrl: string, pageTitle: string, found: FoundMedia
   return all.sort((a, b) => Number(!!b.playing) - Number(!!a.playing) || Number(b.url === pageUrl) - Number(a.url === pageUrl));
 }
 
-async function scan(tabId?: number) {
+export async function scan(tabId?: number) {
   const tab = tabId !== undefined
     ? await chrome.tabs.get(tabId)
     : (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0];

@@ -6,7 +6,7 @@
 
 import { push, RpcError, type Handlers, type LiveEvent, type Push } from '../lib/rpc';
 import { currentEnv } from '../lib/env';
-import { capturable, meetingOf, tabHolder, RECORDING_MODES, type LiveStart, type LiveStatus, type CaptionStyle } from '../lib/live';
+import { capturable, meetingHost, meetingOf, tabHolder, RECORDING_MODES, type LiveStart, type LiveStatus, type CaptionStyle } from '../lib/live';
 import type { OffAnswer, OffCmd } from '../lib/offscreen';
 import { showInPanel } from './panel';
 
@@ -140,6 +140,7 @@ async function overlay(s: LiveStatus, on: boolean) {
 }
 
 function wait(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
+const hostOf = (url: string) => { try { return new URL(url).host; } catch { return undefined; } };
 
 function defaultName(start: LiveStart, tab: chrome.tabs.Tab | null): string {
   const when = new Date().toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -197,7 +198,8 @@ export async function startLive(start: LiveStart, invokedTab?: chrome.tabs.Tab):
   if (showOnTab && tab?.id !== undefined && capturable(tab.url)) {
     setTarget(id, { tabId: tab.id, frameId: await videoFrame(tab.id), hide: start.mode !== 'captions' });
   }
-  const cmd: OffCmd = { off: 'live.start', id, api: env.api, start: { ...start, tabId: tab?.id ?? start.tabId }, name: defaultName(start, tab), streamId, tabTitle: tab?.title };
+  const where = tab?.url ? { meeting: meetingHost(tab.url)?.key, host: hostOf(tab.url) } : {};
+  const cmd: OffCmd = { off: 'live.start', id, api: env.api, start: { ...start, ...where, tabId: tab?.id ?? start.tabId }, name: defaultName(start, tab), streamId, tabTitle: tab?.title };
   try {
     return (await off<LiveStatus>(cmd)).value!;
   } catch (e) {
@@ -236,14 +238,21 @@ async function stopForTab(tabId: number) {
   }
 }
 
+/** The panel's language choices (ui/langs.tsx), for a start made here. */
+export async function livePrefs(): Promise<Pick<LiveStart, 'translateTo' | 'spokenLanguage' | 'speakerLabels'>> {
+  const g = await chrome.storage.local.get(['readLang', 'liveLang', 'speakerLabels']);
+  return { translateTo: (g.readLang as string) || null, spokenLanguage: (g.liveLang as string) || null, speakerLabels: (g.speakerLabels as LiveStart['speakerLabels']) ?? 'auto' };
+}
+
+/** The captions shortcut: this tab's recording shown on the page, on or
+ *  off; with none, a recording starts with its captions on (every live
+ *  session is a saved live transcription). */
 async function captionsOn(tab: chrome.tabs.Tab) {
   const all = await listLive().catch(() => []);
   const holder = tabHolder(all, tab.id);
-  // A recording of this tab: its transcript as the captions, on or off.
   if (holder && holder.mode !== 'captions') { await overlay(holder, !holder.overlay); return; }
   if (holder) { await off({ off: 'live.stop', id: holder.id }); return; }
-  const { captionLang } = await chrome.storage.local.get('captionLang');
-  await startLive({ mode: 'captions', input: { tab: true, mic: false }, tabId: tab.id, translateTo: (captionLang as string) || null }, tab);
+  await startLive({ mode: meetingOf(tab.url) ? 'meeting' : 'record', input: { tab: true, mic: !!meetingOf(tab.url) }, tabId: tab.id, overlay: true, ...(await livePrefs()) }, tab);
 }
 
 export function registerLive(): Handlers {
@@ -267,7 +276,7 @@ export function registerLive(): Handlers {
     // Inside the shortcut's gesture: open the panel first, then capture.
     void showInPanel({ view: 'live', tabId: tab.id }, tab.windowId);
     void markInvoked(tab);
-    if (command === 'record-tab') void startLive({ mode: meetingOf(tab.url) ? 'meeting' : 'record', input: { tab: true, mic: !!meetingOf(tab.url) }, tabId: tab.id }, tab).catch((e) => notifyError(e));
+    if (command === 'record-tab') void livePrefs().then((p) => startLive({ mode: meetingOf(tab.url) ? 'meeting' : 'record', input: { tab: true, mic: !!meetingOf(tab.url) }, tabId: tab.id, ...p }, tab)).catch((e) => notifyError(e));
     if (command === 'captions') void captionsOn(tab).catch((e) => notifyError(e));
   });
 

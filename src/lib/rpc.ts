@@ -8,7 +8,7 @@
 import type { Account } from './auth';
 import type { EnvName } from './env';
 import type { FoundMedia } from './media';
-import type { LiveStatus, LiveStart, DubStart, DubStatus, CaptionStyle } from './live';
+import type { LiveStatus, LiveStart, DubStart, DubStatus, CaptionStyle, VcapStart, VcapStatus } from './live';
 
 export interface Methods {
   'auth.account': [void, Account | null];
@@ -38,6 +38,9 @@ export interface Methods {
   /** The transcript so far of a running session (for a panel opened late). */
   'live.history': [{ id: string }, LiveEvent[]];
   'captions.style': [CaptionStyle, void];
+  'vcap.start': [VcapStart, VcapStatus];
+  'vcap.stop': [{ tabId: number }, void];
+  'vcap.status': [{ tabId: number }, VcapStatus | null];
   'dub.start': [DubStart, DubStatus];
   'dub.stop': [{ tabId: number }, void];
   'dub.status': [{ tabId: number }, DubStatus | null];
@@ -91,11 +94,16 @@ export type Push =
   /** The input level (0..1), a few times a second while capturing. */
   | { push: 'live.level'; id: string; level: number }
   | { push: 'dub.status'; status: DubStatus }
+  | { push: 'vcap.status'; status: VcapStatus }
+  | { push: 'vcap.gone'; tabId: number }
   | { push: 'auth.changed'; account: Account | null };
 
 /** What a live session tells the panel and the captions overlay. */
 export type LiveEvent =
-  | { type: 'committed'; seq: number; text: string; startS: number; endS: number; speaker?: string | null }
+  | { type: 'committed'; seq: number; text: string; startS: number; endS: number; speaker?: string | null; lang?: string | null }
+  /** A speaker recognised as someone the account holds a voice for (an
+   *  empty `name` takes the name back). */
+  | { type: 'speaker'; speaker: string; name: string }
   | { type: 'draft'; text: string }
   /** A translation: of one line (`seq`), or of a whole sentence (`seqs`,
    *  `sentenceId`), which is how live sessions translate. */

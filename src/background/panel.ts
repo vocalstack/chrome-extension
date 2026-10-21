@@ -5,7 +5,7 @@
  *  clears it. That way a context-menu click or a meeting notification can
  *  open the panel on the right screen whether or not it is already open. */
 
-export type View = 'page' | 'live' | 'broadcasts' | 'voices' | 'library' | 'settings';
+export type View = 'page' | 'live' | 'upload' | 'broadcasts' | 'voices' | 'library' | 'settings';
 
 export interface PanelIntent {
   view: View;

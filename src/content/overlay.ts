@@ -1,5 +1,6 @@
 /** Live captions over the page's video (or at the foot of the window
- *  when the frame has none). Lives in a closed shadow root so the page's
+ *  when the frame has none), and a video's own captions in time with it
+ *  (`{vcap}` messages: cues from its transcription, background/vcap.ts). Lives in a closed shadow root so the page's
  *  styles cannot reach it; follows the video through scrolling, resizing
  *  and fullscreen. Fed by the background (`{caption}` messages). */
 
@@ -9,6 +10,7 @@ import { mainVideo, visibleArea } from './video';
 
 interface Line { seq: number; text: string }
 interface Said { key: number; seq: number; tr: string }
+interface Cue { s: number; e: number; t: string; o?: string }
 
 const CSS = `
 :host{all:initial}
@@ -38,6 +40,10 @@ export function startOverlay() {
   let lang: string | null = null;
   let style: CaptionStyle = DEFAULT_CAPTION_STYLE;
   let timer: number | undefined;
+  /** A video's captions: its cues, and the one showing. */
+  let cues: Cue[] | null = null;
+  let cue: Cue | null = null;
+  let cueTimer: number | undefined;
 
   chrome.storage.local.get('captionStyle').then((g) => { if (g.captionStyle) style = g.captionStyle as CaptionStyle; });
   chrome.storage.onChanged.addListener((c, area) => {
@@ -66,6 +72,8 @@ export function startOverlay() {
 
   const unmount = () => {
     if (timer) clearInterval(timer);
+    if (cueTimer) clearInterval(cueTimer);
+    cues = cue = null;
     document.removeEventListener('fullscreenchange', reparent);
     host?.remove();
     host = root = null;
@@ -113,6 +121,8 @@ export function startOverlay() {
     const wrap = root?.querySelector<HTMLElement>('.wrap');
     if (!wrap) return;
     wrap.textContent = '';
+    if (cues) { renderCue(wrap); return; }
+    wrap.style.opacity = '';
     const box = document.createElement('div');
     box.className = 'box';
     const tag = document.createElement('span');
@@ -156,7 +166,56 @@ export function startOverlay() {
     place();
   }
 
+  /** The cue under the video's clock (a beat of grace after it ends). */
+  function follow() {
+    const v = mainVideo();
+    if (!v || !cues) return;
+    const t = v.currentTime;
+    const next = cues.find((c) => t >= c.s && t < c.e + 0.4) ?? null;
+    if (next !== cue) { cue = next; render(); }
+  }
+
+  function renderCue(wrap: HTMLElement) {
+    wrap.style.opacity = cue ? '1' : '0';
+    if (!cue) return;
+    const box = document.createElement('div');
+    box.className = 'box';
+    const tag = document.createElement('span');
+    tag.className = 'tag';
+    tag.textContent = lang ? `VOCALSTACK · ${lang.toUpperCase()}` : 'VOCALSTACK';
+    box.appendChild(tag);
+    const x = document.createElement('button');
+    x.className = 'x';
+    x.title = 'Turn captions off';
+    x.textContent = '×';
+    x.onclick = () => { void chrome.runtime.sendMessage({ vcapOff: true }); unmount(); };
+    box.appendChild(x);
+    if (style.showOriginal && cue.o && cue.o !== cue.t) {
+      const o = document.createElement('div');
+      o.className = 'orig';
+      o.textContent = cue.o;
+      box.appendChild(o);
+    }
+    const d = document.createElement('div');
+    d.textContent = cue.t;
+    box.appendChild(d);
+    wrap.appendChild(box);
+    place();
+  }
+
   chrome.runtime.onMessage.addListener((msg, _sender, send) => {
+    if (msg?.vcap === 'off') { if (cues) unmount(); return false; }
+    if (msg?.vcap === 'on') {
+      unmount();
+      sessionId = 'vcap';
+      lang = msg.lang ?? null;
+      cues = (msg.cues as Cue[]) ?? [];
+      mount();
+      cueTimer = window.setInterval(follow, 200);
+      follow();
+      render();
+      return false;
+    }
     if (msg?.pick === true) {
       send({ area: visibleArea(mainVideo()) });
       return false;
@@ -165,6 +224,7 @@ export function startOverlay() {
     if (msg.caption === 'off') { if (msg.id === sessionId) unmount(); return false; }
     const ev = msg.caption as LiveEvent;
     if (sessionId !== msg.id) { unmount(); sessionId = msg.id; }
+    if (ev.type === 'speaker') return false;
     hideOnly = msg.hide === true;
     mount();
     if (ev.type === 'committed') {

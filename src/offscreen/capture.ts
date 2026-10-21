@@ -56,7 +56,7 @@ function set(l: Live, patch: Partial<LiveStatus>) {
 }
 
 function emit(l: Live, event: LiveEvent) {
-  if (event.type === 'committed' || event.type === 'translated') {
+  if (event.type === 'committed' || event.type === 'translated' || event.type === 'speaker') {
     l.history.push(event);
     if (l.history.length > KEEP) l.history.splice(0, l.history.length - KEEP);
   }
@@ -78,7 +78,7 @@ export async function startLive(cmd: Extract<OffCmd, { off: 'live.start' }>): Pr
     status: {
       id: cmd.id, mode: s.mode, state: 'starting', input: s.input, name: cmd.name, tabId: s.tabId, tabTitle: cmd.tabTitle,
       startedAt: Date.now(), broadcastId: s.broadcastId, translateTo: s.translateTo ?? null, sentS: 0,
-      spokenLanguage: s.spokenLanguage ?? null, overlay: !!s.overlay,
+      spokenLanguage: s.spokenLanguage ?? null, overlay: !!s.overlay, speakerLabels: s.speakerLabels, meeting: s.meeting, host: s.host,
     },
     vs, streams: [], paused: false, stopping: false, buf: new Float32Array(CHUNK), fill: 0, sent: 0, peak: 0, levelAt: 0, history: [],
   };
@@ -106,7 +106,7 @@ export async function startLive(cmd: Extract<OffCmd, { off: 'live.start' }>): Pr
       l.session = await vs.recordings.publish(grant, { onLoading });
       alive();
     } else {
-      const tx = await vs.transcriptions.createLive({ name: cmd.name, settings: { spokenLanguage: lang }, source: { kind: 'mic' } });
+      const tx = await vs.transcriptions.createLive({ name: cmd.name, settings: { spokenLanguage: lang, ...(s.speakerLabels ? { speakerLabels: s.speakerLabels } : {}) }, source: { kind: 'mic' } });
       set(l, { transcriptionId: tx.id });
       alive();
       const grant = await vs.transcriptions.startRecording(tx.id, {});
@@ -260,7 +260,7 @@ async function read(l: Live) {
   }
 }
 
-type Seg = { seq: number; text: string; start: number; end: number; speaker: number; translations?: Record<string, string> };
+type Seg = { seq: number; text: string; start: number; end: number; speaker: number; language?: string | null; translations?: Record<string, string> };
 type Sent = { sentenceId: number; seqs: number[]; translations?: Record<string, string> };
 
 /** A recording's transcript, as the dashboard reads it: committed and
@@ -280,7 +280,7 @@ async function follow(l: Live, rid: string) {
     const segment = (g: Seg) => {
       if (!seen.has(g.seq)) {
         seen.add(g.seq);
-        emit(l, { type: 'committed', seq: g.seq, text: g.text, startS: g.start, endS: g.end, speaker: String(g.speaker) });
+        emit(l, { type: 'committed', seq: g.seq, text: g.text, startS: g.start, endS: g.end, speaker: String(g.speaker), lang: g.language ?? null });
       }
       const tr = lang ? g.translations?.[lang] : undefined;
       if (tr) emit(l, { type: 'translated', seq: g.seq, lang: lang!, text: tr });
@@ -294,9 +294,12 @@ async function follow(l: Live, rid: string) {
       if (ev.type === 'snapshot') {
         for (const g of ev.snapshot.segments) segment(g as Seg);
         for (const st of ev.snapshot.sentences ?? []) sentence(st as Sent);
+        // Who each speaker turned out to be (a voice the account holds).
+        for (const sp of (ev.snapshot.speakers ?? []) as { speaker: number; name?: string | null }[]) if (sp.name) emit(l, { type: 'speaker', speaker: String(sp.speaker), name: sp.name });
       } else if (ev.type === 'frame') {
-        const f = ev.frame as { type: string; segment?: Seg; segments?: { text: string; translations?: Record<string, string> }[]; sentence?: Sent; seq?: number; translations?: Record<string, string> };
+        const f = ev.frame as { type: string; segment?: Seg; segments?: { text: string; translations?: Record<string, string> }[]; sentence?: Sent; seq?: number; translations?: Record<string, string>; speaker?: number; name?: string };
         if (f.type === 'transcript.committed' && f.segment) segment(f.segment);
+        else if ((f.type === 'transcript.speakerIdentified' || f.type === 'transcript.speakerNamed') && typeof f.speaker === 'number') emit(l, { type: 'speaker', speaker: String(f.speaker), name: f.name ?? '' });
         else if (f.type === 'transcript.draft' && f.segments) {
           emit(l, { type: 'draft', text: f.segments.map((x) => x.text).join(' ').trim() });
           if (lang) {

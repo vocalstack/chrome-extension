@@ -35,7 +35,7 @@ export default defineConfig({
     omnibox: { keyword: 'vs' },
     commands: {
       'record-tab': { suggested_key: { default: 'Alt+Shift+R' }, description: 'Record this tab' },
-      'captions': { suggested_key: { default: 'Alt+Shift+C' }, description: 'Live captions on this tab' },
+      'captions': { suggested_key: { default: 'Alt+Shift+C' }, description: 'Captions: show this tab’s recording on the page' },
     },
   },
   vite: () => ({

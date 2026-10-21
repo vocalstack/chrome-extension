@@ -1,34 +1,38 @@
-/** Live: record this tab, the microphone or both (a meeting, on a meeting
- *  tab: both, and a summary when it ends); live
- *  captions and translation. Running sessions show their transcript as it
- *  comes, with pause, stop, translation, captions on the tab and a link to
- *  the recording; finished ones stay until dismissed. */
+/** Live (design 3): record this tab, the tab and the microphone, or the
+ *  microphone alone — every session a saved live transcription. On a
+ *  meeting tab, Tab + mic is the default and the start records the
+ *  meeting (a summary when it ends). While one runs, the screen is its
+ *  recording card: time, source, Show on the page (the transcript as
+ *  captions on the tab), the transcript in the reading language, Pause
+ *  and Stop. */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PanelIntent } from '../background/panel';
 import type { Account } from '../lib/auth';
-import { can } from '../lib/access';
+import { can, whyNot } from '../lib/access';
 import { onPush, rpc, type LiveEvent } from '../lib/rpc';
-import { capturable, meetingOf, tabHolder, RECORDING_MODES, type LiveMode, type LiveStart, type LiveStatus } from '../lib/live';
-import { Badge, Btn, Field, LanguageSelect, Note, Section, Seg, clock, errorText, openApp, useAction, useLangName } from '../ui/kit';
+import { capturable, isRunning, meetingHost, tabHolder, RECORDING_MODES, type LiveStatus } from '../lib/live';
+import { clock, errorText, Note, openApp, useAction } from '../ui/kit';
 import { AccessNote, ProblemNote } from '../ui/access';
+import { Eyebrow, Switch, Toggle } from '../ui/ds';
+import { HiCursor, HiExternal, HiPause, HiPlayStroke, MeetingLogo } from '../ui/icons';
+import { SpeakerLabelsCard, SpokenLanguageCard, useLang, useReadLang, useSpeakerLabels, useSpokenLang } from '../ui/langs';
 import { problemOf } from './page/errors';
-import { IconCaptions, IconClose, IconExternal, IconMeeting, IconMic, IconPause, IconPlay, IconRestore, IconStop, IconTab } from '../ui/icons';
 import { useActiveTab } from '../ui/useTab';
 
-type Input = 'tab' | 'mic' | 'both';
-/** What the Record card records: on a meeting tab, the meeting in Both's place. */
-type Pick = Input | 'meeting';
-type CaptionInput = 'tab' | 'mic';
+type Source = 'tab' | 'tabmic' | 'mic';
 
-const MODE_LABEL: Record<LiveMode, string> = { record: 'Recording', meeting: 'Meeting', captions: 'Captions', broadcast: 'Broadcast' };
-
-const INVOKE_HINT = 'To record or caption this tab, Chrome asks for one click first: click the VocalStack icon in the toolbar while on this tab.';
+export const INVOKE_HINT = 'To record or caption this tab, click the VocalStack icon in Chrome’s toolbar once while on this tab.';
 const BROWSER_PAGE = 'Chrome doesn’t let extensions record its own pages or the extension store. Open a web page, or use the microphone.';
+const SOURCE_NOTE: Record<Source, string> = {
+  tab: 'Only sound from this tab is recorded.',
+  tabmic: 'This tab and your microphone are recorded together, so your own voice is included.',
+  mic: 'Only your microphone is recorded.',
+};
+/** Stored choice (`liveInput`), as the earlier panel saved it too. */
+const fromStored = (v: unknown): Source | null => (v === 'tab' ? 'tab' : v === 'mic' ? 'mic' : v === 'both' || v === 'tabmic' ? 'tabmic' : null);
 
-/** A start, with its busy state, its error (and the error's code), and
- *  when it was clicked: a start that got as far as a session shows its
- *  error on that session's card instead, once. */
+/** A start, with its busy state and its error (and the error's code). */
 function useStart() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ text: string; code?: string; at: number } | null>(null);
@@ -48,7 +52,7 @@ function useStart() {
 }
 
 /** Whether the person invoked the extension on the tab (null: not known yet). */
-function useInvoked(tabId: number | undefined, live: LiveStatus[]): boolean | null {
+export function useInvoked(tabId: number | undefined, live: LiveStatus[]): boolean | null {
   const [invoked, setInvoked] = useState<boolean | null>(null);
   const runningKey = live.filter((s) => s.state === 'live').map((s) => s.id).join(',');
   useEffect(() => {
@@ -64,6 +68,10 @@ function useInvoked(tabId: number | undefined, live: LiveStatus[]): boolean | nu
   return invoked;
 }
 
+export function InvokeNotice() {
+  return <div className="notice" role="status"><HiCursor /><div>{INVOKE_HINT}</div></div>;
+}
+
 export function LiveScreen({ account, live, intent, onIntentDone, onSettings }: {
   account: Account;
   live: LiveStatus[];
@@ -72,294 +80,236 @@ export function LiveScreen({ account, live, intent, onIntentDone, onSettings }: 
   onSettings: () => void;
 }) {
   const tab = useActiveTab();
-  const meeting = meetingOf(tab?.url);
-  const [input, setInput] = useState<Input>('tab');
-  const [lang, setLang] = useState<string | null>(null);
-  const [name, setName] = useState('');
-  const [recordLang, setRecordLang] = useState<string | null>(null);
-  const [captionLang, setCaptionLang] = useState<string | null>(null);
-  const [captionInput, setCaptionInput] = useState<CaptionInput>('tab');
-  const recordStart = useStart();
-  const captionsStart = useStart();
+  const meeting = meetingHost(tab?.url);
+  const [stored, setStored] = useState<Source>('tab');
+  /** This tab's own pick (a meeting tab starts on Tab + mic). */
+  const [picked, setPicked] = useState<{ tabId?: number; v: Source } | null>(null);
+  const [readLang] = useReadLang();
+  const [spoken] = useSpokenLang();
+  const [labels] = useSpeakerLabels();
+  const start = useStart();
   const invoked = useInvoked(tab?.id, live);
-  // A meeting tab opens on the meeting; Tab or Microphone there is for this tab only.
-  const [meetingOff, setMeetingOff] = useState(false);
-  useEffect(() => { setMeetingOff(false); }, [tab?.id]);
-  const pick: Pick = meeting && (!meetingOff || input === 'both') ? 'meeting' : input;
 
   useEffect(() => {
-    chrome.storage.local.get(['liveLang', 'captionLang', 'liveInput', 'liveTranslate', 'captionInput']).then((g) => {
-      if (g.liveLang) setLang(g.liveLang as string);
-      if (g.captionLang) setCaptionLang(g.captionLang as string);
-      if (g.liveInput) setInput(g.liveInput as Input);
-      if (g.liveTranslate) setRecordLang(g.liveTranslate as string);
-      if (g.captionInput) setCaptionInput(g.captionInput as CaptionInput);
-    });
+    chrome.storage.local.get('liveInput').then((g) => { const v = fromStored(g.liveInput); if (v) setStored(v); });
   }, []);
   useEffect(() => {
     if (!intent) return;
-    if (intent.mode === 'meeting') setMeetingOff(false);
+    if (intent.mode === 'meeting') setPicked({ tabId: tab?.id, v: 'tabmic' });
     onIntentDone();
-  }, [intent, onIntentDone]);
+  }, [intent, onIntentDone]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const remember = (k: string, v: unknown) => { void chrome.storage.local.set({ [k]: v }); };
-  const sessions = [...live].sort((a, b) => b.startedAt - a.startedAt);
-  const holder = tabHolder(live, tab?.id);
-  const recordedHere = holder && holder.mode !== 'captions' ? holder : undefined;
-  const captionsHere = holder?.mode === 'captions' ? holder : sessions.find((s) => s.mode === 'captions' && !s.input.tab && s.tabId === tab?.id && !['done', 'failed', 'stopping'].includes(s.state));
+  const src: Source = picked && picked.tabId === tab?.id ? picked.v : meeting ? 'tabmic' : stored;
+  const setSrc = (v: Source) => { setPicked({ tabId: tab?.id, v }); if (!meeting) { setStored(v); void chrome.storage.local.set({ liveInput: v }); } start.clear(); };
   const tabOk = capturable(tab?.url);
+  const needsTab = src !== 'mic';
+  const holder = tabHolder(live, tab?.id);
   const mayRecord = can(account, 'record');
-  const mayCaption = can(account, 'change');
+  const isMeeting = !!meeting && needsTab;
 
-  const go = (st: ReturnType<typeof useStart>, start: Omit<LiveStart, 'tabId' | 'spokenLanguage'>) => st.run(() => rpc('live.start', {
-    ...start,
+  const sessions = [...live].sort((a, b) => b.startedAt - a.startedAt);
+  const running = sessions.filter(isRunning);
+  const ended = sessions.filter((s) => !isRunning(s));
+
+  const go = () => start.run(() => rpc('live.start', {
+    mode: isMeeting ? 'meeting' : 'record',
+    input: { tab: needsTab, mic: src !== 'tab' },
     tabId: tab?.id,
-    spokenLanguage: lang,
+    spokenLanguage: spoken,
+    translateTo: readLang,
+    speakerLabels: labels,
   }));
   /** The click's error, unless the session it made already shows it. */
-  const errorOf = (st: ReturnType<typeof useStart>) => {
-    const e = st.error;
-    if (!e) return null;
-    if (live.some((s) => s.state === 'failed' && s.startedAt >= e.at - 50)) return null;
-    return <ProblemNote error={e.text} code={e.code} onSettings={onSettings} />;
-  };
-  const tabNote = (needsTab: boolean) => (needsTab && tab && !tabOk ? <p className="hint" style={{ margin: 0 }}>{BROWSER_PAGE}</p> : null);
-
-  const recordNeedsTab = pick !== 'mic';
-  const recordBlocked = !mayRecord || (recordNeedsTab && (!tabOk || !!recordedHere));
+  const startError = start.error && !live.some((s) => s.state === 'failed' && s.startedAt >= start.error!.at - 50)
+    ? <ProblemNote error={start.error.text} code={start.error.code} onSettings={onSettings} /> : null;
 
   return (
-    <div className="stack">
-      {sessions.map((s) => <Session key={s.id} s={s} account={account} onSettings={onSettings} />)}
-
-      <AccessNote account={account} need="record" onSettings={onSettings} />
-      {/* Said once, before a start fails on it. */}
-      {tab && tabOk && invoked === false && !holder && <Note>{INVOKE_HINT}</Note>}
-
-      <Field label="Spoken language" hint="Used for recordings and captions.">
-        <LanguageSelect label="Spoken language" list="transcription" auto value={lang} onChange={(v) => { setLang(v); remember('liveLang', v); }} />
-      </Field>
-
-      <Section title="Record">
-        <div className="card stack">
-          <Seg<Pick> label="What to record" value={pick} onChange={(v) => {
-            recordStart.clear();
-            if (v === 'meeting') { setMeetingOff(false); return; }
-            setMeetingOff(true);
-            setInput(v);
-            remember('liveInput', v);
-          }} options={[
-            ...(meeting ? [{ value: 'meeting' as const, label: meeting, icon: <IconMeeting />, disabled: !!recordedHere || !tabOk, title: recordedHere ? 'This tab is already being recorded' : `The ${meeting} meeting and your microphone, with a summary when it ends` }] : []),
-            { value: 'tab', label: 'This tab', icon: <IconTab />, disabled: !!recordedHere || !tabOk, title: recordedHere ? 'This tab is already being recorded' : !tabOk ? 'This page can’t be recorded' : undefined },
-            { value: 'mic', label: 'Microphone', icon: <IconMic /> },
-            ...(meeting ? [] : [{ value: 'both' as const, label: 'Tab + mic', disabled: !!recordedHere || !tabOk, title: recordedHere ? 'This tab is already being recorded' : 'This tab and your microphone, in one recording' }]),
-          ]} />
-          {recordNeedsTab && recordedHere && (
-            <Note>This tab is already being recorded (“{recordedHere.name}”, above). To record something else at the same time, choose Microphone.</Note>
-          )}
-          {recordNeedsTab && !recordedHere && tab && tabOk && <p className="hint" style={{ margin: 0 }}>{pick === 'meeting'
-            ? 'Records the meeting and your microphone. You get the transcript and a summary when it ends. Use headphones so the meeting is not picked up twice.'
-            : tab.title || tab.url}</p>}
-          {recordNeedsTab && !recordedHere && tabNote(true)}
-          {recordNeedsTab && captionsHere?.input.tab && (
-            <p className="hint" style={{ margin: 0 }}>Captions are on for this tab. Recording takes them over: they keep showing, now from the recording.</p>
-          )}
-          <Field label="Name"><input className="input" placeholder={pick === 'mic' ? 'Microphone' : pick === 'meeting' ? `${meeting} meeting` : (tab?.title ?? '')} value={name} onChange={(e) => setName(e.target.value)} maxLength={120} /></Field>
-          <Field label="Translate into" hint="The translation shows under each line, here and on the recording.">
-            <LanguageSelect label="Translate the recording into" list="translation" none="Don't translate" value={recordLang} onChange={(v) => { setRecordLang(v); remember('liveTranslate', v); }} />
-          </Field>
-          <Btn kind="live" size="lg" block busy={recordStart.busy} disabled={recordBlocked} icon={pick === 'meeting' ? <IconMeeting /> : <span className="dot" />}
-            onClick={() => go(recordStart, { mode: pick === 'meeting' ? 'meeting' : 'record', input: { tab: pick !== 'mic', mic: pick !== 'tab' }, translateTo: recordLang, name: name.trim() || undefined })}>
-            {pick === 'meeting' ? 'Record meeting' : 'Start recording'}
-          </Btn>
-          <p className="hint" style={{ margin: 0 }}>Saved to your Transcriptions as it is recorded.</p>
-          {errorOf(recordStart)}
-        </div>
-      </Section>
-
-      <Section title="Captions & translation">
-        <div className="card stack">
-          <p className="hint" style={{ margin: 0 }}>
-            {captionInput === 'mic'
-              ? 'What you say into the microphone, as you say it, over this tab and here. Nothing is saved.'
-              : 'What this tab plays, as it is said, over its video (or at the foot of the page). Nothing is saved.'}
-          </p>
-          <Seg<CaptionInput> label="Captions of" value={captionInput} onChange={(v) => { setCaptionInput(v); remember('captionInput', v); captionsStart.clear(); }} options={[
-            { value: 'tab', label: 'This tab', icon: <IconTab />, disabled: !tabOk && !recordedHere },
-            { value: 'mic', label: 'Microphone', icon: <IconMic /> },
-          ]} />
-          <Field label="Translate into">
-            <LanguageSelect label="Translate captions into" list="translation" none="Don't translate" value={captionLang}
-              onChange={(v) => {
-                setCaptionLang(v);
-                remember('captionLang', v);
-                // Captions already on: they switch language at once.
-                const on = captionInput === 'tab' ? (recordedHere?.overlay ? recordedHere : captionsHere?.input.tab ? captionsHere : undefined) : (captionsHere && !captionsHere.input.tab ? captionsHere : undefined);
-                if (on && ['live', 'paused'].includes(on.state)) void captionsStart.run(() => rpc('live.translate', { id: on.id, lang: v }));
-              }} />
-          </Field>
-          {captionInput === 'tab' && recordedHere ? (
-            recordedHere.overlay
-              ? <Btn kind="danger" block busy={captionsStart.busy} icon={<IconStop />} onClick={() => captionsStart.run(() => rpc('live.overlay', { id: recordedHere.id, on: false }))}>Hide captions of the recording</Btn>
-              : <>
-                  <p className="hint" style={{ margin: 0 }}>This tab is being recorded: the captions come from that recording.</p>
-                  <Btn kind="primary" block busy={captionsStart.busy} icon={<IconCaptions />} onClick={() => go(captionsStart, { mode: 'captions', input: { tab: true, mic: false }, translateTo: captionLang })}>Show captions of the recording</Btn>
-                </>
-          ) : (captionInput === 'tab' ? captionsHere?.input.tab : captionsHere && !captionsHere.input.tab) ? (
-            <Btn kind="danger" block busy={captionsStart.busy} icon={<IconStop />} onClick={() => captionsStart.run(() => rpc('live.stop', { id: captionsHere!.id }))}>Turn captions off</Btn>
-          ) : (
-            <>
-              {tabNote(captionInput === 'tab')}
-              <Btn kind="primary" block busy={captionsStart.busy} disabled={!mayCaption || (captionInput === 'tab' && !tabOk)} icon={<IconCaptions />}
-                onClick={() => go(captionsStart, { mode: 'captions', input: { tab: captionInput === 'tab', mic: captionInput === 'mic' }, translateTo: captionLang })}>
-                {captionLang ? 'Show translated captions' : 'Show captions'}
-              </Btn>
-            </>
-          )}
-          {!mayCaption && <AccessNote account={account} need="change" onSettings={onSettings} />}
-          {errorOf(captionsStart)}
-        </div>
-      </Section>
+    <div className="screen" data-screen-label="Live" style={running.length ? { flex: 1, minHeight: 0 } : undefined}>
+      {running.map((s) => <RecordingCard key={s.id} s={s} account={account} onSettings={onSettings} only={running.length === 1} />)}
+      {ended.map((s) => <EndedCard key={s.id} s={s} account={account} onSettings={onSettings} />)}
+      {!running.length && (
+        <>
+          <AccessNote account={account} need="record" onSettings={onSettings} />
+          {needsTab && tab && tabOk && invoked === false && <InvokeNotice />}
+          {needsTab && tab && !tabOk && <Note>{BROWSER_PAGE}</Note>}
+          {needsTab && holder && <Note>This tab is already being recorded (“{holder.name}”).</Note>}
+          <div className="card2">
+            <Eyebrow>AUDIO SOURCE</Eyebrow>
+            <div className="card2__row">
+              <Switch<Source> size="sm" label="Audio source" value={src} onChange={setSrc} options={[
+                { value: 'tab', label: 'This tab', disabled: !tabOk, title: !tabOk ? 'This page can’t be recorded' : undefined },
+                { value: 'tabmic', label: 'Tab + mic', disabled: !tabOk, title: !tabOk ? 'This page can’t be recorded' : undefined },
+                { value: 'mic', label: 'Mic only' },
+              ]} />
+            </div>
+            <p className="card2__note" style={{ fontSize: 11.5 }}>{SOURCE_NOTE[src]}{isMeeting && ' You get the transcript and a summary when the meeting ends. Use headphones so the meeting is not picked up twice.'}</p>
+          </div>
+          <SpokenLanguageCard />
+          <SpeakerLabelsCard />
+          <button type="button" className="cta cta--live" disabled={!mayRecord || (needsTab && (!tabOk || !!holder))} aria-busy={start.busy || undefined}
+            title={!mayRecord ? whyNot(account, 'record') : undefined} onClick={() => void go()}>
+            {start.busy ? <span className="spin" /> : <span className="cta__dot" />}{isMeeting ? 'Record Meeting' : 'Start Recording'}
+          </button>
+          {startError}
+        </>
+      )}
     </div>
   );
 }
 
-function Session({ s, account, onSettings }: { s: LiveStatus; account: Account; onSettings: () => void }) {
-  const [level, setLevel] = useState(0);
-  const [lines, setLines] = useState<{ seq: number; text: string; tr?: string }[]>([]);
-  const [draft, setDraft] = useState('');
-  const [confirmStop, setConfirmStop] = useState(false);
-  const act = useAction();
-  const stop = useAction();
-  const retry = useAction();
-  const langName = useLangName();
-  const end = useRef<HTMLDivElement>(null);
-  const running = ['starting', 'warming', 'live', 'paused', 'stopping'].includes(s.state);
-  const recording = RECORDING_MODES.includes(s.mode);
+interface Line { seq: number; text: string; tr?: string; speaker?: string | null; startS: number; lang?: string | null }
+const LANES = ['var(--lane-a)', 'var(--lane-b)', 'var(--lane-c)'];
 
+/** A running session's transcript: lines, the draft, who said them. */
+function useTranscript(id: string) {
+  const [lines, setLines] = useState<Line[]>([]);
+  const [draft, setDraft] = useState('');
+  const [draftTr, setDraftTr] = useState('');
+  const [names, setNames] = useState<Record<string, string>>({});
   useEffect(() => {
     const apply = (e: LiveEvent) => {
       if (e.type === 'committed') {
         setLines((l) => {
           const was = l.find((x) => x.seq === e.seq);
-          return [...l.filter((x) => x.seq !== e.seq), { seq: e.seq, text: e.text, tr: was?.tr }].sort((a, b) => a.seq - b.seq).slice(-200);
+          return [...l.filter((x) => x.seq !== e.seq), { seq: e.seq, text: e.text, tr: was?.tr, speaker: e.speaker, startS: e.startS, lang: e.lang }].sort((a, b) => a.seq - b.seq).slice(-200);
         });
         setDraft('');
+        setDraftTr('');
       } else if (e.type === 'draft') setDraft(e.text);
+      else if (e.type === 'draftTranslated') setDraftTr(e.text);
       else if (e.type === 'translated') setLines((l) => l.map((x) => (x.seq === e.seq ? { ...x, tr: e.text } : e.seqs?.includes(x.seq) ? { ...x, tr: undefined } : x)));
+      else if (e.type === 'speaker') setNames((n) => ({ ...n, [e.speaker]: e.name }));
     };
-    rpc('live.history', { id: s.id }).then((h) => h.forEach(apply), () => {});
-    return onPush((p) => {
-      if (p.push === 'live.level' && p.id === s.id) setLevel(p.level);
-      if (p.push === 'live.event' && p.id === s.id) apply(p.event);
-    });
-  }, [s.id]);
+    rpc('live.history', { id }).then((h) => h.forEach(apply), () => {});
+    return onPush((p) => { if (p.push === 'live.event' && p.id === id) apply(p.event); });
+  }, [id]);
+  return { lines, draft, draftTr, names };
+}
+
+function RecordingCard({ s, account, onSettings, only }: { s: LiveStatus; account: Account; onSettings: () => void; only: boolean }) {
+  const { lines, draft, draftTr, names } = useTranscript(s.id);
+  const [confirmStop, setConfirmStop] = useState(false);
+  const [, tick] = useState(0);
+  const act = useAction();
+  const stop = useAction();
+  const lang = useLang();
+  const end = useRef<HTMLDivElement>(null);
+  const recording = RECORDING_MODES.includes(s.mode);
+
   useEffect(() => { end.current?.scrollIntoView({ block: 'nearest' }); }, [lines.length, draft]);
-  // An error from an earlier pause or stop is old news once the state moves on.
   useEffect(() => { act.setError(''); setConfirmStop(false); }, [s.state]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!confirmStop) return;
     const t = setTimeout(() => setConfirmStop(false), 4000);
     return () => clearTimeout(t);
   }, [confirmStop]);
+  useEffect(() => {
+    if (s.state !== 'live') return;
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [s.state]);
 
   const elapsed = s.sentS ?? (Date.now() - s.startedAt) / 1000;
-  const stateBadge =
-    s.state === 'live' ? (recording ? <Badge kind="live" dot="pulse">Live</Badge> : <Badge kind="brand" dot>On</Badge>)
-    : s.state === 'paused' ? <Badge kind="warn">Paused</Badge>
-    : s.state === 'warming' || s.state === 'starting' ? <Badge><span className="spin" style={{ width: 9, height: 9, borderWidth: 1.5 }} />Starting</Badge>
-    : s.state === 'stopping' ? <Badge><span className="spin" style={{ width: 9, height: 9, borderWidth: 1.5 }} />Stopping</Badge>
-    : s.state === 'failed' ? <Badge kind="bad">Stopped</Badge>
-    : <Badge kind="ok">Done</Badge>;
-  const inputText = s.input.tab && s.input.mic ? 'tab and microphone' : s.input.tab ? 'tab' : 'microphone';
-
+  const source = `${s.input.tab && s.input.mic ? 'TAB + MIC' : s.input.tab ? 'TAB' : 'MIC'}${s.host && s.input.tab ? ` · ${s.host.toUpperCase()}` : ''}`;
+  const tr = s.translateTo ? lang(s.translateTo) : null;
+  const detected = s.spokenLanguage ?? [...lines].reverse().find((l) => l.lang)?.lang ?? null;
+  const recLang = tr ? `${(detected ? lang(detected)?.name : 'Auto')?.toUpperCase()} → ${tr.name.toUpperCase()}` : 'AS SPOKEN';
+  const speakers = new Set(lines.map((l) => l.speaker ?? '0'));
+  const showWho = s.speakerLabels === 'on' || (s.speakerLabels !== 'off' && speakers.size > 1) || Object.keys(names).length > 0;
+  const who = (sp: string | null | undefined) => names[sp ?? '0'] || `Speaker ${Number(sp ?? 0) + 1}`;
+  const live = s.state === 'live' || s.state === 'paused';
+  const pill = s.state === 'live' ? <span className="lpill"><i />LIVE</span>
+    : s.state === 'paused' ? <span className="lpill lpill--paused">PAUSED</span>
+    : <span className="lpill lpill--wait"><span className="spin" style={{ width: 9, height: 9, borderWidth: 1.5 }} />{s.state === 'stopping' ? 'STOPPING' : 'STARTING'}</span>;
   const onStop = () => {
-    // A recording ends for good: ask once. Captions just go away.
     if (recording && !confirmStop) { setConfirmStop(true); return; }
     setConfirmStop(false);
     void stop.run(() => rpc('live.stop', { id: s.id }));
   };
+  const reading = tr ? tr.name : 'the spoken language';
+
+  return (
+    <>
+      <div className="card2 rec-head">
+        <div className="row" style={{ gap: 8 }}>{pill}<span className="rec-head__time">{clock(elapsed)}</span></div>
+        <div className="rec-head__title">{s.meeting && <MeetingLogo k={s.meeting} size={18} />}<span title={s.name}>{s.name}</span></div>
+        <div className="rec-head__src">{source}</div>
+      </div>
+      {s.tabId !== undefined && s.mode !== 'broadcast' && (
+        <div className="card2 onpage">
+          <div className="lrow__main">
+            <div className="pref__label">Show on the page</div>
+            <div className="pref__sub">{s.overlay ? `Captions in ${reading} over this tab’s video, or at the foot of the page.` : `Show the live transcript as captions in ${reading} over this tab’s video, or at the foot of the page.`}</div>
+          </div>
+          <Toggle label="Show on the page" checked={!!s.overlay} busy={act.busy} disabled={!live} onChange={(v) => void act.run(() => rpc('live.overlay', { id: s.id, on: v }))} />
+        </div>
+      )}
+      <div className={`card2 txcard${only ? ' txcard--grow' : ''}`}>
+        <Eyebrow side={recLang}>TRANSCRIPT</Eyebrow>
+        <div className="txcard__lines">
+          {!lines.length && !draft && <p className="hint" style={{ margin: 0 }}>{s.state === 'live' ? 'Listening…' : s.state === 'paused' ? 'Paused.' : 'Getting ready…'}</p>}
+          {lines.slice(-60).map((l) => (
+            <div key={l.seq}>
+              {showWho && <div className="txl__who"><span style={{ color: LANES[Number(l.speaker ?? 0) % 3] }}>{who(l.speaker)}</span><span className="txl__at">{clock(l.startS)}</span></div>}
+              <div className="txl__text">{tr ? (l.tr ?? <span className="tx__draft">{l.text}</span>) : l.text}</div>
+            </div>
+          ))}
+          {(draft || draftTr) && <div><div className="txl__text">{tr ? (draftTr || <span className="tx__draft">{draft}</span>) : draft}<span className="caret" /></div></div>}
+          <div ref={end} />
+        </div>
+      </div>
+      {(act.error || stop.error) && <ProblemNote error={act.error || stop.error} onSettings={onSettings} />}
+      {s.error && s.state !== 'failed' && <Note kind="warn">{s.error}</Note>}
+      <div className="row" style={{ gap: 10 }}>
+        {s.mode !== 'captions' && (s.state === 'paused'
+          ? <button type="button" className="sq-btn" aria-label="Resume" title="Resume" disabled={act.busy} onClick={() => void act.run(() => rpc('live.pause', { id: s.id, paused: false }))}><HiPlayStroke /></button>
+          : <button type="button" className="sq-btn" aria-label="Pause" title="Pause" disabled={act.busy || s.state !== 'live'} onClick={() => void act.run(() => rpc('live.pause', { id: s.id, paused: true }))}><HiPause /></button>)}
+        <button type="button" className="cta cta--stop" style={{ flex: 1 }} aria-busy={stop.busy || s.state === 'stopping' || undefined} disabled={s.state === 'stopping'} onClick={onStop}>
+          {stop.busy || s.state === 'stopping' ? <span className="spin" /> : <span className="cta__sq" />}
+          {s.state === 'stopping' ? 'Stopping' : confirmStop ? 'Stop recording?' : recording ? 'Stop recording' : 'Turn off'}
+        </button>
+      </div>
+      {!can(account, 'record') && <AccessNote account={account} need="record" onSettings={onSettings} />}
+    </>
+  );
+}
+
+/** A finished or failed session: how it ended, a meeting's summary, a
+ *  way to open it, Try again, Dismiss. */
+function EndedCard({ s, account, onSettings }: { s: LiveStatus; account: Account; onSettings: () => void }) {
+  const retry = useAction();
   const tryAgain = () => retry.run(async () => {
     await rpc('live.forget', { id: s.id });
     await rpc('live.start', {
       mode: s.mode, input: s.input, tabId: s.tabId, spokenLanguage: s.spokenLanguage ?? null, translateTo: s.translateTo ?? null,
-      name: s.name, broadcastId: s.broadcastId, overlay: s.overlay,
+      name: s.name, broadcastId: s.broadcastId, overlay: s.overlay, speakerLabels: s.speakerLabels,
     });
   });
-  const live = s.state === 'live' || s.state === 'paused';
-
+  const failed = s.state === 'failed';
   return (
-    // Red is for recording; captions record nothing.
-    <div className={`card stack${running ? (recording ? ' card--live' : ' card--tint') : ''}`}>
+    <div className="card2 stack" style={{ gap: 10 }}>
       <div className="row">
-        <div className="grow" style={{ minWidth: 0 }}>
-          <div className="item__title" title={s.name}>{s.name}</div>
-          <div className="item__sub item__sub--wrap">{MODE_LABEL[s.mode]} · {inputText}{s.translateTo ? ` · translated into ${langName(s.translateTo)}` : ''}{s.overlay && s.mode !== 'captions' ? ' · captions on the tab' : ''}</div>
+        <div className="lrow__main">
+          <div className="rec-head__title" style={{ marginTop: 0 }}>{s.meeting && <MeetingLogo k={s.meeting} size={16} />}<span title={s.name}>{s.name}</span></div>
+          <div className="rec-head__src">{s.input.tab && s.input.mic ? 'TAB + MIC' : s.input.tab ? 'TAB' : 'MIC'}{s.sentS ? ` · ${clock(s.sentS)}` : ''}</div>
         </div>
-        {stateBadge}
-        {!running && <button type="button" className="icon-btn" title="Dismiss" aria-label="Dismiss" onClick={() => void rpc('live.forget', { id: s.id })}><IconClose /></button>}
+        <span className={`chip${failed ? ' chip--bad' : ' chip--ok'}`}>{failed ? 'STOPPED' : 'DONE'}</span>
       </div>
-      {running && (
-        <div className="row">
-          <span className="mono tabular" style={{ fontSize: 15, fontWeight: 600 }}>{clock(elapsed)}</span>
-          <Meter level={s.state === 'live' ? level : 0} />
-          <span className="grow" />
-          {s.mode !== 'captions' && (s.state === 'paused'
-            ? <Btn size="sm" icon={<IconPlay />} busy={act.busy} onClick={() => act.run(() => rpc('live.pause', { id: s.id, paused: false }))}>Resume</Btn>
-            : <Btn size="sm" icon={<IconPause />} busy={act.busy} disabled={s.state !== 'live'} onClick={() => act.run(() => rpc('live.pause', { id: s.id, paused: true }))}>Pause</Btn>)}
-          <Btn size="sm" kind="danger" icon={<IconStop />} busy={stop.busy || s.state === 'stopping'} onClick={onStop}>
-            {s.state === 'stopping' ? 'Stopping' : confirmStop ? 'Stop recording?' : s.mode === 'captions' ? 'Turn off' : 'Stop'}
-          </Btn>
-        </div>
-      )}
-      {live && (
-        <div className="row row--wrap">
-          <div className="grow" style={{ minWidth: 150 }}>
-            <LanguageSelect label="Translate into" list="translation" none="Don't translate" value={s.translateTo ?? null} disabled={act.busy}
-              onChange={(v) => void act.run(() => rpc('live.translate', { id: s.id, lang: v }))} />
-          </div>
-          {s.mode !== 'captions' && s.mode !== 'broadcast' && s.input.tab && (
-            <Btn size="sm" icon={<IconCaptions />} busy={act.busy} aria-pressed={!!s.overlay} onClick={() => act.run(() => rpc('live.overlay', { id: s.id, on: !s.overlay }))}>
-              {s.overlay ? 'Hide captions on the tab' : 'Show as captions on the tab'}
-            </Btn>
-          )}
-        </div>
-      )}
-      {s.state === 'failed' && s.error && problemOf({ message: s.error, code: s.errorCode }).access && can(account, s.mode === 'captions' ? 'change' : 'record') ? (
-        // Refused for a permission the sign-in has since been given.
-        <Note>This failed because the sign-in wasn’t allowed to {s.mode === 'captions' ? 'show captions' : 'record'} at the time. It is now: try again.</Note>
-      ) : s.state === 'failed' && s.error && (
-        <ProblemNote error={s.error} code={s.errorCode} onSettings={onSettings} />
-      )}
-      {s.state === 'failed' && (
-        <div className="row row--wrap">
-          <Btn size="sm" icon={<IconRestore />} busy={retry.busy} onClick={() => void tryAgain()}>Try again</Btn>
-          <Btn size="sm" kind="ghost" onClick={() => void rpc('live.forget', { id: s.id })}>Dismiss</Btn>
-        </div>
-      )}
-      {retry.error && <ProblemNote error={retry.error} onSettings={onSettings} />}
-      {(act.error || stop.error) && <ProblemNote error={act.error || stop.error} onSettings={onSettings} />}
-      {(lines.length > 0 || draft) && (
-        <div className="tx" style={{ maxHeight: 220, overflowY: 'auto' }}>
-          {lines.slice(-30).map((l) => <p key={l.seq}>{l.text}{l.tr && <span className="tx__tr">{l.tr}</span>}</p>)}
-          {draft && <p className="tx__draft">{draft}</p>}
-          <div ref={end} />
-        </div>
-      )}
+      {failed && s.error && (problemOf({ message: s.error, code: s.errorCode }).access && can(account, 'record')
+        ? <Note>This failed because the sign-in wasn’t allowed to record at the time. It is now: try again.</Note>
+        : <ProblemNote error={s.error} code={s.errorCode} onSettings={onSettings} />)}
       {s.mode === 'meeting' && s.state === 'done' && (
         s.summary
-          ? <div className="stack"><span className="eyebrow">Summary</span><p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{s.summary}</p></div>
+          ? <div className="stack" style={{ gap: 6 }}><Eyebrow>SUMMARY</Eyebrow><p className="txl__text" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{s.summary}</p></div>
           : <p className="hint row" style={{ margin: 0 }}><span className="spin" />Writing the summary…</p>
       )}
-      {s.transcriptionId && (
-        <Btn size="sm" kind="ghost" icon={<IconExternal />} onClick={() => openApp(`/transcriptions/${s.transcriptionId}`)}>Open in VocalStack</Btn>
-      )}
-      {s.broadcastId && <Btn size="sm" kind="ghost" icon={<IconExternal />} onClick={() => openApp(`/s/${s.broadcastId}`)}>Open the broadcast</Btn>}
+      {retry.error && <ProblemNote error={retry.error} onSettings={onSettings} />}
+      <div className="row row--wrap" style={{ gap: 6 }}>
+        {s.transcriptionId && <button type="button" className="hd__link" style={{ height: 30, paddingLeft: 0 }} onClick={() => void openApp(`/transcriptions/${s.transcriptionId}`)}>Open in VocalStack<HiExternal /></button>}
+        <span className="grow" />
+        {failed && <button type="button" className="hd__link" style={{ height: 30 }} disabled={retry.busy} onClick={() => void tryAgain()}>{retry.busy ? <span className="spin" /> : null}Try again</button>}
+        <button type="button" className="hd__link" style={{ height: 30 }} onClick={() => void rpc('live.forget', { id: s.id })}>Dismiss</button>
+      </div>
     </div>
   );
-}
-
-function Meter({ level }: { level: number }) {
-  const bars = [0.55, 0.8, 1, 0.8, 0.55];
-  return <span className="meter" aria-hidden="true">{bars.map((b, i) => <i key={i} style={{ height: `${Math.max(3, Math.round(level * b * 18))}px` }} />)}</span>;
 }

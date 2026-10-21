@@ -8,6 +8,7 @@ import { setEnv } from '../lib/env';
 import { registerPage } from '../background/page';
 import { anyRunning, markInvoked, registerLive } from '../background/live';
 import { registerDub } from '../background/dub';
+import { registerVcap } from '../background/vcap';
 import { registerMeetings } from '../background/meetings';
 import { showInPanel } from '../background/panel';
 
@@ -53,6 +54,7 @@ export default defineBackground(() => {
     ...registerPage(),
     ...registerLive(),
     ...registerDub(),
+    ...registerVcap(),
     ...registerMeetings(),
   };
   serve(handlers);
