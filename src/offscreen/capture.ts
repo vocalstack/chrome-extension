@@ -131,10 +131,7 @@ export async function startLive(cmd: Extract<OffCmd, { off: 'live.start' }>): Pr
     if (code === 'cancelled') {
       // Stopped while starting: close what the start had already opened.
       const rid = l.status.recordingId;
-      if (rid) {
-        await vs.recordings.pause(rid).catch(() => {});
-        await vs.recordings.stop(rid).catch(() => {});
-      }
+      if (rid) await endRecording(vs, rid, l.session).catch(() => {});
       await teardown(l);
       set(l, { state: 'done' });
       forgetLater(l);
@@ -374,13 +371,7 @@ async function finish(l: Live, error: string | null) {
   flush(l);
   const rid = l.status.recordingId;
   if (rid) {
-    // A live recording stops only from paused, as in the dashboard.
-    // The pause can take a moment to land: retry, and say so if it never does.
-    let stopErr: unknown = null;
-    for (let i = 0; i < 4; i++) {
-      if (i > 0 || !l.paused) await l.vs.recordings.pause(rid).catch(() => {});
-      try { await l.vs.recordings.stop(rid); stopErr = null; break; } catch (e) { stopErr = e; await new Promise((r) => setTimeout(r, 800)); }
-    }
+    const stopErr = await endRecording(l.vs, rid, l.session).then(() => null, (e: unknown) => e);
     if (stopErr && !error) error = `The recording could not be stopped: ${(stopErr as Error).message ?? stopErr}. Stop it in the dashboard.`;
   } else {
     l.session?.eof();
@@ -390,6 +381,34 @@ async function finish(l: Live, error: string | null) {
   set(l, { state: error ? 'failed' : 'done', ...(error ? { error } : {}) });
   if (l.status.mode === 'meeting' && rid && !error) void summarize(l, rid);
   else forgetLater(l);
+}
+
+const ENDED = ['ended', 'finalized'];
+
+/** End a live recording for good, never leave it paused. The API stops
+ *  one only from paused, and the pause can take a moment to land: pause,
+ *  stop, and read it back until it has ended. If stop keeps refusing, end
+ *  it from the publisher socket (eof), which ends it too. Throws when it
+ *  is still not ended. */
+async function endRecording(vs: VocalStack, rid: string, session: RealtimeSession | undefined) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const state = async () => (await vs.recordings.get(rid).catch(() => null))?.state;
+  let err: unknown = null;
+  for (let i = 0; i < 5; i++) {
+    const r = await vs.recordings.pause(rid).catch(() => null);
+    if (r && ENDED.includes(r.state)) return;
+    try { await vs.recordings.stop(rid); return; } catch (e) { err = e; }
+    const s = await state();
+    if (s && ENDED.includes(s)) return;
+    await wait(600 * (i + 1));
+  }
+  try { session?.eof(); } catch { /* closed */ }
+  for (let i = 0; i < 10; i++) {
+    await wait(500);
+    const s = await state();
+    if (s && ENDED.includes(s)) return;
+  }
+  throw err ?? new Error('it is still paused');
 }
 
 async function teardown(l: Live) {
