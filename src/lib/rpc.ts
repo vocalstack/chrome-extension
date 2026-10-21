@@ -30,6 +30,12 @@ export interface Methods {
   'live.forget': [{ id: string }, void];
   /** Show (or hide) a running session's transcript as captions on its tab. */
   'live.overlay': [{ id: string; on: boolean }, void];
+  /** A running session's spoken language (null: detect) or speaker labels,
+   *  from the next words on (the floating captions' menus). */
+  'live.settings': [{ id: string; spokenLanguage?: string | null; speakerLabels?: 'auto' | 'on' | 'off' }, void];
+  /** The languages a live session can be spoken in, for the floating
+   *  captions' menu (a content script cannot call the API). */
+  'live.langs': [void, { code: string; flag?: string; name: string; native?: string }[]];
   /** Translate a running session into another language (null: stop translating). */
   'live.translate': [{ id: string; lang: string | null }, void];
   /** Whether the person invoked the extension on this tab (clicked its icon,

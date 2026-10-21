@@ -9,6 +9,7 @@ import { currentEnv } from '../lib/env';
 import { capturable, meetingHost, meetingOf, tabHolder, RECORDING_MODES, type LiveStart, type LiveStatus, type CaptionStyle } from '../lib/live';
 import type { OffAnswer, OffCmd } from '../lib/offscreen';
 import { showInPanel } from './panel';
+import { vsClient } from './video';
 
 const OFFSCREEN = 'offscreen.html';
 let creating: Promise<void> | null = null;
@@ -138,9 +139,20 @@ async function overlay(s: LiveStatus, on: boolean) {
   const t: Target = { tabId: s.tabId, frameId: await videoFrame(s.tabId), hide: s.mode !== 'captions' };
   setTarget(s.id, t);
   await off({ off: 'live.set', id: s.id, overlay: true });
+  tellTarget(t, { ...s, overlay: true });
   const history = ((await off<LiveEvent[]>({ off: 'live.history', id: s.id })).value ?? []).slice(-6);
   for (const event of history) await chrome.tabs.sendMessage(t.tabId, { caption: event, id: s.id, hide: t.hide }, { frameId: t.frameId }).catch(() => {});
 }
+
+/** What the floating captions show of a session: its state, languages,
+ *  speaker labels and host. */
+function tellTarget(t: Target, s: LiveStatus) {
+  const status = { state: s.state, mode: s.mode, spokenLanguage: s.spokenLanguage ?? null, translateTo: s.translateTo ?? null, speakerLabels: s.speakerLabels ?? 'auto', host: s.host };
+  chrome.tabs.sendMessage(t.tabId, { captionStatus: status, id: s.id, hide: t.hide }, { frameId: t.frameId }).catch(() => {});
+}
+
+/** The spoken-language list, once per service worker. */
+let spokenLangs: Promise<{ code: string; flag?: string; name: string; native?: string }[]> | null = null;
 
 function wait(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 const hostOf = (url: string) => { try { return new URL(url).host; } catch { return undefined; } };
@@ -262,7 +274,12 @@ export function registerLive(): Handlers {
   chrome.runtime.onMessage.addListener((msg: Push) => {
     if (msg?.push === 'live.status') {
       void badge();
-      if (['done', 'failed'].includes(msg.status.state)) void targetsLoaded.then(() => dropTarget(msg.status.id));
+      const st = msg.status;
+      void targetsLoaded.then(() => {
+        if (['done', 'failed'].includes(st.state)) { dropTarget(st.id); return; }
+        const t = captionTargets.get(st.id);
+        if (t) tellTarget(t, st);
+      });
     }
     if (msg?.push === 'live.event') {
       void targetsLoaded.then(() => {
@@ -305,6 +322,15 @@ export function registerLive(): Handlers {
       const s = (await listLive()).find((x) => x.id === id);
       if (!s) throw new RpcError('That session has ended.');
       await overlay(s, on);
+    },
+    'live.settings': async ({ id, ...patch }) => { await off({ off: 'live.set', id, ...patch }); },
+    'live.langs': () => {
+      spokenLangs ??= vsClient().then((vs) => vs.languages.list()).then((l) => {
+        const codes = new Set(l.transcription ?? []);
+        return l.languages.filter((x) => codes.has(x.code)).sort((a, b) => a.name.localeCompare(b.name))
+          .map((x) => ({ code: x.code, flag: x.flag ?? undefined, name: x.name, native: x.native && x.native !== x.name ? x.native : undefined }));
+      }).catch((e) => { spokenLangs = null; throw e; });
+      return spokenLangs;
     },
     'live.translate': async ({ id, lang }) => { await off({ off: 'live.set', id, translateTo: lang }); },
     'tab.invoked': ({ tabId }) => wasInvoked(tabId),

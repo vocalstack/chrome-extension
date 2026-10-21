@@ -1,5 +1,5 @@
 /** Settings (design 3): the account, Captions on videos, Offer to record
- *  meetings, Sign Out. The environment is picked on the sign-in screen
+ *  meetings, Speaker labels (for Live and Upload), Sign Out. The environment is picked on the sign-in screen
  *  (EnvPicker). */
 
 import { useEffect, useState } from 'react';
@@ -10,6 +10,7 @@ import { AUTO_CAPTIONS, OFFER_KEY } from '../lib/live';
 import { Field, Note, useAction } from '../ui/kit';
 import { HiKey } from '../ui/icons';
 import { Toggle } from '../ui/ds';
+import { SpeakerLabelsCard } from '../ui/langs';
 import { client } from '../lib/client';
 
 export function EnvPicker({ env, compact }: { env: Env; compact?: boolean }) {
@@ -74,6 +75,8 @@ export function Settings({ account }: { account: Account; env: Env | null; onBac
           </div>
         ))}
       </div>
+
+      <SpeakerLabelsCard />
 
       <button type="button" className="cta cta--signout" disabled={out.busy} onClick={() => out.run(() => rpc('auth.signOut'))}>{out.busy && <span className="spin" />}Sign Out</button>
       {out.error && <Note kind="bad">{out.error}</Note>}

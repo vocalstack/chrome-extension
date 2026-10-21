@@ -1,16 +1,15 @@
 /** The side panel (design 3): sign-in, then a header (the reading
- *  language, a running recording's timer, Dashboard, Settings) over six
- *  areas in an icon tab strip. */
+ *  language, Dashboard, Settings) over six areas in an icon tab strip,
+ *  whose Live tab turns red while a session runs. */
 
 import { useEffect, useState } from 'react';
 import type { Account } from '../lib/auth';
 import { onPush, rpc } from '../lib/rpc';
 import { currentEnv, type Env } from '../lib/env';
-import { RECORDING_MODES, isRunning, type LiveStatus } from '../lib/live';
+import { isRunning, type LiveStatus } from '../lib/live';
 import type { View } from '../background/panel';
 import { usePanelIntent } from './intent';
 import { HiBack, HiBroadcast, HiDoc, HiExternal, HiGear, HiGlobe, HiMic, HiUpload, HiVoices } from './icons';
-import { mmss } from '../screens/Live';
 import { ReadInChip } from './langs';
 import { SignIn } from '../screens/SignIn';
 import { Settings } from '../screens/Settings';
@@ -64,9 +63,8 @@ export function App() {
   if (account === undefined) return null;
   if (!account) return <div className="shell"><SignIn env={env} /></div>;
 
-  const recordings = live.filter((s) => on(s) && RECORDING_MODES.includes(s.mode)).sort((a, b) => a.startedAt - b.startedAt);
-  const recording = recordings[0];
-  const area: Area = view === 'settings' ? lastArea : view;
+  /** A session running: the Live tab shows it. */
+  const rec = live.some((s) => on(s) && isRunning(s));
   return (
     <div className="shell">
       <div className="hd">
@@ -78,7 +76,6 @@ export function App() {
         ) : (
           <>
             <ReadInChip />
-            {recording && area !== 'live' && <RecPill s={recording} onClick={() => setView('live')} />}
             {env && env.name !== 'production' && <span className="env-pill" title={`Environment: ${env.label}`}>{env.name === 'local' ? 'Local' : env.label}</span>}
             <div className="hd__end">
               {env && <a className="hd__link" href={env.app} target="_blank" rel="noopener" title="Open Dashboard in a new tab">Dashboard<HiExternal /></a>}
@@ -91,10 +88,10 @@ export function App() {
         <div className="tabs2-wrap">
           <nav className="tabs2" role="tablist" aria-label="Areas">
             {TABS.map(({ view: v, label, Icon }) => (
-              <button key={v} type="button" role="tab" className="tab2" aria-selected={view === v} title={label} aria-label={label} onClick={() => setView(v)}>
-                <Icon />
+              <button key={v} type="button" role="tab" className={`tab2${v === 'live' && rec ? ' tab2--rec' : ''}`} aria-selected={view === v} title={label} aria-label={v === 'live' && rec ? `${label} (recording)` : label} onClick={() => setView(v)}>
+                {v === 'live' && rec && view === v && <i className="tab2__dot" />}
+                <span className="tab2__icon"><Icon />{v === 'live' && rec && view !== v && <i className="tab2__dot tab2__dot--corner" />}</span>
                 {view === v && <span className="tab2__label">{label}</span>}
-                {v === 'live' && view !== v && live.some((s) => on(s) && isRunning(s)) && <i className="tab2__dot" role="img" aria-label="recording" />}
               </button>
             ))}
           </nav>
@@ -112,16 +109,4 @@ export function App() {
       <FileDrop account={account} onSettings={() => setView('settings')} onDropped={() => setView('upload')} />
     </div>
   );
-}
-
-/** The recording's time, as its card shows it: audio sent, so it stops
- *  while paused. */
-function RecPill({ s, onClick }: { s: LiveStatus; onClick: () => void }) {
-  const [, tick] = useState(0);
-  useEffect(() => {
-    if (s.state !== 'live') return;
-    const t = setInterval(() => tick((n) => n + 1), 1000);
-    return () => clearInterval(t);
-  }, [s.state]);
-  return <button type="button" className="rec-pill" title="Recording: open Live" onClick={onClick}>{s.state === 'live' && <i />}{mmss(s.sentS ?? (Date.now() - s.startedAt) / 1000)}</button>;
 }

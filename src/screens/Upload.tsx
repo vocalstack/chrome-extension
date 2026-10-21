@@ -1,6 +1,6 @@
 /** Upload (design 3): local audio and video files, picked or dropped
  *  (anywhere on the panel: FileDrop adds them here), with the spoken
- *  language and speaker labels; Transcribe sends each as its own
+ *  language (speaker labels: Settings); Transcribe sends each as its own
  *  transcription and opens the Library, where they show as they go. */
 
 import { useRef, useSyncExternalStore } from 'react';
@@ -10,7 +10,7 @@ import { Eyebrow } from '../ui/ds';
 import { HiCloud, HiFile, HiPlus, HiX } from '../ui/icons';
 import { Note } from '../ui/kit';
 import { AccessNote } from '../ui/access';
-import { SpeakerLabelsCard, SpokenLanguageCard, useSpeakerLabels, useSpokenLang } from '../ui/langs';
+import { SpokenLanguageCard, useSpeakerLabels, useSpokenLang } from '../ui/langs';
 import { isMedia, measure, uploadFiles } from './FileDrop';
 
 interface Queued { id: number; file: File; durationS?: number }
@@ -96,7 +96,6 @@ export function UploadScreen({ account, onSettings, onLibrary }: { account: Acco
         {bad.length > 0 && <div style={{ marginTop: 10 }}><Note kind="warn">{bad.length === 1 ? `“${bad[0]}” is not an audio or video file.` : `${bad.length} files are not audio or video.`}</Note></div>}
       </div>
       <SpokenLanguageCard />
-      <SpeakerLabelsCard />
       <button type="button" className="cta" disabled={!files.length || !mayRecord} title={!mayRecord ? whyNot(account, 'record') : undefined} onClick={start}>
         {files.length > 1 ? `Transcribe ${files.length} Files` : 'Transcribe'}
       </button>

@@ -313,12 +313,24 @@ async function follow(l: Live, rid: string) {
   } catch { /* the transcript stays in the dashboard */ }
 }
 
-/** Change what a running session translates into, or whether its
- *  transcript shows on the tab (the background draws it there). */
-export async function setLive(id: string, patch: { translateTo?: string | null; overlay?: boolean }) {
+/** Change what a running session translates into, whether its
+ *  transcript shows on the tab (the background draws it there), or its
+ *  spoken language and speaker labels (from the next words on). */
+export async function setLive(id: string, patch: { translateTo?: string | null; overlay?: boolean; spokenLanguage?: string | null; speakerLabels?: 'auto' | 'on' | 'off' }) {
   const l = lives.get(id);
   if (!l) return;
   if (patch.overlay !== undefined) set(l, { overlay: patch.overlay });
+  if (patch.spokenLanguage !== undefined || patch.speakerLabels !== undefined) {
+    if (l.stopping || !['live', 'paused'].includes(l.status.state)) throw new Coded('Wait until it is live, then change this.', 'not_live');
+    l.session?.update({
+      ...(patch.spokenLanguage !== undefined && { spokenLanguage: patch.spokenLanguage ?? 'auto' }),
+      ...(patch.speakerLabels !== undefined && { speakerLabels: patch.speakerLabels }),
+    });
+    set(l, {
+      ...(patch.spokenLanguage !== undefined && { spokenLanguage: patch.spokenLanguage }),
+      ...(patch.speakerLabels !== undefined && { speakerLabels: patch.speakerLabels }),
+    });
+  }
   if (patch.translateTo === undefined || (patch.translateTo ?? null) === (l.status.translateTo ?? null)) return;
   if (l.stopping || !['live', 'paused'].includes(l.status.state)) throw new Coded('Wait until it is live, then change the language.', 'not_live');
   const lang = patch.translateTo;

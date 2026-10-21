@@ -2,9 +2,9 @@
  *  microphone alone — every session a saved live transcription. On a
  *  meeting tab, Tab + mic is the default and the start records the
  *  meeting (a summary when it ends). While one runs, the screen is its
- *  recording card: time, source, Show on the page (the transcript as
- *  captions on the tab), the transcript in the reading language, Pause
- *  and Stop. */
+ *  recording card: source and time, Floating Captions (the transcript
+ *  in a window on the tab, content/overlay.ts), the transcript in the
+ *  reading language, Pause and Stop. Speaker labels are a setting. */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PanelIntent } from '../background/panel';
@@ -15,8 +15,8 @@ import { capturable, isRunning, meetingHost, tabHolder, RECORDING_MODES, type Li
 import { errorText, Note, openApp, useAction } from '../ui/kit';
 import { AccessNote, ProblemNote } from '../ui/access';
 import { Eyebrow, Switch, Toggle } from '../ui/ds';
-import { HiCursor, HiExternal, HiPause, HiPlayStroke, MeetingLogo } from '../ui/icons';
-import { SpeakerLabelsCard, SpokenLanguageCard, useLang, useReadLang, useSpeakerLabels, useSpokenLang } from '../ui/langs';
+import { HiCaptions, HiCursor, HiExternal, HiMic, HiPause, HiPlayStroke, MeetingLogo, YouTubeLogo } from '../ui/icons';
+import { SpokenLanguageCard, useLang, useReadLang, useSpeakerLabels, useSpokenLang } from '../ui/langs';
 import { problemOf } from './page/errors';
 import { useActiveTab } from '../ui/useTab';
 
@@ -128,6 +128,8 @@ export function LiveScreen({ account, live, intent, onIntentDone, onSettings }: 
     spokenLanguage: spoken,
     translateTo: readLang,
     speakerLabels: labels,
+    // Floating Captions start on, over the tab recorded.
+    overlay: needsTab,
   }));
   /** Chrome refused the tab because the icon was not clicked on it: the
    *  notice says what to do, so the error does not say it again. */
@@ -158,7 +160,6 @@ export function LiveScreen({ account, live, intent, onIntentDone, onSettings }: 
             <p className="card2__note" style={{ fontSize: 11.5 }}>{SOURCE_NOTE[src]}</p>
           </div>
           <SpokenLanguageCard />
-          <SpeakerLabelsCard />
           <button type="button" className="cta cta--live" disabled={!prefsReady || !mayRecord || (needsTab && (!tabOk || !!holder))} aria-busy={start.busy || undefined}
             title={!mayRecord ? whyNot(account, 'record') : undefined} onClick={() => void go()}>
             {start.busy ? <span className="spin" /> : <span className="cta__dot" />}{isMeeting ? 'Record Meeting' : 'Start Recording'}
@@ -231,26 +232,34 @@ function RecordingCard({ s, account, onSettings, only }: { s: LiveStatus; accoun
   const lastSpeaker = lines.length ? lines[lines.length - 1]!.speaker : null;
   const who = (sp: string | null | undefined) => names[sp ?? '0'] || `Speaker ${Number(sp ?? 0) + 1}`;
   const live = s.state === 'live' || s.state === 'paused';
-  const pill = s.state === 'live' ? <span className="lpill"><i />LIVE</span>
-    : s.state === 'paused' ? <span className="lpill lpill--paused">PAUSED</span>
-    : <span className="lpill lpill--wait"><span className="spin" style={{ width: 9, height: 9, borderWidth: 1.5 }} />{s.state === 'stopping' ? 'STOPPING' : 'STARTING'}</span>;
+  /** Not live yet, or any more: said before the source. */
+  const state = s.state === 'paused' ? 'PAUSED' : s.state === 'stopping' ? 'STOPPING' : s.state === 'live' ? null : 'STARTING';
+  const host = s.host?.replace(/^www\./, '') ?? '';
+  const icon = s.meeting ? <MeetingLogo k={s.meeting} size={20} />
+    : !s.input.tab ? <HiMic width={18} height={18} />
+    : /(^|\.)youtube\.com$/.test(host) ? <YouTubeLogo size={20} />
+    : <i className="rec-head__dot" />;
   const onStop = () => void stop.run(() => rpc('live.stop', { id: s.id }));
   const reading = tr ? tr.name : 'the spoken language';
 
   return (
     <>
       <div className="card2 rec-head">
-        <div className="row" style={{ gap: 8 }}>{pill}<span className="rec-head__time">{mmss(elapsed)}</span></div>
-        <div className="rec-head__title">{s.meeting && <MeetingLogo k={s.meeting} size={18} />}<span title={s.name}>{s.name}</span></div>
-        <div className="rec-head__src">{source}</div>
+        <span className="rec-head__icon">{icon}</span>
+        <div className="lrow__main">
+          <div className="rec-head__title"><span title={s.name}>{s.name}</span></div>
+          <div className="rec-head__src">{state && <span className="rec-head__state">{state} · </span>}{source}</div>
+        </div>
+        <span className={`rec-head__time${s.state === 'live' ? '' : ' rec-head__time--off'}`}>{state === 'STARTING' || state === 'STOPPING' ? <span className="spin" /> : mmss(elapsed)}</span>
       </div>
       {s.tabId !== undefined && s.mode !== 'broadcast' && (
         <div className="card2 onpage">
+          <span className={`onpage__icon${s.overlay ? ' onpage__icon--on' : ''}`}><HiCaptions width={16} height={16} /></span>
           <div className="lrow__main">
-            <div className="pref__label">Show on the page</div>
-            <div className="pref__sub">{s.overlay ? `Captions in ${reading} over this tab’s video, or at the foot of the page.` : `Show the live transcript as captions in ${reading} over this tab’s video, or at the foot of the page.`}</div>
+            <div className="pref__label" style={{ fontWeight: 600 }}>Floating Captions</div>
+            <div className="pref__sub">Subtitles in a floating window you can place anywhere on the page, even over full-screen video, in {reading}.</div>
           </div>
-          <Toggle label="Show on the page" checked={!!s.overlay} busy={act.busy} disabled={!live} onChange={(v) => void act.run(() => rpc('live.overlay', { id: s.id, on: v }))} />
+          <Toggle label="Floating Captions" checked={!!s.overlay} busy={act.busy} disabled={!live} onChange={(v) => void act.run(() => rpc('live.overlay', { id: s.id, on: v }))} />
         </div>
       )}
       <div className={`card2 txcard${only ? ' txcard--grow' : ''}`}>

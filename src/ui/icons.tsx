@@ -91,6 +91,8 @@ export const HiCheck = H('m4.5 12.75 6 6 9-13.5', 3);
 export const HiPause = H('M15.75 5.25v13.5m-7.5-13.5v13.5', 2);
 export const HiPlayStroke = H('M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z', 2);
 export const HiCloud = H('M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z', 1.5);
+/** Floating Captions: a window with lines of text. */
+export const HiCaptions = H('M3.75 7.5A2.25 2.25 0 0 1 6 5.25h12a2.25 2.25 0 0 1 2.25 2.25v9A2.25 2.25 0 0 1 18 18.75H6a2.25 2.25 0 0 1-2.25-2.25v-9ZM7.5 12.75h3.75m2.25 0h3.75M7.5 15.75h6m2.25 0h.75');
 export const HiX = H('M6 18 18 6M6 6l12 12', 1.8);
 export const HiPlus = H('M12 4.5v15m7.5-7.5h-15', 1.8);
 export const HiSearch = H('m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z', 1.7);
@@ -101,6 +103,11 @@ export const HiPlay = (p: P) => <svg viewBox="0 0 24 24" fill="currentColor" ari
 
 const MEETING_LOGOS: Record<string, string> = { meet: logoMeet, teams: logoTeams, zoom: logoZoom, webex: logoWebex, whereby: logoWhereby, gather: logoGather, discord: logoDiscord };
 /** A meeting service's logo (lib/live.ts MEETING_HOSTS `key`). */
+/** YouTube's mark, for a recording of a YouTube tab. */
+export const YouTubeLogo = ({ size = 20 }: { size?: number }) => (
+  <svg viewBox="0 0 48 48" width={size} height={size} aria-hidden="true" style={{ flex: 'none', display: 'block' }}><rect x="2" y="9" width="44" height="30" rx="9" fill="#FF0000" /><path d="M20 17.5v13l11-6.5z" fill="#fff" /></svg>
+);
+
 export function MeetingLogo({ k, size = 16 }: { k: string; size?: number }) {
   const src = MEETING_LOGOS[k];
   return src ? <img src={src} alt="" width={size} height={size} style={{ flex: 'none', display: 'block' }} /> : null;
