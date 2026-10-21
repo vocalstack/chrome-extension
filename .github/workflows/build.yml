@@ -1,10 +1,16 @@
 # Every push and pull request: typecheck, unit tests, and the builds you load
 # unpacked (Chrome and Edge), kept as run artifacts.
 #
-# On main it also refreshes the `unpacked` release, whose zips have links
-# that never change (the website's Chrome page points at them):
-#   https://github.com/vocalstack/chrome-extension/releases/download/unpacked/vocalstack-chrome.zip
-#   https://github.com/vocalstack/chrome-extension/releases/download/unpacked/vocalstack-edge.zip
+# On main it also refreshes the `unpacked` release: every main build, for
+# trying a change before it is released.
+#
+# A version tag (`git tag 0.1.25 && git push origin 0.1.25`, the manifest
+# version of that commit: scripts/package.sh) releases it: a release of its
+# own, which GitHub marks Latest, and the `latest` release moved to it,
+# whose zips have links that never change (vocalstack/transcribe's website
+# deploy copies them to vocalstack.com/downloads/):
+#   https://github.com/vocalstack/chrome-extension/releases/download/latest/vocalstack-chrome.zip
+#   https://github.com/vocalstack/chrome-extension/releases/download/latest/vocalstack-edge.zip
 # Unzip, then chrome://extensions (edge://extensions) → Developer mode →
 # Load unpacked → the unzipped folder.
 name: build
@@ -12,6 +18,7 @@ name: build
 on:
   push:
     branches: [main]
+    tags: ['*', '!latest', '!unpacked'] # those two are moved by the runs below
   pull_request:
   workflow_dispatch:
 
@@ -77,3 +84,46 @@ jobs:
             gh release create unpacked output/vocalstack-chrome.zip output/vocalstack-edge.zip \
               --target "$GITHUB_SHA" --prerelease --title "Unpacked build $version" --notes "$notes"
           fi
+
+      - name: release the version
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version=$(node -p "require('./output/chrome/manifest.json').version")
+          [ "$tag" = "$version" ] || { echo "::error::tag $tag does not match the build's version $version (scripts/package.sh: <package.json major.minor>.<commits>)"; exit 1; }
+          gh release create "$tag" output/vocalstack-chrome.zip output/vocalstack-edge.zip \
+            --verify-tag --latest --title "VocalStack for Chrome and Edge $tag" --generate-notes
+
+      # The `latest` release follows each version, so its links never change.
+      - name: refresh the latest release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          notes="VocalStack for Chrome and Edge $tag (built from ${GITHUB_SHA::12}). Moves to each new version. Unzip, then chrome://extensions (or edge://extensions) → Developer mode → Load unpacked → the unzipped folder."
+          retry() { for i in 1 2 3 4; do "$@" && return 0; echo "retry $i: $*"; sleep $((i * 10)); done; "$@"; }
+          if gh release view latest >/dev/null 2>&1; then
+            retry gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+            retry gh release upload latest output/vocalstack-chrome.zip output/vocalstack-edge.zip --clobber
+            retry gh release edit latest --title "VocalStack for Chrome and Edge $tag (latest)" --notes "$notes" --latest=false
+          else
+            gh release create latest output/vocalstack-chrome.zip output/vocalstack-edge.zip \
+              --target "$GITHUB_SHA" --latest=false --title "VocalStack for Chrome and Edge $tag (latest)" --notes "$notes"
+          fi
+
+      # vocalstack.com serves the zips from its own deploy: run it again, so
+      # the site offers this version now. Needs WEBSITE_DEPLOY_TOKEN, a
+      # token that may run vocalstack/transcribe's workflows (Actions: write);
+      # without it the site takes the new zips at its next deploy.
+      - name: redeploy vocalstack.com
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.WEBSITE_DEPLOY_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "::warning::WEBSITE_DEPLOY_TOKEN is not set: vocalstack.com offers this version from its next deploy"; exit 0; fi
+          gh workflow run website.yml -R vocalstack/transcribe --ref main

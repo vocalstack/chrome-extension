@@ -1,13 +1,32 @@
 # Publishing
 
-Two ways out of this repo:
+Three ways out of this repo:
 
 | What | How | Status |
 |---|---|---|
-| Unpacked builds (Chrome, Edge) | `.github/workflows/build.yml` on every push to main: run artifacts, and the `unpacked` release's zips at fixed links | live |
+| Unpacked builds (Chrome, Edge) | `.github/workflows/build.yml` on every push to main: run artifacts, and the `unpacked` pre-release (every main build) | live |
+| Releases | a version tag: `.github/workflows/build.yml` makes that version's release (GitHub's Latest) and moves the `latest` release to it; vocalstack.com serves `latest` | live |
 | Chrome Web Store | `.github/workflows/publish-webstore.yml`, run by hand; `scripts/publish-webstore.mjs` | wired, not set up: no listing yet |
 
+## Releasing a version
+
+The version is the manifest's: `<package.json major.minor>.<commits on main>`. Tag the commit with it and push the tag:
+
+```sh
+v=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')").$(git rev-list --count HEAD)
+git tag "$v" && git push origin "$v"
+```
+
+The tag's build checks the tag matches the build's version, then publishes the release `$v` with both zips, marked Latest, and moves the `latest` release to it. The zips at these links are always the newest version:
+
+- `https://github.com/vocalstack/chrome-extension/releases/download/latest/vocalstack-chrome.zip`
+- `https://github.com/vocalstack/chrome-extension/releases/download/latest/vocalstack-edge.zip`
+
+vocalstack.com/downloads/ serves copies of them (vocalstack/transcribe `scripts/website_vercel.sh`), taken at each website deploy. With the secret `WEBSITE_DEPLOY_TOKEN` set here (a token that may run vocalstack/transcribe's workflows), the tag's build runs the website deploy, which reads the release with transcribe's `EXTENSION_RELEASES_TOKEN` (Contents: read on this repository and vocalstack/mac-app). Without them, run `make website-deploy` in transcribe after a release.
+
 ## Unpacked
+
+Every build on main, before it is released:
 
 - `https://github.com/vocalstack/chrome-extension/releases/download/unpacked/vocalstack-chrome.zip`
 - `https://github.com/vocalstack/chrome-extension/releases/download/unpacked/vocalstack-edge.zip`
