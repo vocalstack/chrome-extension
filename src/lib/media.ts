@@ -109,3 +109,7 @@ export const KIND_LABEL: Record<MediaKind, string> = {
   link: 'Media link',
   page: 'This page',
 };
+
+/** Pages that are one recording: probing them is a plain check, not a
+ *  search of the page (which the server counts by the hour). */
+export const MEDIA_PAGE = /^https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch|live|shorts)|youtu\.be\/|vimeo\.com\/\d|soundcloud\.com\/[^/]+\/[^/]+|open\.spotify\.com\/(?:episode|show)\/|dailymotion\.com\/video\/|twitch\.tv\/|kick\.com\/|loom\.com\/share\/)/i;

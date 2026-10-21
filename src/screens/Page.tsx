@@ -12,13 +12,13 @@ import { capturable, meetingHost, tabHolder, type DubStatus, type LiveStatus, ty
 import { AccessNote, ProblemNote } from '../ui/access';
 import { client } from '../lib/client';
 import { onPush, rpc, type Answer } from '../lib/rpc';
-import type { FoundMedia } from '../lib/media';
-import { Note, clock, errorText, openApp, useAction } from '../ui/kit';
+import { MEDIA_PAGE, type FoundMedia } from '../lib/media';
+import { Note, errorText, useAction } from '../ui/kit';
 import { Eyebrow, Toggle } from '../ui/ds';
 import { HiAudio, HiCheck, HiChevronRight, HiDoc, HiGlobe, HiLang, HiMic, HiNone, HiVideo, HiVoices, MeetingLogo } from '../ui/icons';
 import { IconRestore } from '../ui/icons';
 import { ReadInPicker, useLang, useReadLang } from '../ui/langs';
-import { InvokeNotice, useInvoked } from './Live';
+import { InvokeNotice, mmss, useInvoked } from './Live';
 import { problemOf } from './page/errors';
 import { created, patch, track, useTracked } from './page/tracker';
 
@@ -45,9 +45,6 @@ function probe(url: string): Promise<LinkProbe> {
 }
 type ProbeState = { state: 'loading' } | { state: 'done'; probe: LinkProbe } | { state: 'error'; text: string };
 
-/** Pages that are one recording: probing them is a plain check, not a
- *  search of the page (which the server counts by the hour). */
-const MEDIA_PAGE = /^https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch|live|shorts)|youtu\.be\/|vimeo\.com\/\d|soundcloud\.com\/[^/]+\/[^/]+|open\.spotify\.com\/(?:episode|show)\/|dailymotion\.com\/video\/|twitch\.tv\/|kick\.com\/|loom\.com\/share\/)/i;
 const AUTO_PROBES = 10;
 
 const host = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
@@ -78,7 +75,6 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   /** The ticked rows; null until the person ticks one (the main item is). */
   const [sel, setSel] = useState<Set<string> | null>(null);
   const [starting, setStarting] = useState(false);
-  const [liveBusy, setLiveBusy] = useState<string | null>(null);
   const tracked = useTracked('page');
   const seq = useRef(0);
   const tabRef = useRef<number | null>(null);
@@ -167,7 +163,7 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   const isLive = (r: Row) => verdict(r)?.kind === 'live';
   const selectable = (r: Row) => {
     const v = verdict(r);
-    if (v) return v.ok && v.kind !== 'live';
+    if (v) return v.ok || v.kind === 'live';
     return !isPage(r) && !r.streamOnly && probed[r.url]?.state !== 'error';
   };
   const started = new Set(tracked.filter((t) => t.phase !== 'error').map((t) => t.url));
@@ -190,7 +186,14 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
         const name = (r.title || host(r.url) || 'From the web').slice(0, 120);
         const key = track({ origin: 'page', name, url: r.url, phase: 'sending' });
         try {
-          created(key, await vs.transcriptions.createFromUrl(r.url, { name, crop: false }));
+          if (isLive(r)) {
+            // A live stream: a live transcription the server pulls, started
+            // at once (the dashboard's New live transcription does the same).
+            const t = await vs.transcriptions.createLive({ name, source: { kind: 'stream', url: r.url } });
+            patch(key, { transcription: t });
+            await vs.transcriptions.startRecording(t.id);
+            patch(key, { phase: 'live' });
+          } else created(key, await vs.transcriptions.createFromUrl(r.url, { name, crop: false }));
         } catch (e) {
           patch(key, { phase: 'error', problem: problemOf(e) });
         }
@@ -199,26 +202,6 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
       onLibrary();
     } finally {
       setStarting(false);
-    }
-  };
-
-  // A live stream: a live transcription the server pulls, started at once
-  // (the dashboard's New live transcription does the same).
-  const transcribeLive = async (r: Row) => {
-    setLiveBusy(r.url);
-    const name = (r.title || host(r.url) || 'Live stream').slice(0, 120);
-    const key = track({ origin: 'page', name, url: r.url, phase: 'sending' });
-    try {
-      const vs = await client();
-      const t = await vs.transcriptions.createLive({ name, source: { kind: 'stream', url: r.url } });
-      patch(key, { transcription: t });
-      await vs.transcriptions.startRecording(t.id);
-      patch(key, { phase: 'live' });
-      onLibrary();
-    } catch (e) {
-      patch(key, { phase: 'error', problem: problemOf(e) });
-    } finally {
-      setLiveBusy(null);
     }
   };
 
@@ -232,7 +215,7 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   return (
     <div className="screen" data-screen-label="Page">
       <div className="card2 site">
-        <span className="round">{meeting ? <MeetingLogo k={meeting.key} size={20} /> : <span className="sitedot" style={{ background: scan ? 'var(--live)' : 'var(--ink-45)' }} />}</span>
+        <span className="round">{meeting ? <MeetingLogo k={meeting.key} size={20} /> : <span className="sitedot" style={{ background: scan && MEDIA_PAGE.test(scan.url) ? 'var(--live)' : 'var(--ink-45)' }} />}</span>
         <div className="lrow__main">
           <div className="lrow__title" title={scan?.title}>{scan?.title || (scanning ? 'Reading this tab…' : 'This tab')}</div>
           {scan && <div className="site__host">{host(scan.url)}</div>}
@@ -251,8 +234,7 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
             <div className="found">
               {rows.map((r) => (
                 <FoundRow key={r.url} r={r} page={isPage(r)} probe={probed[r.url]} selectable={selectable(r)} ticked={ticked(r)} started={started.has(r.url)}
-                  onToggle={() => toggle(r)} onProbe={() => runProbe(r.url)}
-                  onLive={isLive(r) && mayRecord ? () => void transcribeLive(r) : undefined} liveBusy={liveBusy === r.url} />
+                  onToggle={() => toggle(r)} onProbe={() => runProbe(r.url)} />
               ))}
             </div>
           </div>
@@ -281,15 +263,15 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   );
 }
 
-function FoundRow({ r, page, probe: p, selectable, ticked, started, onToggle, onProbe, onLive, liveBusy }: {
+function FoundRow({ r, page, probe: p, selectable, ticked, started, onToggle, onProbe }: {
   r: Row; page: boolean; probe?: ProbeState; selectable: boolean; ticked: boolean; started: boolean;
-  onToggle: () => void; onProbe: () => void; onLive?: () => void; liveBusy: boolean;
+  onToggle: () => void; onProbe: () => void;
 }) {
   const v = p?.state === 'done' ? p.probe : null;
   const live = v?.kind === 'live';
   const meta = [
     live ? 'LIVE STREAM' : KIND_META[r.kind],
-    r.durationS && !live ? clock(r.durationS) : '',
+    r.durationS && !live ? mmss(r.durationS) : '',
     r.from === 'click' ? 'YOU PICKED THIS' : r.from === 'server' ? 'FOUND ON THE PAGE' : r.playing ? 'MAIN PLAYER' : r.frameUrl ? 'EMBEDDED' : '',
     started ? 'STARTED' : '',
   ].filter(Boolean).join(' · ');
@@ -298,7 +280,6 @@ function FoundRow({ r, page, probe: p, selectable, ticked, started, onToggle, on
   let foot: React.ReactNode = null;
   if (p?.state === 'loading') foot = <><span className="spin" />Checking…</>;
   else if (p?.state === 'error') foot = <span className="pg-bad">{p.text}</span>;
-  else if (live) foot = <><span>Live now: transcribe it as it plays.</span><button type="button" className="pg-link" disabled={!onLive || liveBusy} onClick={onLive}>{liveBusy ? <span className="spin" /> : null}Transcribe live</button></>;
   else if (v && !v.ok && v.media?.length) foot = <span>{v.media.length === 1 ? 'One recording found on it, listed below.' : `${v.media.length} recordings found on it, listed below.`}</span>;
   else if (v && !v.ok && !r.streamOnly) foot = <span className="pg-bad">{v.problem || 'VocalStack can’t fetch this.'}</span>;
   else if (!p && page && !r.streamOnly) foot = <><span>VocalStack can look for recordings on this page.</span><button type="button" className="pg-link" onClick={onProbe}>Find recordings</button></>;
@@ -377,6 +358,7 @@ function MediaCards({ account, live, tabId, url, title, liveStream, onSettings, 
   });
   const dubOn = (v: boolean) => {
     if (!v) { setDubWant(false); void dubAct.run(async () => { await rpc('dub.stop', { tabId }); setDub(null); }); return; }
+    if (dub?.state === 'waiting') { setPicking(true); return; }
     if (!readLang) { setDubWant(true); setPicking(true); return; }
     void startDub(readLang);
   };
@@ -386,7 +368,8 @@ function MediaCards({ account, live, tabId, url, title, liveStream, onSettings, 
     const holder = tabHolder(live, tabId);
     const on = !!holder?.overlay;
     const liveCaps = (v: boolean) => capAct.run(async () => {
-      if (!v) { if (holder) await rpc('live.overlay', { id: holder.id, on: false }); return; }
+      // Off: the recording this card started stops (the design's handler).
+      if (!v) { if (holder) await rpc('live.stop', { id: holder.id }); return; }
       if (holder) { await rpc('live.overlay', { id: holder.id, on: true }); return; }
       const g = await chrome.storage.local.get(['liveLang', 'speakerLabels']);
       await rpc('live.start', { mode: 'record', input: { tab: true, mic: false }, tabId, overlay: true, translateTo: readLang, spokenLanguage: (g.liveLang as string) || null, speakerLabels: (g.speakerLabels as 'auto' | 'on' | 'off') ?? 'auto' });
@@ -406,7 +389,8 @@ function MediaCards({ account, live, tabId, url, title, liveStream, onSettings, 
   const dubSteps = ['Transcribing', 'Translating', 'Preparing the voice'];
   const dubStage = !dub ? 0 : dub.state === 'transcribing' ? 0 : dub.state === 'translating' ? 1 : dub.state === 'voicing' ? 2 : 3;
   const capLive = !!cap && cap.state !== 'failed';
-  const dubLive = !!dub && dub.state !== 'failed';
+  const dubWaiting = dubWant || dub?.state === 'waiting';
+  const dubLive = !!dub && dub.state !== 'failed' && dub.state !== 'waiting';
   const dubLang = dub ? lang(dub.lang)?.name : readLang ? read : null;
   return (
     <div className="screen">
@@ -415,15 +399,12 @@ function MediaCards({ account, live, tabId, url, title, liveStream, onSettings, 
         ready={cap?.state === 'on' ? `CAPTIONS ON · ${cap.lang ? (lang(cap.lang)?.name ?? cap.lang).toUpperCase() : 'AS SPOKEN'}` : undefined} />
       {cap?.state === 'failed' && <ProblemNote error={cap.error ?? 'The captions stopped.'} onSettings={onSettings} />}
       {capAct.error && <ProblemNote error={capAct.error} onSettings={onSettings} />}
-      <MediaCard label="Dub" sub={dubLang ? `Hear the video spoken in ${dubLang}, in sync with the picture.` : 'Hear the video spoken in your reading language.'} icon={<HiVoices />} on={dubLive || dubWant} busy={dubAct.busy} disabled={!mayRecord} onChange={dubOn}
+      <MediaCard label="Dub" sub={dubLang ? `Hear the video spoken in ${dubLang}, in sync with the picture.` : 'Hear the video spoken in your reading language.'} icon={<HiVoices />} on={dubLive || dubWaiting} busy={dubAct.busy} disabled={!mayRecord} onChange={dubOn}
         steps={dubLive && dub!.state !== 'playing' && dub!.state !== 'ready' ? dubSteps : undefined} stage={dubStage} pct={dub?.state === 'transcribing' ? dub.progress : undefined}
-        waiting={dubWant && !dubLive ? () => setPicking(true) : undefined}
+        waiting={dubWaiting && !dubLive ? () => setPicking(true) : undefined}
         ready={dub && (dub.state === 'playing' || dub.state === 'ready') ? `DUBBING IN ${(lang(dub.lang)?.name ?? dub.lang).toUpperCase()}` : undefined} />
       {dub?.state === 'failed' && <ProblemNote error={dub.error ?? 'The dub stopped.'} onSettings={onSettings} />}
       {dubAct.error && <ProblemNote error={dubAct.error} onSettings={onSettings} />}
-      {(cap?.transcriptionId || dub?.transcriptionId) && (
-        <button type="button" className="hd__link" style={{ alignSelf: 'flex-start', paddingLeft: 0 }} onClick={() => void openApp(`/transcriptions/${cap?.transcriptionId ?? dub?.transcriptionId}`)}>Open the transcript<HiChevronRight width={13} height={13} /></button>
-      )}
       <ReadInPicker open={picking} onClose={() => { setPicking(false); }} onPicked={(c) => { if (c && dubWant) void startDub(c); else if (!c) setDubWant(false); }} />
     </div>
   );

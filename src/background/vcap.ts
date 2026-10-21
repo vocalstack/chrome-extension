@@ -1,41 +1,33 @@
 /** Captions on a page's video (design 3, Page → Captions): VocalStack
- *  transcribes the video from its address (a file transcription, kept in
- *  the account, shared with the dub), then the content script shows its
- *  sentences in time with the video, in the reading language.
+ *  transcribes the video from its address (the one transcription the dub
+ *  shares, background/video.ts), then the content script shows its
+ *  sentences in time with the video, in the reading language. A new
+ *  reading language translates the same transcription again.
  *
- *  With Settings → Captions on videos, this starts by itself when a video
- *  starts playing on a page (once per address while the browser runs). */
+ *  With Settings → Captions on videos (on by default), this starts by
+ *  itself when the person starts a video playing with its sound on, on a
+ *  page whose video VocalStack can fetch (once per address while the
+ *  browser runs). */
 
 import { push, RpcError, type Handlers } from '../lib/rpc';
 import { account } from '../lib/auth';
-import { AUTO_CAPTIONS as AUTO_KEY, type VcapStart, type VcapStatus } from '../lib/live';
-import { transcribeVideo, sleep, vsClient } from './dub';
+import { AUTO_CAPTIONS, type VcapStart, type VcapStatus } from '../lib/live';
 import { videoFrame } from './live';
-import { scan } from './page';
+import { sleep, tabStore, transcribeVideo, videoSource, vsClient } from './video';
 
-const STATE = 'vcap.state';
 const AUTO_SEEN = 'vcap.autoSeen';
 interface TabCap { status: VcapStatus; frameId: number; run: number }
+const store = tabStore<TabCap>('vcap.state');
+const get = store.get;
+const put = store.put;
+const all = store.all;
 
-async function all(): Promise<Record<string, TabCap>> {
-  return ((await chrome.storage.session.get(STATE))[STATE] as Record<string, TabCap> | undefined) ?? {};
-}
-async function get(tabId: number): Promise<TabCap | null> {
-  return (await all())[tabId] ?? null;
-}
-async function put(tabId: number, d: TabCap | null) {
-  const a = await all();
-  if (d) a[tabId] = d; else delete a[tabId];
-  await chrome.storage.session.set({ [STATE]: a });
-}
 async function current(tabId: number, run: number): Promise<boolean> {
   return (await get(tabId))?.run === run;
 }
 async function set(s: VcapStatus, run: number) {
-  const d = await get(s.tabId);
-  if (!d || d.run !== run) return;
-  await put(s.tabId, { ...d, status: s });
-  push({ push: 'vcap.status', status: s });
+  const ok = await store.update(s.tabId, (d) => (d && d.run === run ? [{ ...d, status: s }, true] : [d, false]));
+  if (ok) push({ push: 'vcap.status', status: s });
 }
 
 export interface Cue { s: number; e: number; t: string; o?: string }
@@ -43,7 +35,7 @@ export interface Cue { s: number; e: number; t: string; o?: string }
 async function run(req: VcapStart, runId: number) {
   const { tabId } = req;
   const lang = req.lang ?? null;
-  const base: VcapStatus = { tabId, lang, url: req.url, title: req.title, state: 'transcribing', progress: 0 };
+  const base: VcapStatus = { tabId, lang, url: req.url, title: req.title, state: 'transcribing', progress: 0, auto: req.auto };
   await set(base, runId);
   const vs = await vsClient();
   const ids = await transcribeVideo(vs, { url: req.url, title: req.title }, (p) => set({ ...base, ...p }, runId), () => current(tabId, runId));
@@ -68,15 +60,14 @@ async function run(req: VcapStart, runId: number) {
   if (!(await current(tabId, runId))) return;
   const cues: Cue[] = sentences.map((x) => (lang ? { s: x.start, e: x.end, t: tr[x.sentenceId] ?? x.text, o: x.text } : { s: x.start, e: x.end, t: x.text }));
   const frameId = await videoFrame(tabId);
-  const d = await get(tabId);
-  if (d) await put(tabId, { ...d, frameId });
+  await store.update(tabId, (d) => [d && d.run === runId ? { ...d, frameId } : d, undefined]);
   await chrome.tabs.sendMessage(tabId, { vcap: 'on', lang, cues }, { frameId }).catch(() => {});
   await set({ ...withIds, state: 'on', progress: undefined }, runId);
 }
 
 async function start(req: VcapStart): Promise<VcapStatus> {
   const prev = await get(req.tabId);
-  if (prev) await stop(req.tabId);
+  if (prev) await hide(req.tabId, prev);
   const runId = Date.now();
   const first: VcapStatus = { tabId: req.tabId, lang: req.lang ?? null, url: req.url, title: req.title, state: 'transcribing', progress: 0, auto: req.auto };
   await put(req.tabId, { status: first, frameId: 0, run: runId });
@@ -84,42 +75,38 @@ async function start(req: VcapStart): Promise<VcapStatus> {
   return first;
 }
 
+async function hide(tabId: number, d: TabCap | null) {
+  await chrome.tabs.sendMessage(tabId, { vcap: 'off' }, { frameId: d?.frameId ?? 0 }).catch(() => {});
+}
+
 async function stop(tabId: number) {
   const d = await get(tabId);
   await put(tabId, null);
-  await chrome.tabs.sendMessage(tabId, { vcap: 'off' }, { frameId: d?.frameId ?? 0 }).catch(() => {});
+  await hide(tabId, d);
   push({ push: 'vcap.gone', tabId });
 }
 
-/** What VocalStack transcribes for a tab's video: the main video's own
- *  file when it has one, an embedded player's page, else the page. */
-export async function videoSource(tabId: number, pageUrl: string): Promise<string> {
-  const found = await scan(tabId).catch(() => null);
-  const media = found?.media ?? [];
-  const playing = (k: string) => media.filter((m) => m.kind === k && !m.streamOnly).sort((a, b) => Number(!!b.playing) - Number(!!a.playing) || (b.durationS ?? 0) - (a.durationS ?? 0));
-  return playing('video')[0]?.url ?? playing('embed')[0]?.url ?? pageUrl;
-}
-
 export function registerVcap(): Handlers {
-  chrome.runtime.onMessage.addListener((m: { vcapOff?: boolean; videoPlaying?: boolean }, sender) => {
+  chrome.runtime.onMessage.addListener((m: { vcapOff?: boolean; videoPlaying?: { url: string } }, sender) => {
     const tabId = sender.tab?.id;
     if (tabId === undefined) return false;
-    // × on the captions.
+    // × on the captions, or the tab's recording took the captions over.
     if (m?.vcapOff) void stop(tabId);
-    // A video started playing: Captions on videos.
+    // The person started a video with its sound on: Captions on videos.
     if (m?.videoPlaying) void auto(sender.tab!);
     return false;
   });
-  chrome.tabs.onRemoved.addListener((tabId) => { void get(tabId).then((d) => d && put(tabId, null)); });
-  // The reading language changed: running captions follow it.
+  chrome.tabs.onRemoved.addListener((tabId) => { void put(tabId, null); });
+  chrome.tabs.onUpdated.addListener((tabId, info) => { if (info.url) void get(tabId).then((d) => d && stop(tabId)); });
+  // The reading language changed: running captions follow it (the same
+  // transcription, translated).
   chrome.storage.onChanged.addListener((c, area) => {
     if (area !== 'local' || !('readLang' in c)) return;
     const lang = (c.readLang!.newValue as string | null) || null;
     void all().then((caps) => {
-      for (const d of Object.values(caps)) if (d.status.state !== 'failed' && d.status.lang !== lang) void start({ tabId: d.status.tabId, url: d.status.url, title: d.status.title, lang, auto: d.status.auto });
+      for (const d of caps) if (d.status.state !== 'failed' && d.status.lang !== lang) void start({ tabId: d.status.tabId, url: d.status.url, title: d.status.title, lang, auto: d.status.auto });
     });
   });
-  chrome.tabs.onUpdated.addListener((tabId, info) => { if (info.url) void get(tabId).then((d) => d && stop(tabId)); });
   return {
     'vcap.start': (req) => start(req),
     'vcap.stop': ({ tabId }) => stop(tabId),
@@ -129,13 +116,15 @@ export function registerVcap(): Handlers {
 
 async function auto(tab: chrome.tabs.Tab) {
   if (tab.id === undefined || !tab.url || !/^https?:/.test(tab.url)) return;
-  const g = await chrome.storage.local.get([AUTO_KEY, 'readLang']);
-  if (g[AUTO_KEY] !== true || !(await account())) return;
+  const g = await chrome.storage.local.get([AUTO_CAPTIONS, 'readLang']);
+  if (g[AUTO_CAPTIONS] === false || !(await account())) return;
   if (await get(tab.id)) return;
   // Once per address while the browser runs: turned off, it stays off.
   const seen = ((await chrome.storage.session.get(AUTO_SEEN))[AUTO_SEEN] as string[] | undefined) ?? [];
   if (seen.includes(tab.url)) return;
+  // Only a video VocalStack can fetch: never the page's address instead.
+  const url = await videoSource(tab.id, tab.url, true);
+  if (!url) return;
   await chrome.storage.session.set({ [AUTO_SEEN]: [...seen.slice(-200), tab.url] });
-  const url = await videoSource(tab.id, tab.url);
   await start({ tabId: tab.id, url, title: tab.title, lang: (g.readLang as string) || null, auto: true });
 }

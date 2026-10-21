@@ -5,35 +5,23 @@
  *
  *  Speech comes only from the video's own transcript, translated: the
  *  owner's rule (no speech from text a caller provides) holds. A video
- *  dubbed before is not transcribed again: its transcription is
- *  remembered per address. */
+ *  dubbed or captioned before is not transcribed again: its transcription
+ *  is shared per address (background/video.ts). */
 
-import { VocalStack } from '@vocalstack/sdk';
-import type { Transcription } from '@vocalstack/contract';
-import { accessToken } from '../lib/auth';
-import { currentEnv } from '../lib/env';
 import { push, RpcError, type Handlers } from '../lib/rpc';
+import { currentEnv } from '../lib/env';
 import type { DubStart, DubStatus } from '../lib/live';
 import { off, videoFrame } from './live';
+import { tabStore, transcribeVideo, vsClient } from './video';
 
-const KNOWN = 'dub.known';
 /** Per tab: the dub's status and the frame whose video it follows. Kept in
  *  chrome.storage.session, because a dub outlives the service worker (a
  *  paused video sends nothing, and the worker is suspended meanwhile). */
-const STATE = 'dub.state';
 interface TabDub { status: DubStatus; frameId: number; run: number }
-
-async function all(): Promise<Record<string, TabDub>> {
-  return ((await chrome.storage.session.get(STATE))[STATE] as Record<string, TabDub> | undefined) ?? {};
-}
-async function get(tabId: number): Promise<TabDub | null> {
-  return (await all())[tabId] ?? null;
-}
-async function put(tabId: number, d: TabDub | null) {
-  const a = await all();
-  if (d) a[tabId] = d; else delete a[tabId];
-  await chrome.storage.session.set({ [STATE]: a });
-}
+const store = tabStore<TabDub>('dub.state');
+const get = store.get;
+const put = store.put;
+const all = store.all;
 
 /** This run is still the tab's dub (not stopped, not replaced by a newer one). */
 async function current(tabId: number, run: number): Promise<boolean> {
@@ -41,61 +29,9 @@ async function current(tabId: number, run: number): Promise<boolean> {
 }
 
 async function set(s: DubStatus, run: number) {
-  const d = await get(s.tabId);
   // Stopped, or replaced by a newer dub: this run reports nothing more.
-  if (!d || d.run !== run) return;
-  await put(s.tabId, { ...d, status: s });
-  push({ push: 'dub.status', status: s });
-}
-
-export async function vsClient(): Promise<VocalStack> {
-  const env = await currentEnv();
-  return new VocalStack({ baseUrl: env.api, token: () => accessToken() });
-}
-
-async function known(url: string): Promise<{ transcriptionId: string; recordingId: string } | null> {
-  const env = await currentEnv();
-  const g = await chrome.storage.local.get(KNOWN);
-  return (g[KNOWN] as Record<string, { transcriptionId: string; recordingId: string }> | undefined)?.[`${env.name}|${url}`] ?? null;
-}
-
-async function remember(url: string, v: { transcriptionId: string; recordingId: string }) {
-  const env = await currentEnv();
-  const g = await chrome.storage.local.get(KNOWN);
-  const all = (g[KNOWN] as Record<string, unknown>) ?? {};
-  await chrome.storage.local.set({ [KNOWN]: { ...all, [`${env.name}|${url}`]: v } });
-}
-
-export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/** A page video's transcription (made once per address and remembered),
- *  its job read every few seconds until done. Shared by the dub and by
- *  captions on a video (background/vcap.ts). `current` stops it quietly;
- *  null means it was stopped. */
-export async function transcribeVideo(vs: VocalStack, req: { url: string; title?: string; suffix?: string }, onProgress: (p: { progress: number; transcriptionId: string; recordingId: string }) => Promise<void>, current: () => Promise<boolean>): Promise<{ transcriptionId: string; recordingId: string } | null> {
-  let ids = await known(req.url);
-  if (ids) {
-    // Still there? (It may have been archived or purged.)
-    const t = await vs.transcriptions.get(ids.transcriptionId).catch(() => null);
-    if (!t || t.lifecycle !== 'active') ids = null;
-  }
-  if (!ids) {
-    const t: Transcription = await vs.transcriptions.createFromUrl(req.url, { name: req.title ? `${req.title}${req.suffix ?? ''}` : null });
-    const rid = t.job?.recordingId ?? t.currentRecording?.recordingId ?? t.lastRecording?.recordingId;
-    if (!rid) throw new RpcError('VocalStack did not start transcribing this video.');
-    ids = { transcriptionId: t.id, recordingId: rid };
-  }
-  await onProgress({ progress: 0, ...ids });
-  for (;;) {
-    if (!(await current())) return null;
-    const job = await vs.jobs.get(ids.recordingId).catch(() => null);
-    if (!job || job.state === 'done') break;
-    if (job.state === 'failed' || job.state === 'stopped') throw new RpcError(job.error || 'VocalStack could not transcribe this video.');
-    await onProgress({ progress: (job.progress?.pct ?? 0) / 100, ...ids });
-    await sleep(3000);
-  }
-  await remember(req.url, ids);
-  return ids;
+  const ok = await store.update(s.tabId, (d) => (d && d.run === run ? [{ ...d, status: s }, true] : [d, false]));
+  if (ok) push({ push: 'dub.status', status: s });
 }
 
 async function run(req: DubStart, run: number) {
@@ -103,7 +39,7 @@ async function run(req: DubStart, run: number) {
   const base: DubStatus = { tabId, lang, title: req.title, url: req.url, state: 'transcribing', progress: 0 };
   await set(base, run);
   const vs = await vsClient();
-  const ids = await transcribeVideo(vs, { url: req.url, title: req.title, suffix: ' (dub)' }, (p) => set({ ...base, ...p }, run), () => current(tabId, run));
+  const ids = await transcribeVideo(vs, { url: req.url, title: req.title }, (p) => set({ ...base, ...p }, run), () => current(tabId, run));
   if (!ids) return;
   const withIds = { ...base, transcriptionId: ids.transcriptionId, recordingId: ids.recordingId };
   if (!(await current(tabId, run))) return;
@@ -119,8 +55,7 @@ async function run(req: DubStart, run: number) {
   // One frame's video leads: the one with the largest visible video. It
   // turns the video down and reports its clock.
   const frameId = await videoFrame(tabId);
-  const d = await get(tabId);
-  if (d) await put(tabId, { ...d, frameId });
+  await store.update(tabId, (d) => [d && d.run === run ? { ...d, frameId } : d, undefined]);
   await chrome.tabs.sendMessage(tabId, { dub: 'on' }, { frameId }).catch(() => {});
   await set({ ...withIds, state: 'playing' }, run);
 }
@@ -144,6 +79,15 @@ export function registerDub(): Handlers {
     run(req, runId).catch((e) => set({ ...first, state: 'failed', error: e instanceof Error ? e.message : String(e) }, runId));
     return first;
   };
+  /** Dub on, no language to dub into: the voice stops, the dub waits. */
+  const wait = async (st: DubStatus) => {
+    const d = await get(st.tabId);
+    await chrome.tabs.sendMessage(st.tabId, { dub: 'off' }, { frameId: d?.frameId ?? 0 }).catch(() => {});
+    await off({ off: 'dub.stop', tabId: st.tabId }).catch(() => {});
+    const status: DubStatus = { ...st, state: 'waiting', progress: undefined, error: undefined };
+    await put(st.tabId, { status, frameId: 0, run: Date.now() });
+    push({ push: 'dub.status', status });
+  };
   const stop = async (tabId: number) => {
     const d = await get(tabId);
     await put(tabId, null);
@@ -151,14 +95,15 @@ export function registerDub(): Handlers {
     await off({ off: 'dub.stop', tabId }).catch(() => {});
   };
   chrome.tabs.onRemoved.addListener((tabId) => { void get(tabId).then((d) => d && stop(tabId)); });
-  // The reading language changed: a dub follows it (as spoken: it stops).
+  // The reading language changed: a dub follows it, translating the same
+  // transcription. As spoken: it waits for a language to dub into.
   chrome.storage.onChanged.addListener((c, area) => {
     if (area !== 'local' || !('readLang' in c)) return;
     const lang = (c.readLang!.newValue as string | null) || null;
     void all().then((dubs) => {
-      for (const d of Object.values(dubs)) {
-        if (d.status.state === 'failed' || d.status.lang === lang) continue;
-        if (!lang) { void stop(d.status.tabId); push({ push: 'dub.status', status: { ...d.status, state: 'failed', error: 'Dub stopped: pick a language to dub into.' } }); continue; }
+      for (const d of dubs) {
+        if (d.status.state === 'failed' || (d.status.lang === lang && d.status.state !== 'waiting')) continue;
+        if (!lang) { void wait(d.status); continue; }
         if (d.status.url) void startDub({ tabId: d.status.tabId, url: d.status.url, title: d.status.title, lang });
       }
     });

@@ -101,9 +101,10 @@ export type Push =
 /** What a live session tells the panel and the captions overlay. */
 export type LiveEvent =
   | { type: 'committed'; seq: number; text: string; startS: number; endS: number; speaker?: string | null; lang?: string | null }
-  /** A speaker recognised as someone the account holds a voice for (an
-   *  empty `name` takes the name back). */
-  | { type: 'speaker'; speaker: string; name: string }
+  /** A speaker's name: typed by a person (`person`), or recognised from a
+   *  voice the account holds (`voice`). An empty `name` takes it back. A
+   *  typed name outranks a recognised one, as the server ranks them. */
+  | { type: 'speaker'; speaker: string; name: string; by: 'person' | 'voice' }
   | { type: 'draft'; text: string }
   /** A translation: of one line (`seq`), or of a whole sentence (`seqs`,
    *  `sentenceId`), which is how live sessions translate. */

@@ -295,11 +295,11 @@ async function follow(l: Live, rid: string) {
         for (const g of ev.snapshot.segments) segment(g as Seg);
         for (const st of ev.snapshot.sentences ?? []) sentence(st as Sent);
         // Who each speaker turned out to be (a voice the account holds).
-        for (const sp of (ev.snapshot.speakers ?? []) as { speaker: number; name?: string | null }[]) if (sp.name) emit(l, { type: 'speaker', speaker: String(sp.speaker), name: sp.name });
+        for (const sp of (ev.snapshot.speakers ?? []) as { speaker: number; name?: string | null; identified?: boolean | null }[]) if (sp.name) emit(l, { type: 'speaker', speaker: String(sp.speaker), name: sp.name, by: sp.identified ? 'voice' : 'person' });
       } else if (ev.type === 'frame') {
         const f = ev.frame as { type: string; segment?: Seg; segments?: { text: string; translations?: Record<string, string> }[]; sentence?: Sent; seq?: number; translations?: Record<string, string>; speaker?: number; name?: string };
         if (f.type === 'transcript.committed' && f.segment) segment(f.segment);
-        else if ((f.type === 'transcript.speakerIdentified' || f.type === 'transcript.speakerNamed') && typeof f.speaker === 'number') emit(l, { type: 'speaker', speaker: String(f.speaker), name: f.name ?? '' });
+        else if ((f.type === 'transcript.speakerIdentified' || f.type === 'transcript.speakerNamed') && typeof f.speaker === 'number') emit(l, { type: 'speaker', speaker: String(f.speaker), name: f.name ?? '', by: f.type === 'transcript.speakerNamed' ? 'person' : 'voice' });
         else if (f.type === 'transcript.draft' && f.segments) {
           emit(l, { type: 'draft', text: f.segments.map((x) => x.text).join(' ').trim() });
           if (lang) {

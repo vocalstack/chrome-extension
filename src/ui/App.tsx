@@ -10,8 +10,8 @@ import { RECORDING_MODES, isRunning, type LiveStatus } from '../lib/live';
 import type { View } from '../background/panel';
 import { usePanelIntent } from './intent';
 import { HiBack, HiBroadcast, HiDoc, HiExternal, HiGear, HiGlobe, HiMic, HiUpload, HiVoices } from './icons';
-import { clock } from './kit';
-import { ReadInChip, useReadLang } from './langs';
+import { mmss } from '../screens/Live';
+import { ReadInChip } from './langs';
 import { SignIn } from '../screens/SignIn';
 import { Settings } from '../screens/Settings';
 import { PageScreen } from '../screens/Page';
@@ -34,17 +34,6 @@ const TABS: { view: Area; label: string; Icon: typeof HiGlobe }[] = [
 
 const on = (s: LiveStatus) => s.state === 'live' || s.state === 'warming' || s.state === 'paused';
 
-/** Seconds since `from`, ticking. */
-function useElapsed(from: number | undefined): number {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    if (from === undefined) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [from]);
-  return from === undefined ? 0 : (now - from) / 1000;
-}
-
 export function App() {
   const [account, setAccount] = useState<Account | null | undefined>(undefined);
   const [env, setEnvState] = useState<Env | null>(null);
@@ -54,7 +43,6 @@ export function App() {
   const setView = (v: View) => { if (v !== 'settings') setLastArea(v); setViewState(v); };
   const [live, setLive] = useState<LiveStatus[]>([]);
   const [intent, clearIntent] = usePanelIntent();
-  const [readLang] = useReadLang();
 
   useEffect(() => {
     rpc('auth.account').then(setAccount, () => setAccount(null));
@@ -73,13 +61,6 @@ export function App() {
     if (intent) setView(intent.view);
   }, [intent]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // The reading language is the panel's: a running session reads in it too.
-  useEffect(() => {
-    for (const s of live) {
-      if (s.mode !== 'broadcast' && (s.state === 'live' || s.state === 'paused') && (s.translateTo ?? null) !== readLang) void rpc('live.translate', { id: s.id, lang: readLang }).catch(() => {});
-    }
-  }, [readLang, live]);
-
   if (account === undefined) return null;
   if (!account) return <div className="shell"><SignIn env={env} /></div>;
 
@@ -97,7 +78,7 @@ export function App() {
         ) : (
           <>
             <ReadInChip />
-            {recording && area !== 'live' && <RecPill since={recording.startedAt} onClick={() => setView('live')} />}
+            {recording && area !== 'live' && <RecPill s={recording} onClick={() => setView('live')} />}
             {env && env.name !== 'production' && <span className="env-pill" title={`Environment: ${env.label}`}>{env.name === 'local' ? 'Local' : env.label}</span>}
             <div className="hd__end">
               {env && <a className="hd__link" href={env.app} target="_blank" rel="noopener" title="Open Dashboard in a new tab">Dashboard<HiExternal /></a>}
@@ -133,7 +114,14 @@ export function App() {
   );
 }
 
-function RecPill({ since, onClick }: { since: number; onClick: () => void }) {
-  const s = useElapsed(since);
-  return <button type="button" className="rec-pill" title="Recording: open Live" onClick={onClick}><i />{clock(s)}</button>;
+/** The recording's time, as its card shows it: audio sent, so it stops
+ *  while paused. */
+function RecPill({ s, onClick }: { s: LiveStatus; onClick: () => void }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (s.state !== 'live') return;
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [s.state]);
+  return <button type="button" className="rec-pill" title="Recording: open Live" onClick={onClick}>{s.state === 'live' && <i />}{mmss(s.sentS ?? (Date.now() - s.startedAt) / 1000)}</button>;
 }

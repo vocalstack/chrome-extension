@@ -12,7 +12,7 @@ import type { Account } from '../lib/auth';
 import { can, whyNot } from '../lib/access';
 import { onPush, rpc, type LiveEvent } from '../lib/rpc';
 import { capturable, isRunning, meetingHost, tabHolder, RECORDING_MODES, type LiveStatus } from '../lib/live';
-import { clock, errorText, Note, openApp, useAction } from '../ui/kit';
+import { errorText, Note, openApp, useAction } from '../ui/kit';
 import { AccessNote, ProblemNote } from '../ui/access';
 import { Eyebrow, Switch, Toggle } from '../ui/ds';
 import { HiCursor, HiExternal, HiPause, HiPlayStroke, MeetingLogo } from '../ui/icons';
@@ -21,6 +21,15 @@ import { problemOf } from './page/errors';
 import { useActiveTab } from '../ui/useTab';
 
 type Source = 'tab' | 'tabmic' | 'mic';
+
+/** 04:12, 1:02:09: the design's clock. */
+export function mmss(seconds: number): string {
+  const t = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(t / 3600);
+  const mm = String(Math.floor((t % 3600) / 60)).padStart(2, '0');
+  const ss = String(t % 60).padStart(2, '0');
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
 
 export const INVOKE_HINT = 'To record or caption this tab, click the VocalStack icon in Chrome’s toolbar once while on this tab.';
 const BROWSER_PAGE = 'Chrome doesn’t let extensions record its own pages or the extension store. Open a web page, or use the microphone.';
@@ -84,9 +93,10 @@ export function LiveScreen({ account, live, intent, onIntentDone, onSettings }: 
   const [stored, setStored] = useState<Source>('tab');
   /** This tab's own pick (a meeting tab starts on Tab + mic). */
   const [picked, setPicked] = useState<{ tabId?: number; v: Source } | null>(null);
-  const [readLang] = useReadLang();
-  const [spoken] = useSpokenLang();
-  const [labels] = useSpeakerLabels();
+  const [readLang, , readReady] = useReadLang();
+  const [spoken, , spokenReady] = useSpokenLang();
+  const [labels, , labelsReady] = useSpeakerLabels();
+  const prefsReady = readReady && spokenReady && labelsReady;
   const start = useStart();
   const invoked = useInvoked(tab?.id, live);
 
@@ -146,7 +156,7 @@ export function LiveScreen({ account, live, intent, onIntentDone, onSettings }: 
           </div>
           <SpokenLanguageCard />
           <SpeakerLabelsCard />
-          <button type="button" className="cta cta--live" disabled={!mayRecord || (needsTab && (!tabOk || !!holder))} aria-busy={start.busy || undefined}
+          <button type="button" className="cta cta--live" disabled={!prefsReady || !mayRecord || (needsTab && (!tabOk || !!holder))} aria-busy={start.busy || undefined}
             title={!mayRecord ? whyNot(account, 'record') : undefined} onClick={() => void go()}>
             {start.busy ? <span className="spin" /> : <span className="cta__dot" />}{isMeeting ? 'Record Meeting' : 'Start Recording'}
           </button>
@@ -157,7 +167,7 @@ export function LiveScreen({ account, live, intent, onIntentDone, onSettings }: 
   );
 }
 
-interface Line { seq: number; text: string; tr?: string; speaker?: string | null; startS: number; lang?: string | null }
+interface Line { seq: number; text: string; tr?: string; speaker?: string | null; startS: number; endS: number; lang?: string | null }
 const LANES = ['var(--lane-a)', 'var(--lane-b)', 'var(--lane-c)'];
 
 /** A running session's transcript: lines, the draft, who said them. */
@@ -165,24 +175,29 @@ function useTranscript(id: string) {
   const [lines, setLines] = useState<Line[]>([]);
   const [draft, setDraft] = useState('');
   const [draftTr, setDraftTr] = useState('');
-  const [names, setNames] = useState<Record<string, string>>({});
+  /** Names typed by a person, and names recognised from voices. */
+  const [typed, setTyped] = useState<Record<string, string>>({});
+  const [voiced, setVoiced] = useState<Record<string, string>>({});
   useEffect(() => {
     const apply = (e: LiveEvent) => {
       if (e.type === 'committed') {
         setLines((l) => {
           const was = l.find((x) => x.seq === e.seq);
-          return [...l.filter((x) => x.seq !== e.seq), { seq: e.seq, text: e.text, tr: was?.tr, speaker: e.speaker, startS: e.startS, lang: e.lang }].sort((a, b) => a.seq - b.seq).slice(-200);
+          return [...l.filter((x) => x.seq !== e.seq), { seq: e.seq, text: e.text, tr: was?.tr, speaker: e.speaker, startS: e.startS, endS: e.endS, lang: e.lang }].sort((a, b) => a.seq - b.seq).slice(-200);
         });
         setDraft('');
         setDraftTr('');
       } else if (e.type === 'draft') setDraft(e.text);
       else if (e.type === 'draftTranslated') setDraftTr(e.text);
       else if (e.type === 'translated') setLines((l) => l.map((x) => (x.seq === e.seq ? { ...x, tr: e.text } : e.seqs?.includes(x.seq) ? { ...x, tr: undefined } : x)));
-      else if (e.type === 'speaker') setNames((n) => ({ ...n, [e.speaker]: e.name }));
+      else if (e.type === 'speaker') (e.by === 'person' ? setTyped : setVoiced)((n) => ({ ...n, [e.speaker]: e.name }));
     };
     rpc('live.history', { id }).then((h) => h.forEach(apply), () => {});
     return onPush((p) => { if (p.push === 'live.event' && p.id === id) apply(p.event); });
   }, [id]);
+  // A typed name outranks a recognised one; a recognition taken back
+  // leaves the typed name, if any.
+  const names: Record<string, string> = { ...Object.fromEntries(Object.entries(voiced).filter(([, v]) => v)), ...Object.fromEntries(Object.entries(typed).filter(([, v]) => v)) };
   return { lines, draft, draftTr, names };
 }
 
@@ -213,9 +228,10 @@ function RecordingCard({ s, account, onSettings, only }: { s: LiveStatus; accoun
   const source = `${s.input.tab && s.input.mic ? 'TAB + MIC' : s.input.tab ? 'TAB' : 'MIC'}${s.host && s.input.tab ? ` · ${s.host.toUpperCase()}` : ''}`;
   const tr = s.translateTo ? lang(s.translateTo) : null;
   const detected = s.spokenLanguage ?? [...lines].reverse().find((l) => l.lang)?.lang ?? null;
-  const recLang = tr ? `${(detected ? lang(detected)?.name : 'Auto')?.toUpperCase()} → ${tr.name.toUpperCase()}` : 'AS SPOKEN';
+  const recLang = tr ? (detected ? `${(lang(detected)?.name ?? detected).toUpperCase()} → ${tr.name.toUpperCase()}` : `→ ${tr.name.toUpperCase()}`) : 'AS SPOKEN';
   const speakers = new Set(lines.map((l) => l.speaker ?? '0'));
   const showWho = s.speakerLabels === 'on' || (s.speakerLabels !== 'off' && speakers.size > 1) || Object.keys(names).length > 0;
+  const lastSpeaker = lines.length ? lines[lines.length - 1]!.speaker : null;
   const who = (sp: string | null | undefined) => names[sp ?? '0'] || `Speaker ${Number(sp ?? 0) + 1}`;
   const live = s.state === 'live' || s.state === 'paused';
   const pill = s.state === 'live' ? <span className="lpill"><i />LIVE</span>
@@ -231,7 +247,7 @@ function RecordingCard({ s, account, onSettings, only }: { s: LiveStatus; accoun
   return (
     <>
       <div className="card2 rec-head">
-        <div className="row" style={{ gap: 8 }}>{pill}<span className="rec-head__time">{clock(elapsed)}</span></div>
+        <div className="row" style={{ gap: 8 }}>{pill}<span className="rec-head__time">{mmss(elapsed)}</span></div>
         <div className="rec-head__title">{s.meeting && <MeetingLogo k={s.meeting} size={18} />}<span title={s.name}>{s.name}</span></div>
         <div className="rec-head__src">{source}</div>
       </div>
@@ -250,11 +266,16 @@ function RecordingCard({ s, account, onSettings, only }: { s: LiveStatus; accoun
           {!lines.length && !draft && <p className="hint" style={{ margin: 0 }}>{s.state === 'live' ? 'Listening…' : s.state === 'paused' ? 'Paused.' : 'Getting ready…'}</p>}
           {lines.slice(-60).map((l) => (
             <div key={l.seq}>
-              {showWho && <div className="txl__who"><span style={{ color: LANES[Number(l.speaker ?? 0) % 3] }}>{who(l.speaker)}</span><span className="txl__at">{clock(l.startS)}</span></div>}
+              {showWho && <div className="txl__who"><span style={{ color: LANES[Number(l.speaker ?? 0) % 3] }}>{who(l.speaker)}</span><span className="txl__at">{mmss(l.startS)}</span></div>}
               <div className="txl__text">{tr ? (l.tr ?? <span className="tx__draft">{l.text}</span>) : l.text}</div>
             </div>
           ))}
-          {(draft || draftTr) && <div><div className="txl__text">{tr ? (draftTr || <span className="tx__draft">{draft}</span>) : draft}<span className="caret" /></div></div>}
+          {(draft || draftTr) && (
+            <div>
+              {showWho && <div className="txl__who"><span style={{ color: LANES[Number(lastSpeaker ?? 0) % 3] }}>{who(lastSpeaker)}</span><span className="txl__at">{mmss(lines.length ? lines[lines.length - 1]!.endS : 0)}</span></div>}
+              <div className="txl__text">{tr ? (draftTr || <span className="tx__draft">{draft}</span>) : draft}<span className="caret" /></div>
+            </div>
+          )}
           <div ref={end} />
         </div>
       </div>
@@ -291,7 +312,7 @@ function EndedCard({ s, account, onSettings }: { s: LiveStatus; account: Account
       <div className="row">
         <div className="lrow__main">
           <div className="rec-head__title" style={{ marginTop: 0 }}>{s.meeting && <MeetingLogo k={s.meeting} size={16} />}<span title={s.name}>{s.name}</span></div>
-          <div className="rec-head__src">{s.input.tab && s.input.mic ? 'TAB + MIC' : s.input.tab ? 'TAB' : 'MIC'}{s.sentS ? ` · ${clock(s.sentS)}` : ''}</div>
+          <div className="rec-head__src">{s.input.tab && s.input.mic ? 'TAB + MIC' : s.input.tab ? 'TAB' : 'MIC'}{s.sentS ? ` · ${mmss(s.sentS)}` : ''}</div>
         </div>
         <span className={`chip${failed ? ' chip--bad' : ' chip--ok'}`}>{failed ? 'STOPPED' : 'DONE'}</span>
       </div>

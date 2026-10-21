@@ -93,7 +93,8 @@ export interface DubStart {
   voice?: string | null;
 }
 
-export type DubState = 'transcribing' | 'translating' | 'voicing' | 'ready' | 'playing' | 'failed';
+/** `waiting`: on, but reading as spoken: no language to dub into yet. */
+export type DubState = 'transcribing' | 'translating' | 'voicing' | 'ready' | 'playing' | 'failed' | 'waiting';
 
 export interface DubStatus {
   tabId: number;

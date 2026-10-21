@@ -270,6 +270,15 @@ export function registerLive(): Handlers {
     return false;
   });
   chrome.tabs.onRemoved.addListener((tabId) => { void stopForTab(tabId); void forgetInvoked(tabId); });
+  // The reading language (ui/langs.tsx) changed: every running session
+  // reads in it, whether or not the panel is open.
+  chrome.storage.onChanged.addListener((c, area) => {
+    if (area !== 'local' || !('readLang' in c)) return;
+    const lang = (c.readLang!.newValue as string | null) || null;
+    void listLive().then((all) => {
+      for (const s of all) if (s.mode !== 'broadcast' && (s.state === 'live' || s.state === 'paused') && (s.translateTo ?? null) !== lang) void off({ off: 'live.set', id: s.id, translateTo: lang }).catch(() => {});
+    }, () => {});
+  });
   chrome.tabs.onUpdated.addListener((tabId, info) => { if (info.url) void forgetInvoked(tabId, info.url); });
   chrome.commands.onCommand.addListener((command, tab) => {
     if (!tab?.id) return;

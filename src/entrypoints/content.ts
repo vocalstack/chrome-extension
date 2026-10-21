@@ -19,15 +19,22 @@ export default defineContentScript({
     });
     startOverlay();
     startDubSync();
-    // Settings → Captions on videos: tell the background a video started
-    // playing here (once per page address).
+    // Settings → Captions on videos: tell the background when the person
+    // starts a video playing with its sound on (once per page address).
+    // Muted autoplay and hover previews do not count: no recent click or
+    // key, or no sound.
     let told = '';
-    document.addEventListener('play', (e) => {
+    const audible = (v: HTMLVideoElement) => !v.paused && !v.muted && v.volume > 0 && !(Number.isFinite(v.duration) && v.duration < 20);
+    const check = (e: Event) => {
       const v = e.target;
-      if (!(v instanceof HTMLVideoElement) || told === location.href) return;
-      if (Number.isFinite(v.duration) && v.duration < 20) return;
+      if (!(v instanceof HTMLVideoElement) || told === location.href || !audible(v)) return;
+      if (!navigator.userActivation?.isActive) return;
       told = location.href;
-      void chrome.runtime.sendMessage({ videoPlaying: true }).catch(() => {});
-    }, true);
+      void chrome.runtime.sendMessage({ videoPlaying: { url: location.href } }).catch(() => {});
+    };
+    document.addEventListener('play', check, true);
+    document.addEventListener('playing', check, true);
+    // Unmuting a playing video (a click on its sound button) starts it too.
+    document.addEventListener('volumechange', check, true);
   },
 });

@@ -166,12 +166,17 @@ export function startOverlay() {
     place();
   }
 
-  /** The cue under the video's clock (a beat of grace after it ends). */
+  /** The cue under the video's clock: the last to start at or before it,
+   *  while it lasts. Nothing while the video is out of view. */
   function follow() {
+    if (!cues) return;
     const v = mainVideo();
-    if (!v || !cues) return;
-    const t = v.currentTime;
-    const next = cues.find((c) => t >= c.s && t < c.e + 0.4) ?? null;
+    let next: Cue | null = null;
+    if (v) {
+      const t = v.currentTime;
+      for (const c of cues) { if (c.s > t) break; next = c; }
+      if (next && t >= next.e) next = null;
+    }
     if (next !== cue) { cue = next; render(); }
   }
 
@@ -206,10 +211,13 @@ export function startOverlay() {
   chrome.runtime.onMessage.addListener((msg, _sender, send) => {
     if (msg?.vcap === 'off') { if (cues) unmount(); return false; }
     if (msg?.vcap === 'on') {
+      // One owner per frame: the video's captions take over from a
+      // recording shown here, which the panel then shows as off.
+      if (sessionId && sessionId !== 'vcap') void chrome.runtime.sendMessage({ rpc: 'live.overlay', args: { id: sessionId, on: false } });
       unmount();
       sessionId = 'vcap';
       lang = msg.lang ?? null;
-      cues = (msg.cues as Cue[]) ?? [];
+      cues = [...((msg.cues as Cue[]) ?? [])].sort((a, b) => a.s - b.s);
       mount();
       cueTimer = window.setInterval(follow, 200);
       follow();
@@ -223,8 +231,14 @@ export function startOverlay() {
     if (msg?.caption === undefined) return false;
     if (msg.caption === 'off') { if (msg.id === sessionId) unmount(); return false; }
     const ev = msg.caption as LiveEvent;
-    if (sessionId !== msg.id) { unmount(); sessionId = msg.id; }
     if (ev.type === 'speaker') return false;
+    if (sessionId !== msg.id) {
+      // A recording shown here takes over from the video's captions, which
+      // the panel then shows as off.
+      if (cues) void chrome.runtime.sendMessage({ vcapOff: true });
+      unmount();
+      sessionId = msg.id;
+    }
     hideOnly = msg.hide === true;
     mount();
     if (ev.type === 'committed') {
