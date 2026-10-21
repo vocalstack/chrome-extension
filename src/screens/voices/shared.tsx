@@ -9,7 +9,7 @@
  *  speaks text a caller provides. */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Voice } from '@vocalstack/sdk';
+import type { Voice } from '@vocalstack/js-sdk';
 import { client } from '../../lib/client';
 import { Badge, errorText } from '../../ui/kit';
 

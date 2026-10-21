@@ -1,7 +1,7 @@
 /** The page's media (`page.scan`), the "Transcribe this …" context
  *  menus, and the `vs` omnibox keyword over the person's transcripts. */
 
-import { VocalStack, type SearchHit } from '@vocalstack/sdk';
+import { VocalStack, type SearchHit } from '@vocalstack/js-sdk';
 import type { Handlers } from '../lib/rpc';
 import type { FoundMedia } from '../lib/media';
 import { accessToken } from '../lib/auth';

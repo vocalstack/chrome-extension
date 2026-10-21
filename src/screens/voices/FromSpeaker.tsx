@@ -3,7 +3,7 @@
  *  of them out of the recording itself). */
 
 import { useEffect, useMemo, useState } from 'react';
-import type { Transcription, TranscriptSnapshot } from '@vocalstack/sdk';
+import type { Transcription, TranscriptSnapshot } from '@vocalstack/js-sdk';
 import { client } from '../../lib/client';
 import { Field, Note, useLoad } from '../../ui/kit';
 import { MIN_SAMPLE_S, SAMPLE_TOLERANCE_S, seconds } from './shared';

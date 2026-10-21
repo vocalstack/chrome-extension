@@ -3,7 +3,7 @@
  *  speak it), one row per voice with its sample, and Clone a Voice. */
 
 import { useEffect, useState } from 'react';
-import type { Voice } from '@vocalstack/sdk';
+import type { Voice } from '@vocalstack/js-sdk';
 import type { VoiceOption } from '@vocalstack/contract';
 import { client } from '../../lib/client';
 import { Note, errorText, useLoad } from '../../ui/kit';

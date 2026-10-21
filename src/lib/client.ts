@@ -2,7 +2,7 @@
  *  its token is the background's key token (`auth.token`), asked for on
  *  each call and exchanged there when it is about to run out. */
 
-import { VocalStack } from '@vocalstack/sdk';
+import { VocalStack } from '@vocalstack/js-sdk';
 import { currentEnv, type Env } from './env';
 import { rpc } from './rpc';
 

@@ -2,7 +2,7 @@
  *  here, uploaded, or taken from a speaker in a transcription. */
 
 import { useEffect, useRef, useState } from 'react';
-import type { Voice } from '@vocalstack/sdk';
+import type { Voice } from '@vocalstack/js-sdk';
 import { client } from '../../lib/client';
 import { rpc } from '../../lib/rpc';
 import { Btn, Field, IconBtn, Note, Section, Seg, clock, useAction } from '../../ui/kit';

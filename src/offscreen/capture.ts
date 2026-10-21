@@ -10,7 +10,7 @@
  *  Every change of state is pushed as `live.status`; transcript events as
  *  `live.event` (the background forwards captions to the tab). */
 
-import { VocalStack, type RealtimeSession, type Subscription } from '@vocalstack/sdk';
+import { VocalStack, type RealtimeSession, type Subscription } from '@vocalstack/js-sdk';
 import { push, rpc, type LiveEvent } from '../lib/rpc';
 import type { LiveStatus } from '../lib/live';
 import type { OffCmd } from '../lib/offscreen';

@@ -5,7 +5,7 @@
  *  only translates it. Also: per-tab state in session storage, one key
  *  per tab, written one at a time. */
 
-import { VocalStack } from '@vocalstack/sdk';
+import { VocalStack } from '@vocalstack/js-sdk';
 import type { Transcription } from '@vocalstack/contract';
 import { accessToken } from '../lib/auth';
 import { currentEnv } from '../lib/env';

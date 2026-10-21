@@ -38,7 +38,7 @@ Settings → Environment switches between production, e2e and this computer (`lo
 | Content script | `src/entrypoints/content.ts`, `src/content/*` | media scan, captions overlay, dub clock |
 | Permission page | `src/entrypoints/permission` | asks for the microphone once for the whole extension |
 
-All API calls go through the TypeScript SDK (`sdk/`, aliased as `@vocalstack/sdk`).
+All API calls go through the TypeScript SDK (`sdk/`, aliased as `@vocalstack/js-sdk`).
 
 ### Sign-in
 

@@ -5,7 +5,7 @@
  *  (`dub.sync`); a pause, a seek or a rate change stops what is playing and
  *  schedules again from the new position. */
 
-import { VocalStack } from '@vocalstack/sdk';
+import { VocalStack } from '@vocalstack/js-sdk';
 import { rpc } from '../lib/rpc';
 import type { DubSentence, OffCmd } from '../lib/offscreen';
 
