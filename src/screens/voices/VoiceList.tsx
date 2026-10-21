@@ -10,7 +10,7 @@ import { Note, errorText, useLoad } from '../../ui/kit';
 import { Eyebrow, LanguageChip, LanguagePicker } from '../../ui/ds';
 import { HiPause, HiPlay, HiPlus, HiGlobe } from '../../ui/icons';
 import { AutoGlyph, usePickLangs, useLang } from '../../ui/langs';
-import { CONSENT_FOOTER, previewBlob, usePlayer, usePollWhile, voiceColor } from './shared';
+import { previewBlob, usePlayer, usePollWhile, voiceColor } from './shared';
 
 const SLOTS = ['var(--vx-1)', 'var(--vx-2)', 'var(--vx-3)', 'var(--vx-4)', 'var(--vx-5)', 'var(--vx-6)'];
 const FILTER = 'voices.lang';
@@ -24,7 +24,7 @@ function clonedMeta(v: Voice): string {
 
 /** Two letters: a name's initials, or a one-word name's first two. */
 function twoLetters(name: string): string {
-  const words = name.replace(/[^\p{L} ]/gu, ' ').trim().split(/\s+/).filter(Boolean);
+  const words = name.replace(/\([^)]*\)/g, ' ').replace(/[^\p{L} ]/gu, ' ').trim().split(/\s+/).filter(Boolean);
   if (!words.length) return '—';
   return (words.length > 1 ? words[0]![0]! + words[1]![0]! : words[0]!.slice(0, 2)).toUpperCase();
 }
@@ -36,6 +36,12 @@ function stockFor(langs: string[]): Promise<Stock[]> {
   allStock ??= client().then((vs) => Promise.all(langs.map((l) => vs.voices.available(l).then((c) => (c.voices ?? []).filter((v) => !v.cloned).map((v) => ({ ...v, lang: l })), () => [] as Stock[]))).then((x) => x.flat()));
   allStock.catch(() => { allStock = null; });
   return allStock;
+}
+
+/** A stock voice speaks several languages: listed once (its first one plays). */
+function onePerVoice(all: Stock[]): Stock[] {
+  const seen = new Set<string>();
+  return all.filter((v) => { const k = v.name.trim().toLowerCase() || v.id; if (seen.has(k)) return false; seen.add(k); return true; });
 }
 
 export function VoiceList({ onOpen, onNew }: { onOpen: (v: Voice) => void; onNew: () => void }) {
@@ -60,8 +66,8 @@ export function VoiceList({ onOpen, onNew }: { onOpen: (v: Voice) => void; onNew
     setStockError('');
     if (!voiceLangs) return;
     let on = true;
-    // All languages: every stock voice; a language: the ones that speak it.
-    stockFor(voiceLangs.split(',')).then((all) => { if (on) setStock(lang ? all.filter((v) => v.lang === lang) : all); }, (e) => { if (on) setStockError(errorText(e)); });
+    // All languages: every stock voice once; a language: the ones that speak it.
+    stockFor(voiceLangs.split(',')).then((all) => { if (on) setStock(lang ? all.filter((v) => v.lang === lang) : onePerVoice(all)); }, (e) => { if (on) setStockError(errorText(e)); });
     return () => { on = false; };
   }, [lang, voiceLangs]);
   const langOf = useLang();
@@ -92,7 +98,7 @@ export function VoiceList({ onOpen, onNew }: { onOpen: (v: Voice) => void; onNew
       {stockError && <Note kind="warn">{stockError}</Note>}
       {player.error && <Note kind="bad">{player.error}</Note>}
       <div className="card2" style={{ padding: '14px 14px 4px' }}>
-        <Eyebrow>YOUR VOICES</Eyebrow>
+        <div className="ey ey--line">YOUR VOICES</div>
         <div style={{ marginTop: 6 }}>
           {loading && !data && <div className="empty"><span className="spin" style={{ margin: '0 auto' }} /></div>}
           {data && !sorted.length && !stock.length && <p className="pref__sub" style={{ margin: '6px 0 12px' }}>No voices yet. Record thirty seconds and the voice is built from it.</p>}
@@ -117,10 +123,10 @@ export function VoiceList({ onOpen, onNew }: { onOpen: (v: Voice) => void; onNew
             const key = `st:${v.id}:${v.lang}`;
             return (
               <div key={`${v.lang}:${v.id}`} className="lrow" style={{ padding: '11px 0' }}>
-                <span className="vav" style={{ '--vc': SLOTS[(sorted.length + i + 1) % SLOTS.length] } as React.CSSProperties}>{twoLetters(v.name)}</span>
+                <span className="vav" style={{ '--vc': SLOTS[(sorted.length + i) % SLOTS.length] } as React.CSSProperties}>{twoLetters(v.name)}</span>
                 <div className="lrow__main">
                   <div className="lrow__title">{v.name}</div>
-                  <div className="lrow__meta">{['STOCK', v.accent, (langOf(v.lang)?.name ?? v.lang)].filter(Boolean).join(' · ')}</div>
+                  <div className="lrow__meta">{['STOCK', v.accent, lang && (langOf(v.lang)?.name ?? v.lang)].filter(Boolean).join(' · ').toUpperCase()}</div>
                 </div>
                 <PlayBtn on={player.playing === key} busy={player.loading === key} onClick={() => playStock(v)} />
               </div>
@@ -129,7 +135,6 @@ export function VoiceList({ onOpen, onNew }: { onOpen: (v: Voice) => void; onNew
         </div>
       </div>
       <button type="button" className="cta cta--dashed" onClick={onNew}><HiPlus width={15} height={15} />Clone a Voice</button>
-      <p className="pref__sub" style={{ margin: 0 }}>{CONSENT_FOOTER}</p>
       <LanguagePicker open={open} onClose={() => setOpen(false)} title="VOICE LANGUAGE" note="Show only the voices that speak this language."
         value={lang ?? 'ALL'} searchPlaceholder={`Search ${rows.length} languages`}
         languages={[{ code: 'ALL', flag: <HiGlobe width={20} height={20} />, label: 'All languages', native: 'Every voice' }, ...rows.map((r) => ({ ...r, voice: false }))]}

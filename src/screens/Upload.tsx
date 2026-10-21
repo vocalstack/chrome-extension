@@ -89,7 +89,7 @@ export function UploadScreen({ account, onSettings, onLibrary }: { account: Acco
                 <button type="button" className="file__x" title="Remove" aria-label={`Remove ${q.file.name}`} onClick={() => remove(q.id)}><HiX width={14} height={14} /></button>
               </div>
             ))}
-            <button type="button" className="cta cta--dashed" style={{ height: 40, fontSize: 13 }} onClick={choose}><HiPlus width={15} height={15} />Add Another File</button>
+            <button type="button" className="cta cta--dashed" style={{ height: 42, borderRadius: 10, fontSize: 13 }} onClick={choose}><HiPlus width={15} height={15} />Add Another File</button>
             <p className="card2__note" style={{ marginTop: 3, fontSize: 11.5, color: 'var(--ink-45)' }}>Each file becomes its own transcript, named after the file.</p>
           </div>
         )}

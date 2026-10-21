@@ -129,8 +129,11 @@ export function LiveScreen({ account, live, intent, onIntentDone, onSettings }: 
     translateTo: readLang,
     speakerLabels: labels,
   }));
+  /** Chrome refused the tab because the icon was not clicked on it: the
+   *  notice says what to do, so the error does not say it again. */
+  const invokeFailed = start.error?.code === 'invoke';
   /** The click's error, unless the session it made already shows it. */
-  const startError = start.error && !live.some((s) => s.state === 'failed' && s.startedAt >= start.error!.at - 50)
+  const startError = start.error && !invokeFailed && !live.some((s) => s.state === 'failed' && s.startedAt >= start.error!.at - 50)
     ? <ProblemNote error={start.error.text} code={start.error.code} onSettings={onSettings} /> : null;
 
   return (
@@ -140,7 +143,7 @@ export function LiveScreen({ account, live, intent, onIntentDone, onSettings }: 
       {!running.length && (
         <>
           <AccessNote account={account} need="record" onSettings={onSettings} />
-          {needsTab && tab && tabOk && invoked === false && <InvokeNotice />}
+          {needsTab && tab && tabOk && (invoked === false || invokeFailed) && <InvokeNotice />}
           {needsTab && tab && !tabOk && <Note>{BROWSER_PAGE}</Note>}
           {needsTab && holder && <Note>This tab is already being recorded (“{holder.name}”).</Note>}
           <div className="card2">
@@ -203,7 +206,6 @@ function useTranscript(id: string) {
 
 function RecordingCard({ s, account, onSettings, only }: { s: LiveStatus; account: Account; onSettings: () => void; only: boolean }) {
   const { lines, draft, draftTr, names } = useTranscript(s.id);
-  const [confirmStop, setConfirmStop] = useState(false);
   const [, tick] = useState(0);
   const act = useAction();
   const stop = useAction();
@@ -212,12 +214,7 @@ function RecordingCard({ s, account, onSettings, only }: { s: LiveStatus; accoun
   const recording = RECORDING_MODES.includes(s.mode);
 
   useEffect(() => { end.current?.scrollIntoView({ block: 'nearest' }); }, [lines.length, draft]);
-  useEffect(() => { act.setError(''); setConfirmStop(false); }, [s.state]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (!confirmStop) return;
-    const t = setTimeout(() => setConfirmStop(false), 4000);
-    return () => clearTimeout(t);
-  }, [confirmStop]);
+  useEffect(() => { act.setError(''); }, [s.state]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (s.state !== 'live') return;
     const t = setInterval(() => tick((n) => n + 1), 1000);
@@ -225,7 +222,7 @@ function RecordingCard({ s, account, onSettings, only }: { s: LiveStatus; accoun
   }, [s.state]);
 
   const elapsed = s.sentS ?? (Date.now() - s.startedAt) / 1000;
-  const source = `${s.input.tab && s.input.mic ? 'TAB + MIC' : s.input.tab ? 'TAB' : 'MIC'}${s.host && s.input.tab ? ` · ${s.host.toUpperCase()}` : ''}`;
+  const source = `${s.input.tab && s.input.mic ? 'TAB + MIC' : s.input.tab ? 'TAB' : 'MIC'}${s.host && s.input.tab ? ` · ${s.host.replace(/^www\./, '').toUpperCase()}` : ''}`;
   const tr = s.translateTo ? lang(s.translateTo) : null;
   const detected = s.spokenLanguage ?? [...lines].reverse().find((l) => l.lang)?.lang ?? null;
   const recLang = tr ? (detected ? `${(lang(detected)?.name ?? detected).toUpperCase()} → ${tr.name.toUpperCase()}` : `→ ${tr.name.toUpperCase()}`) : 'AS SPOKEN';
@@ -237,11 +234,7 @@ function RecordingCard({ s, account, onSettings, only }: { s: LiveStatus; accoun
   const pill = s.state === 'live' ? <span className="lpill"><i />LIVE</span>
     : s.state === 'paused' ? <span className="lpill lpill--paused">PAUSED</span>
     : <span className="lpill lpill--wait"><span className="spin" style={{ width: 9, height: 9, borderWidth: 1.5 }} />{s.state === 'stopping' ? 'STOPPING' : 'STARTING'}</span>;
-  const onStop = () => {
-    if (recording && !confirmStop) { setConfirmStop(true); return; }
-    setConfirmStop(false);
-    void stop.run(() => rpc('live.stop', { id: s.id }));
-  };
+  const onStop = () => void stop.run(() => rpc('live.stop', { id: s.id }));
   const reading = tr ? tr.name : 'the spoken language';
 
   return (
@@ -287,7 +280,7 @@ function RecordingCard({ s, account, onSettings, only }: { s: LiveStatus; accoun
           : <button type="button" className="sq-btn" aria-label="Pause" title="Pause" disabled={act.busy || s.state !== 'live'} onClick={() => void act.run(() => rpc('live.pause', { id: s.id, paused: true }))}><HiPause /></button>)}
         <button type="button" className="cta cta--stop" style={{ flex: 1 }} aria-busy={stop.busy || s.state === 'stopping' || undefined} disabled={s.state === 'stopping'} onClick={onStop}>
           {stop.busy || s.state === 'stopping' ? <span className="spin" /> : <span className="cta__sq" />}
-          {s.state === 'stopping' ? 'Stopping' : confirmStop ? 'Stop recording?' : recording ? 'Stop recording' : 'Turn off'}
+          {s.state === 'stopping' ? 'Stopping' : recording ? 'Stop recording' : 'Turn off'}
         </button>
       </div>
       {!can(account, 'record') && <AccessNote account={account} need="record" onSettings={onSettings} />}

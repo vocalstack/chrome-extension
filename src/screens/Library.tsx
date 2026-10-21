@@ -13,7 +13,6 @@ import { MEETING_HOSTS } from '../lib/live';
 import { hitPath, txPath } from '../background/page/paths';
 import { jobPct, jobText } from './page/tracker';
 import { mmss } from './Live';
-import { Eyebrow } from '../ui/ds';
 
 /** The ids of the person's broadcasts: a hit in one opens under /s/… */
 let broadcasts: Promise<Set<string>> | null = null;
@@ -90,7 +89,7 @@ export function LibraryScreen({ account, intent, onIntentDone }: { account: Acco
       {term.length >= 2 ? (
         hits && (hits.length ? (
           <div className="card2" style={{ padding: '12px 14px 2px' }}>
-            <Eyebrow side={`${hits.length}`}>LINES</Eyebrow>
+            <div className="ey-row ey--line"><span className="ey">LINES</span><span className="ey">{hits.length}</span></div>
             <div style={{ marginTop: 4 }}>
               {hits.map((h) => (
                 <div key={`${h.recordingId}:${h.sentenceId}`} className="lrow lrow--click lib-hit" role="link" tabIndex={0} onClick={() => void openHit(h)} onKeyDown={(e) => { if (e.key === 'Enter') void openHit(h); }}>
@@ -163,7 +162,7 @@ function Recent({ own }: { own: boolean }) {
     <>
       {groups.map((g) => (
         <div key={g.label} className="card2" style={{ padding: '12px 14px 2px' }}>
-          <Eyebrow side={g === groups[0] && own ? 'MADE BY THE EXTENSION' : undefined}>{g.label}</Eyebrow>
+          <div className="ey-row ey--line"><span className="ey">{g.label}</span>{g === groups[0] && own && <span className="ey">MADE BY THE EXTENSION</span>}</div>
           <div style={{ marginTop: 4 }}>{g.items.map((t) => <LibRow key={t.id} t={t} today={g.label === 'TODAY'} onChanged={() => void reload()} />)}</div>
         </div>
       ))}

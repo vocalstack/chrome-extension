@@ -1,7 +1,7 @@
 /** The account's broadcasts (design 3): New Broadcast, then one row each —
  *  a date tile, the name, what it is doing (live now, or its last
- *  recording's peak audience and length), a LIVE chip. Archived ones
- *  behind a link at the foot. */
+ *  recording's peak audience and length), a LIVE chip. Archived ones are
+ *  in the dashboard. */
 
 import { useEffect, useState } from 'react';
 import type { Broadcast } from '@vocalstack/contract';
@@ -13,8 +13,6 @@ import { AccessNote } from '../../ui/access';
 import { Note } from '../../ui/kit';
 import { HiBroadcast, HiChevronRight, HiPlus } from '../../ui/icons';
 import { isActive, sessionOf } from './shared';
-
-export type Lifecycle = 'active' | 'archived';
 
 /* Each last recording's peak audience, once per panel. */
 const peaks = new Map<string, Promise<number | null>>();
@@ -30,11 +28,9 @@ function peakOf(rid: string): Promise<number | null> {
 const MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 const dur = (s: number) => (s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min` : `${Math.max(1, Math.round(s / 60))} min`);
 
-export function BroadcastList({ account, onSettings, lifecycle, onLifecycle, items, loading, error, live, onOpen, onNew }: {
+export function BroadcastList({ account, onSettings, items, loading, error, live, onOpen, onNew }: {
   account: Account;
   onSettings: () => void;
-  lifecycle: Lifecycle;
-  onLifecycle: (l: Lifecycle) => void;
   items: Broadcast[] | undefined;
   loading: boolean;
   error: string;
@@ -53,16 +49,14 @@ export function BroadcastList({ account, onSettings, lifecycle, onLifecycle, ite
   const mayChange = can(account, 'change');
   return (
     <div className="screen" data-screen-label="Broadcasts">
-      {lifecycle === 'active'
-        ? <button type="button" className="cta" disabled={!mayChange} title={mayChange ? undefined : 'This sign-in may not make changes'} onClick={onNew}><HiPlus />New Broadcast</button>
-        : <div className="row"><span className="ey grow">ARCHIVED BROADCASTS</span><button type="button" className="hd__link" onClick={() => onLifecycle('active')}>Back to active</button></div>}
+      <button type="button" className="cta" disabled={!mayChange} title={mayChange ? undefined : 'This sign-in may not make changes'} onClick={onNew}><HiPlus />New Broadcast</button>
       <AccessNote account={account} need="change" onSettings={onSettings} />
       {error && <Note kind="bad">{error}</Note>}
       {!items && loading && <div className="empty"><span className="spin" style={{ margin: '0 auto' }} /></div>}
       {items && items.length === 0 && (
         <div className="card2 empty2">
           <span className="round round--lg"><HiBroadcast /></span>
-          <div className="empty2__text">{lifecycle === 'active' ? 'No broadcasts yet. A broadcast is a link listeners open to follow you live.' : 'No archived broadcasts.'}
+          <div className="empty2__text">No broadcasts yet. A broadcast is a link listeners open to follow you live.
             {account.reach === 'own' && <><br />This sign-in sees only the broadcasts the extension made.</>}</div>
         </div>
       )}
@@ -83,7 +77,7 @@ export function BroadcastList({ account, onSettings, lifecycle, onLifecycle, ite
                 : b.recordingCount === 0 ? 'Not recorded yet' : `/${b.code}`;
             return (
               <div key={b.id} className="lrow lrow--click" role="button" tabIndex={0} onClick={() => onOpen(b)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(b); } }}>
-                <div className="dtile"><div className="dtile__mon">{MON[when.getMonth()]}</div><div className="dtile__day">{when.getDate()}</div></div>
+                <div className="dtile"><div className="dtile__mon">{MON[when.getMonth()]}</div><div className="dtile__day">{String(when.getDate()).padStart(2, '0')}</div></div>
                 <div className="lrow__main">
                   <div className="lrow__title">{b.name}</div>
                   <div className="lrow__sub">{meta}{b.access === 'private' ? ' · Private' : ''}</div>
@@ -96,7 +90,6 @@ export function BroadcastList({ account, onSettings, lifecycle, onLifecycle, ite
           })}
         </div>
       )}
-      {lifecycle === 'active' && <button type="button" className="hd__link" style={{ alignSelf: 'center' }} onClick={() => onLifecycle('archived')}>Archived broadcasts</button>}
     </div>
   );
 }

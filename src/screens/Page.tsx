@@ -16,7 +16,6 @@ import { MEDIA_PAGE, type FoundMedia } from '../lib/media';
 import { Note, errorText, useAction } from '../ui/kit';
 import { Eyebrow, Toggle } from '../ui/ds';
 import { HiAudio, HiCheck, HiChevronRight, HiDoc, HiGlobe, HiLang, HiMic, HiNone, HiVideo, HiVoices, MeetingLogo } from '../ui/icons';
-import { IconRestore } from '../ui/icons';
 import { ReadInPicker, useLang, useReadLang } from '../ui/langs';
 import { InvokeNotice, mmss, useInvoked } from './Live';
 import { problemOf } from './page/errors';
@@ -110,9 +109,13 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
     chrome.windows.getCurrent().then((w) => { windowId = w.id; }, () => {});
     const activated = (a: { tabId: number; windowId: number }) => { if (windowId === undefined || a.windowId === windowId) void rescan(); };
     const updated = (tabId: number, info: { status?: string }) => { if (tabId === tabRef.current && info.status === 'complete') void rescan(); };
+    // The design has no Scan again button: media a page adds after it
+    // loaded is found when the person comes back to the panel.
+    const focused = () => void rescan();
     chrome.tabs.onActivated.addListener(activated);
     chrome.tabs.onUpdated.addListener(updated);
-    return () => { chrome.tabs.onActivated.removeListener(activated); chrome.tabs.onUpdated.removeListener(updated); };
+    window.addEventListener('focus', focused);
+    return () => { chrome.tabs.onActivated.removeListener(activated); chrome.tabs.onUpdated.removeListener(updated); window.removeEventListener('focus', focused); };
   }, [rescan]);
 
   // A context-menu click: that address on top, ready to go.
@@ -210,7 +213,8 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   const liveStream = rows.find(isLive);
   const tabOk = capturable(scan?.url);
   const failed = tracked.filter((t) => t.phase === 'error' && !t.hidden).slice(-2);
-  const empty = !rows.length && !scanning && !scanError;
+  // A scan again (the panel focused) keeps what the last one showed.
+  const empty = !rows.length && !scanError && (!scanning || !!scan);
 
   return (
     <div className="screen" data-screen-label="Page">
@@ -220,10 +224,12 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
           <div className="lrow__title" title={scan?.title}>{scan?.title || (scanning ? 'Reading this tab…' : 'This tab')}</div>
           {scan && <div className="site__host">{host(scan.url)}</div>}
         </div>
-        <button type="button" className="hd__icon" style={{ width: 30, height: 30 }} title="Scan again" aria-label="Scan again" onClick={() => void rescan()} disabled={scanning}>{scanning ? <span className="spin" /> : <IconRestore width={15} height={15} />}</button>
       </div>
 
-      {tabOk && invoked === false && (empty || !!liveStream) && <InvokeNotice />}
+      {/* As the design: wherever this tab could be recorded or captioned
+          from the panel — nothing to transcribe (Record This Tab), or a
+          video with Captions and Dub. */}
+      {tabOk && invoked === false && (empty || hasVideo) && <InvokeNotice />}
       <AccessNote account={account} need="record" onSettings={onSettings} />
       {scanError && <Note kind="warn">{scanError}</Note>}
 

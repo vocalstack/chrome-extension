@@ -89,7 +89,10 @@ async function streamIdFor(tab: chrome.tabs.Tab): Promise<string> {
   } catch (e) {
     const m = String((e as Error)?.message ?? e);
     if (/invoked|activeTab/i.test(m)) {
-      throw new RpcError('Chrome lets VocalStack capture a tab only after you click the VocalStack icon on that tab. Click the icon in the toolbar, then start again.', 'invoke');
+      // Noted as invoked, but Chrome no longer agrees (the extension was
+      // reloaded, say): forget it, so the panel asks for the click again.
+      await forgetInvoked(tab.id!);
+      throw new RpcError('Click the VocalStack icon in Chrome’s toolbar while on this tab, then start again: Chrome lets VocalStack record a tab only after that.', 'invoke');
     }
     if (/active stream|already/i.test(m)) throw new RpcError('Another extension or browser feature is already using this tab’s sound. Stop it there, then start again.', 'tab_busy');
     throw new RpcError(`The tab could not be captured: ${m}`, 'tab_capture');

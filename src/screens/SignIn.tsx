@@ -1,13 +1,14 @@
 /** Signed out (design 3): the logo, Sign in with VocalStack (One-click
- *  Connect), or Use an API Key (a field, then Connect). */
+ *  Connect), or Use an API Key (a field, then Connect). The environment
+ *  switch is not in the design: Shift-click the logo to show it (it shows
+ *  by itself outside production, so the way back is always there). */
 
 import { useState } from 'react';
 import { rpc } from '../lib/rpc';
-import type { Env } from '../lib/env';
+import { ENVS, type Env, type EnvName } from '../lib/env';
 import { Note, useAction } from '../ui/kit';
 import logoUrl from '../styles/vocalstack-logo.svg';
 import logoDarkUrl from '../styles/vocalstack-logo-dark.svg';
-import { EnvPicker } from './Settings';
 
 export function SignIn({ env }: { env: Env | null }) {
   const connect = useAction();
@@ -15,6 +16,7 @@ export function SignIn({ env }: { env: Env | null }) {
   const [showKey, setShowKey] = useState(false);
   const [value, setValue] = useState('');
   const [bad, setBad] = useState(false);
+  const [showEnv, setShowEnv] = useState(false);
   const submit = () => {
     const k = value.trim();
     if (!k) return;
@@ -25,7 +27,7 @@ export function SignIn({ env }: { env: Env | null }) {
   return (
     <div className="welcome2" data-screen-label="Sign in">
       <div className="welcome2__top">
-        <picture><source srcSet={logoDarkUrl} media="(prefers-color-scheme: dark)" /><img src={logoUrl} alt="VocalStack" className="welcome2__logo" /></picture>
+        <picture onClick={(e) => { if (e.shiftKey) setShowEnv((v) => !v); }}><source srcSet={logoDarkUrl} media="(prefers-color-scheme: dark)" /><img src={logoUrl} alt="VocalStack" className="welcome2__logo" /></picture>
         <div className="welcome2__head">Speech made simple</div>
         <div className="welcome2__text">Transcribe, translate and record any tab. Your transcripts sync with your VocalStack account.</div>
       </div>
@@ -49,7 +51,19 @@ export function SignIn({ env }: { env: Env | null }) {
           <button type="button" className="cta cta--text" onClick={() => { setShowKey(false); setValue(''); setBad(false); key.setError(''); }}>Back</button>
         </form>
       )}
-      {env && <div className="welcome2__env"><EnvPicker env={env} compact /></div>}
+      {env && (showEnv || env.name !== 'production') && <EnvSwitch env={env} />}
+    </div>
+  );
+}
+
+function EnvSwitch({ env }: { env: Env }) {
+  const pick = useAction();
+  return (
+    <div className="welcome2__env">
+      <select className="select" aria-label="Environment" value={env.name} disabled={pick.busy} onChange={(e) => { const name = e.target.value as EnvName; void pick.run(() => rpc('env.set', { name })); }}>
+        {Object.values(ENVS).map((e) => <option key={e.name} value={e.name}>{e.label} · {new URL(e.api).host}</option>)}
+      </select>
+      {pick.error && <Note kind="bad">{pick.error}</Note>}
     </div>
   );
 }
