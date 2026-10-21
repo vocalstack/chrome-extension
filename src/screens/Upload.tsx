@@ -78,7 +78,7 @@ export function UploadScreen({ account, onSettings, onLibrary }: { account: Acco
           </button>
         ) : (
           <div className="files">
-            <div className="files__head"><span>{files.length} {files.length === 1 ? 'FILE' : 'FILES'}</span><span>{hms(total)} TOTAL</span></div>
+            <div className="files__head"><span>{files.length} {files.length === 1 ? 'FILE' : 'FILES'}</span>{total > 0 && <span>{hms(total)} TOTAL</span>}</div>
             {files.map((q) => (
               <div key={q.id} className="file">
                 <HiFile width={17} height={17} style={{ color: 'var(--brand)', flex: 'none' }} />

@@ -77,7 +77,7 @@ export function BroadcastList({ account, onSettings, lifecycle, onLifecycle, ite
             const last = b.lastRecording;
             const p = last ? peak[last.recordingId] : null;
             const meta = onAir || paused
-              ? [when.toDateString() === new Date().toDateString() ? 'Today' : when.toLocaleDateString(undefined, { weekday: 'short' }), when.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }), (b.listenersNow ?? 0) > 0 ? `${b.listenersNow} listening` : ''].filter(Boolean).join(' · ')
+              ? [when.toDateString() === new Date().toDateString() ? 'Today' : when.toLocaleDateString(undefined, { weekday: 'short' }), when.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })].join(' · ')
               : last
                 ? [p ? `${p} at peak` : '', last.durationS ? dur(last.durationS) : '', !p && !last.durationS ? `/${b.code}` : ''].filter(Boolean).join(' · ')
                 : b.recordingCount === 0 ? 'Not recorded yet' : `/${b.code}`;

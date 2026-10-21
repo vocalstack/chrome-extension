@@ -12,6 +12,7 @@ import { HiAudio, HiBroadcast, HiDoc, HiExternal, HiMic, HiSearch, HiVideo, HiX 
 import { MEETING_HOSTS } from '../lib/live';
 import { hitPath, txPath } from '../background/page/paths';
 import { jobPct, jobText } from './page/tracker';
+import { mmss } from './Live';
 import { Eyebrow } from '../ui/ds';
 
 /** The ids of the person's broadcasts: a hit in one opens under /s/… */
@@ -166,9 +167,23 @@ function Recent({ own }: { own: boolean }) {
           <div style={{ marginTop: 4 }}>{g.items.map((t) => <LibRow key={t.id} t={t} today={g.label === 'TODAY'} onChanged={() => void reload()} />)}</div>
         </div>
       ))}
-      <button type="button" className="hd__link" style={{ alignSelf: 'center' }} onClick={() => void openApp('/transcriptions')}>All transcriptions<HiExternal /></button>
     </>
   );
+}
+
+/* Whether a meeting's recording has its summary, once per panel. */
+const summaries = new Map<string, Promise<boolean>>();
+function useSummary(rid: string | null | undefined): boolean {
+  const [has, setHas] = useState(false);
+  useEffect(() => {
+    if (!rid) return;
+    let p = summaries.get(rid);
+    if (!p) { p = client().then((vs) => vs.recordings.get(rid)).then((r) => !!r.summary, () => false); summaries.set(rid, p); }
+    let on = true;
+    void p.then((v) => { if (on) setHas(v); });
+    return () => { on = false; };
+  }, [rid]);
+  return has;
 }
 
 function LibRow({ t, today, onChanged }: { t: Transcription; today: boolean; onChanged: () => void }) {
@@ -180,7 +195,8 @@ function LibRow({ t, today, onChanged }: { t: Transcription; today: boolean; onC
   const pct = job ? jobPct(job) : null;
   const working = !!job && ['fetching', 'transcribing'].includes(job.state);
   const failed = job?.state === 'failed' || job?.state === 'stopped';
-  const meta = failed ? (job?.error || jobText(job!)).toUpperCase() : [label, dur ? clock(dur) : '', job?.state === 'queued' ? jobText(job).toUpperCase() : ''].filter(Boolean).join(' · ');
+  const summary = useSummary(t.live && meetingOfName(t.name) && cur !== 'live' && cur !== 'paused' ? t.lastRecording?.recordingId : null);
+  const meta = failed ? (job?.error || jobText(job!)).toUpperCase() : [label, dur ? mmss(dur) : '', job?.state === 'queued' ? jobText(job).toUpperCase() : '', summary ? 'SUMMARY' : ''].filter(Boolean).join(' · ');
   const chip = cur === 'live' ? <span className="chip chip--live">LIVE</span>
     : cur === 'paused' ? <span className="chip chip--mute">PAUSED</span>
     : working ? <span className="chip">{pct !== null ? `${pct}%` : 'WORKING'}</span>

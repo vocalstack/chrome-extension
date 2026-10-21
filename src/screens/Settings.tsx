@@ -36,7 +36,7 @@ export function Settings({ account, env }: { account: Account; env: Env | null; 
   const [micState, setMicState] = useState<PermissionState | 'unknown'>('unknown');
   const [style, setStyle] = useState<CaptionStyle>(DEFAULT_CAPTION_STYLE);
   const [offerMeetings, setOfferMeetings] = useState(true);
-  const [autoCaptions, setAutoCaptions] = useState(false);
+  const [autoCaptions, setAutoCaptions] = useState(true);
   const [plan, setPlan] = useState<string | null>(null);
   const [shortcuts, setShortcuts] = useState<Record<string, string>>({});
   const check = useAction();
@@ -52,7 +52,7 @@ export function Settings({ account, env }: { account: Account; env: Env | null; 
     chrome.storage.local.get(['captionStyle', OFFER_KEY, AUTO_CAPTIONS]).then((g) => {
       if (g.captionStyle) setStyle(g.captionStyle as CaptionStyle);
       setOfferMeetings(g[OFFER_KEY] !== false);
-      setAutoCaptions(g[AUTO_CAPTIONS] === true);
+      setAutoCaptions(g[AUTO_CAPTIONS] !== false);
     });
     // The plan, when this sign-in may read billing (a key may not).
     if (account.via === 'connect') client().then((vs) => vs.billing.get()).then((b) => setPlan(b.enabled && b.plan ? b.plan.name : null), () => {});
@@ -72,7 +72,7 @@ export function Settings({ account, env }: { account: Account; env: Env | null; 
         <span className="acct__av">{isKey ? <HiKey width={18} height={18} /> : initials}</span>
         <div className="lrow__main">
           <div className="lrow__title" style={{ fontWeight: 600 }}>{account.name}</div>
-          <div className="rec-head__src" style={{ marginTop: 3 }}>{isKey ? (account.keyTail ? `vs_key_••••${account.keyTail}` : 'API key') : 'Signed in with VocalStack'}</div>
+          <div className="rec-head__src" style={{ marginTop: 3 }}>{isKey ? (account.keyTail ? `vs_••••${account.keyTail}` : 'API key') : 'Signed in with VocalStack'}</div>
         </div>
         {check.busy && <span className="spin" title="Checking what this sign-in may do" />}
         {!isKey && plan && <span className="chip">{plan}</span>}
