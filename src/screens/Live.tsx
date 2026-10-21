@@ -1,4 +1,5 @@
-/** Live: record this tab, the microphone or both; record a meeting; live
+/** Live: record this tab, the microphone or both (a meeting, on a meeting
+ *  tab: both, and a summary when it ends); live
  *  captions and translation. Running sessions show their transcript as it
  *  comes, with pause, stop, translation, captions on the tab and a link to
  *  the recording; finished ones stay until dismissed. */
@@ -16,6 +17,8 @@ import { IconCaptions, IconClose, IconExternal, IconMeeting, IconMic, IconPause,
 import { useActiveTab } from '../ui/useTab';
 
 type Input = 'tab' | 'mic' | 'both';
+/** What the Record card records: on a meeting tab, the meeting in Both's place. */
+type Pick = Input | 'meeting';
 type CaptionInput = 'tab' | 'mic';
 
 const MODE_LABEL: Record<LiveMode, string> = { record: 'Recording', meeting: 'Meeting', captions: 'Captions', broadcast: 'Broadcast' };
@@ -76,10 +79,13 @@ export function LiveScreen({ account, live, intent, onIntentDone, onSettings }: 
   const [recordLang, setRecordLang] = useState<string | null>(null);
   const [captionLang, setCaptionLang] = useState<string | null>(null);
   const [captionInput, setCaptionInput] = useState<CaptionInput>('tab');
-  const meetingStart = useStart();
   const recordStart = useStart();
   const captionsStart = useStart();
   const invoked = useInvoked(tab?.id, live);
+  // A meeting tab opens on the meeting; Tab or Microphone there is for this tab only.
+  const [meetingOff, setMeetingOff] = useState(false);
+  useEffect(() => { setMeetingOff(false); }, [tab?.id]);
+  const pick: Pick = meeting && (!meetingOff || input === 'both') ? 'meeting' : input;
 
   useEffect(() => {
     chrome.storage.local.get(['liveLang', 'captionLang', 'liveInput', 'liveTranslate', 'captionInput']).then((g) => {
@@ -92,7 +98,7 @@ export function LiveScreen({ account, live, intent, onIntentDone, onSettings }: 
   }, []);
   useEffect(() => {
     if (!intent) return;
-    if (intent.mode === 'meeting') setInput('both');
+    if (intent.mode === 'meeting') setMeetingOff(false);
     onIntentDone();
   }, [intent, onIntentDone]);
 
@@ -119,7 +125,7 @@ export function LiveScreen({ account, live, intent, onIntentDone, onSettings }: 
   };
   const tabNote = (needsTab: boolean) => (needsTab && tab && !tabOk ? <p className="hint" style={{ margin: 0 }}>{BROWSER_PAGE}</p> : null);
 
-  const recordNeedsTab = input !== 'mic';
+  const recordNeedsTab = pick !== 'mic';
   const recordBlocked = !mayRecord || (recordNeedsTab && (!tabOk || !!recordedHere));
 
   return (
@@ -134,38 +140,37 @@ export function LiveScreen({ account, live, intent, onIntentDone, onSettings }: 
         <LanguageSelect label="Spoken language" list="transcription" auto value={lang} onChange={(v) => { setLang(v); remember('liveLang', v); }} />
       </Field>
 
-      {meeting && !recordedHere && (
-        <div className="card card--tint stack">
-          <div className="row"><IconMeeting width={18} height={18} /><strong className="grow">{meeting} meeting</strong></div>
-          <p className="hint" style={{ margin: 0 }}>Records the meeting and your microphone. You get the transcript and a summary when it ends. Use headphones so the meeting is not picked up twice.</p>
-          {tabNote(true)}
-          <Btn kind="live" busy={meetingStart.busy} disabled={!mayRecord} icon={<IconMeeting />} onClick={() => go(meetingStart, { mode: 'meeting', input: { tab: true, mic: true }, translateTo: recordLang, name: name.trim() || undefined })}>Record meeting</Btn>
-          {errorOf(meetingStart)}
-        </div>
-      )}
-
       <Section title="Record">
         <div className="card stack">
-          <Seg<Input> label="What to record" value={input} onChange={(v) => { setInput(v); remember('liveInput', v); recordStart.clear(); }} options={[
+          <Seg<Pick> label="What to record" value={pick} onChange={(v) => {
+            recordStart.clear();
+            if (v === 'meeting') { setMeetingOff(false); return; }
+            setMeetingOff(true);
+            setInput(v);
+            remember('liveInput', v);
+          }} options={[
+            ...(meeting ? [{ value: 'meeting' as const, label: meeting, icon: <IconMeeting />, disabled: !!recordedHere || !tabOk, title: recordedHere ? 'This tab is already being recorded' : `The ${meeting} meeting and your microphone, with a summary when it ends` }] : []),
             { value: 'tab', label: 'This tab', icon: <IconTab />, disabled: !!recordedHere || !tabOk, title: recordedHere ? 'This tab is already being recorded' : !tabOk ? 'This page can’t be recorded' : undefined },
             { value: 'mic', label: 'Microphone', icon: <IconMic /> },
-            { value: 'both', label: 'Both', disabled: !!recordedHere || !tabOk, title: recordedHere ? 'This tab is already being recorded' : undefined },
+            ...(meeting ? [] : [{ value: 'both' as const, label: 'Tab + mic', disabled: !!recordedHere || !tabOk, title: recordedHere ? 'This tab is already being recorded' : 'This tab and your microphone, in one recording' }]),
           ]} />
           {recordNeedsTab && recordedHere && (
             <Note>This tab is already being recorded (“{recordedHere.name}”, above). To record something else at the same time, choose Microphone.</Note>
           )}
-          {recordNeedsTab && !recordedHere && tab && tabOk && <p className="hint" style={{ margin: 0 }}>{tab.title || tab.url}</p>}
+          {recordNeedsTab && !recordedHere && tab && tabOk && <p className="hint" style={{ margin: 0 }}>{pick === 'meeting'
+            ? 'Records the meeting and your microphone. You get the transcript and a summary when it ends. Use headphones so the meeting is not picked up twice.'
+            : tab.title || tab.url}</p>}
           {recordNeedsTab && !recordedHere && tabNote(true)}
           {recordNeedsTab && captionsHere?.input.tab && (
             <p className="hint" style={{ margin: 0 }}>Captions are on for this tab. Recording takes them over: they keep showing, now from the recording.</p>
           )}
-          <Field label="Name"><input className="input" placeholder={input === 'mic' ? 'Microphone' : (tab?.title ?? '')} value={name} onChange={(e) => setName(e.target.value)} maxLength={120} /></Field>
+          <Field label="Name"><input className="input" placeholder={pick === 'mic' ? 'Microphone' : pick === 'meeting' ? `${meeting} meeting` : (tab?.title ?? '')} value={name} onChange={(e) => setName(e.target.value)} maxLength={120} /></Field>
           <Field label="Translate into" hint="The translation shows under each line, here and on the recording.">
             <LanguageSelect label="Translate the recording into" list="translation" none="Don't translate" value={recordLang} onChange={(v) => { setRecordLang(v); remember('liveTranslate', v); }} />
           </Field>
-          <Btn kind="live" size="lg" block busy={recordStart.busy} disabled={recordBlocked} icon={<span className="dot" />}
-            onClick={() => go(recordStart, { mode: 'record', input: { tab: input !== 'mic', mic: input !== 'tab' }, translateTo: recordLang, name: name.trim() || undefined })}>
-            Start recording
+          <Btn kind="live" size="lg" block busy={recordStart.busy} disabled={recordBlocked} icon={pick === 'meeting' ? <IconMeeting /> : <span className="dot" />}
+            onClick={() => go(recordStart, { mode: pick === 'meeting' ? 'meeting' : 'record', input: { tab: pick !== 'mic', mic: pick !== 'tab' }, translateTo: recordLang, name: name.trim() || undefined })}>
+            {pick === 'meeting' ? 'Record meeting' : 'Start recording'}
           </Btn>
           <p className="hint" style={{ margin: 0 }}>Saved to your Transcriptions as it is recorded.</p>
           {errorOf(recordStart)}
