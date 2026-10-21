@@ -142,7 +142,7 @@ export function LiveScreen({ account, live, intent, onIntentDone, onSettings }: 
                 { value: 'mic', label: 'Mic only' },
               ]} />
             </div>
-            <p className="card2__note" style={{ fontSize: 11.5 }}>{SOURCE_NOTE[src]}{isMeeting && ' You get the transcript and a summary when the meeting ends. Use headphones so the meeting is not picked up twice.'}</p>
+            <p className="card2__note" style={{ fontSize: 11.5 }}>{SOURCE_NOTE[src]}</p>
           </div>
           <SpokenLanguageCard />
           <SpeakerLabelsCard />
