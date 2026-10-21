@@ -22,7 +22,7 @@ The tag's build checks the tag matches the build's version, then publishes the r
 - `https://github.com/vocalstack/chrome-extension/releases/download/latest/vocalstack-chrome.zip`
 - `https://github.com/vocalstack/chrome-extension/releases/download/latest/vocalstack-edge.zip`
 
-vocalstack.com/downloads/ serves copies of them (vocalstack/transcribe `scripts/website_vercel.sh`), taken at each website deploy. With the secret `WEBSITE_DEPLOY_TOKEN` set here (a token that may run vocalstack/transcribe's workflows), the tag's build runs the website deploy, which reads the release with transcribe's `EXTENSION_RELEASES_TOKEN` (Contents: read on this repository and vocalstack/mac-app). Without them, run `make website-deploy` in transcribe after a release.
+vocalstack.com/downloads/vocalstack-chrome.zip and -edge.zip redirect to these links (vocalstack/transcribe `scripts/website_vercel.sh`), so the website offers a new version as soon as its release is out, with no deploy.
 
 ## Unpacked
 
@@ -33,7 +33,7 @@ Every build on main, before it is released:
 
 Unzip the file. Open `chrome://extensions` (or `edge://extensions`), turn on Developer mode, choose Load unpacked, and pick the unzipped folder.
 
-While this repository is private, only people with access to it can download these files. Locally, `npm run package` builds the same folders (`output/chrome`, `output/edge`) and the same zips.
+Locally, `npm run package` builds the same folders (`output/chrome`, `output/edge`) and the same zips.
 
 The manifest version is `<package.json major.minor>.<commits on main>`, so every build on main is newer than the one before.
 

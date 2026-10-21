@@ -7,8 +7,8 @@
 # A version tag (`git tag 0.1.25 && git push origin 0.1.25`, the manifest
 # version of that commit: scripts/package.sh) releases it: a release of its
 # own, which GitHub marks Latest, and the `latest` release moved to it,
-# whose zips have links that never change (vocalstack/transcribe's website
-# deploy copies them to vocalstack.com/downloads/):
+# whose zips have links that never change (vocalstack.com/downloads/
+# redirects to them):
 #   https://github.com/vocalstack/chrome-extension/releases/download/latest/vocalstack-chrome.zip
 #   https://github.com/vocalstack/chrome-extension/releases/download/latest/vocalstack-edge.zip
 # Unzip, then chrome://extensions (edge://extensions) → Developer mode →
@@ -115,15 +115,3 @@ jobs:
             gh release create latest output/vocalstack-chrome.zip output/vocalstack-edge.zip \
               --target "$GITHUB_SHA" --latest=false --title "VocalStack for Chrome and Edge $tag (latest)" --notes "$notes"
           fi
-
-      # vocalstack.com serves the zips from its own deploy: run it again, so
-      # the site offers this version now. Needs WEBSITE_DEPLOY_TOKEN, a
-      # token that may run vocalstack/transcribe's workflows (Actions: write);
-      # without it the site takes the new zips at its next deploy.
-      - name: redeploy vocalstack.com
-        if: startsWith(github.ref, 'refs/tags/')
-        env:
-          GH_TOKEN: ${{ secrets.WEBSITE_DEPLOY_TOKEN }}
-        run: |
-          if [ -z "$GH_TOKEN" ]; then echo "::warning::WEBSITE_DEPLOY_TOKEN is not set: vocalstack.com offers this version from its next deploy"; exit 0; fi
-          gh workflow run website.yml -R vocalstack/transcribe --ref main
