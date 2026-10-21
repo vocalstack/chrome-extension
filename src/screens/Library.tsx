@@ -1,14 +1,18 @@
-/** Library: search every transcript, or the latest transcriptions. */
+/** Library (design 3): search every transcript, or the latest
+ *  transcriptions by day, with their progress; a failed one can be tried
+ *  again, one waiting to be trimmed opens in the dashboard. */
 
 import { useEffect, useRef, useState } from 'react';
 import type { SearchHit, Transcription } from '@vocalstack/contract';
 import type { PanelIntent } from '../background/panel';
 import type { Account } from '../lib/auth';
 import { client } from '../lib/client';
-import { Badge, Btn, Empty, Note, Section, ago, clock, errorText, openApp, useLoad } from '../ui/kit';
-import { IconClose, IconExternal, IconFile, IconLibrary, IconLive, IconSearch } from '../ui/icons';
+import { Note, ago, clock, errorText, openApp, useAction, useLoad } from '../ui/kit';
+import { HiAudio, HiBroadcast, HiDoc, HiExternal, HiMic, HiSearch, HiVideo, HiX } from '../ui/icons';
+import { MEETING_HOSTS } from '../lib/live';
 import { hitPath, txPath } from '../background/page/paths';
 import { jobPct, jobText } from './page/tracker';
+import { Eyebrow } from '../ui/ds';
 
 /** The ids of the person's broadcasts: a hit in one opens under /s/… */
 let broadcasts: Promise<Set<string>> | null = null;
@@ -41,7 +45,6 @@ export function LibraryScreen({ account, intent, onIntentDone }: { account: Acco
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
-  const field = useRef<HTMLInputElement>(null);
   const seq = useRef(0);
 
   // The omnibox's free text: run it here.
@@ -50,8 +53,6 @@ export function LibraryScreen({ account, intent, onIntentDone }: { account: Acco
     if (intent.query !== undefined) setQ(intent.query);
     onIntentDone();
   }, [intent?.at]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => { field.current?.focus(); }, []);
 
   useEffect(() => {
     const term = q.trim();
@@ -76,42 +77,31 @@ export function LibraryScreen({ account, intent, onIntentDone }: { account: Acco
   const term = q.trim();
 
   return (
-    <div className="stack">
-      <div className="lib-search">
-        <IconSearch />
-        <input
-          ref={field}
-          className="input"
-          type="search"
-          placeholder="Search your transcripts"
-          aria-label="Search your transcripts"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Escape') setQ(''); }}
-        />
-        {searching ? <span className="spin" /> : q && <button type="button" className="lib-clear" aria-label="Clear" onClick={() => setQ('')}><IconClose /></button>}
-      </div>
+    <div className="screen" data-screen-label="Library">
+      <label className="search2">
+        <HiSearch width={15} height={15} />
+        <input type="search" placeholder="Search transcripts" aria-label="Search transcripts" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') setQ(''); }} />
+        {searching ? <span className="spin" /> : q && <button type="button" className="file__x" aria-label="Clear" onClick={() => setQ('')}><HiX width={14} height={14} /></button>}
+      </label>
 
       {searchError && <Note kind="bad">{searchError}</Note>}
 
       {term.length >= 2 ? (
         hits && (hits.length ? (
-          <Section title="Lines" side={<span className="hint">{hits.length}</span>}>
-            <div className="list">
+          <div className="card2" style={{ padding: '12px 14px 2px' }}>
+            <Eyebrow side={`${hits.length}`}>LINES</Eyebrow>
+            <div style={{ marginTop: 4 }}>
               {hits.map((h) => (
-                <div key={`${h.recordingId}:${h.sentenceId}`} className="item item--click lib-hit" role="link" tabIndex={0} onClick={() => void openHit(h)} onKeyDown={(e) => { if (e.key === 'Enter') void openHit(h); }}>
-                  <div className="item__main">
+                <div key={`${h.recordingId}:${h.sentenceId}`} className="lrow lrow--click lib-hit" role="link" tabIndex={0} onClick={() => void openHit(h)} onKeyDown={(e) => { if (e.key === 'Enter') void openHit(h); }}>
+                  <div className="lrow__main">
                     <div className="lib-hit__text"><Marked text={h.rendered || h.text} q={term} /></div>
-                    <div className="item__sub">
-                      {h.live && <><Badge kind="live" dot>Live</Badge> </>}
-                      {h.linkName}{h.recordedAt ? ` · ${ago(h.recordedAt)}` : ''} · <span className="tabular">{clock(h.mediaStart)}</span>
-                    </div>
+                    <div className="lrow__meta">{h.live ? 'LIVE · ' : ''}{h.linkName}{h.recordedAt ? ` · ${ago(h.recordedAt)}` : ''} · {clock(h.mediaStart)}</div>
                   </div>
                 </div>
               ))}
             </div>
-          </Section>
-        ) : !searching && <Empty icon={<IconSearch />}>No line says “{term}”.</Empty>)
+          </div>
+        ) : !searching && <p className="pref__sub" style={{ textAlign: 'center' }}>No line says “{term}”.</p>)
       ) : (
         <Recent own={account.reach === 'own'} />
       )}
@@ -119,55 +109,104 @@ export function LibraryScreen({ account, intent, onIntentDone }: { account: Acco
   );
 }
 
-function state(t: Transcription): React.ReactNode {
-  const cur = t.currentRecording?.state;
-  if (cur === 'live') return <Badge kind="live" dot="pulse">Live</Badge>;
-  if (cur === 'paused') return <Badge kind="warn">Paused</Badge>;
-  const job = t.job;
-  if (job) {
-    if (job.state === 'failed') return <Badge kind="bad">Failed</Badge>;
-    if (job.state === 'queued') return <Badge>Waiting</Badge>;
-    if (job.state === 'fetching' || job.state === 'transcribing') {
-      const pct = jobPct(job);
-      return <Badge kind="brand">{pct !== null ? `${pct}%` : 'Working'}</Badge>;
-    }
-    if (job.state === 'cropping') return <Badge kind="warn">To trim</Badge>;
+const meetingOfName = (name: string) => MEETING_HOSTS.find((m) => name.startsWith(`${m.name} ·`))?.name ?? null;
+const hostLabel = (u: string | null | undefined) => { try { const h = new URL(u ?? '').hostname.replace(/^(www|m)\./, ''); return h === 'youtu.be' ? 'YOUTUBE' : h.split('.').slice(-2, -1)[0]!.toUpperCase(); } catch { return ''; } };
+
+/** Where it came from, as the design's meta line says it. */
+function sourceOf(t: Transcription): { label: string; Icon: typeof HiDoc } {
+  if ((t.broadcasts?.length ?? 0) > 0) return { label: 'BROADCAST', Icon: HiBroadcast };
+  if (t.live) {
+    const m = meetingOfName(t.name);
+    if (m) return { label: m.toUpperCase(), Icon: HiMic };
+    if (t.source.kind === 'stream') return { label: hostLabel(t.source.url) || 'STREAM', Icon: HiVideo };
+    return { label: 'RECORDING', Icon: HiMic };
   }
-  return null;
+  const src = t.job?.source;
+  if (src?.kind === 'file') return { label: 'UPLOAD', Icon: HiAudio };
+  if (src?.kind === 'url') return { label: hostLabel(src.url) || 'LINK', Icon: HiVideo };
+  return { label: 'TRANSCRIPTION', Icon: HiDoc };
+}
+
+function dayOf(iso: string): 'TODAY' | 'THIS WEEK' | 'EARLIER' {
+  const d = new Date(iso);
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return 'TODAY';
+  return now.getTime() - d.getTime() < 7 * 86400_000 ? 'THIS WEEK' : 'EARLIER';
 }
 
 function Recent({ own }: { own: boolean }) {
-  const { data, error, loading, reload } = useLoad(async () => (await (await client()).transcriptions.listPage({ limit: 20 })).transcriptions);
+  const { data, error, loading, reload } = useLoad(async () => (await (await client()).transcriptions.listPage({ limit: 30 })).transcriptions);
   const working = (data ?? []).some((t) => t.currentRecording?.state === 'live' || (t.job && ['queued', 'fetching', 'transcribing'].includes(t.job.state)));
-  // Keep the badges current while something is in progress.
+  // Keep the progress current while something is in progress.
   useEffect(() => {
     if (!working) return;
-    const t = setInterval(() => void reload(), 5000);
+    const t = setInterval(() => void reload(), 4000);
     return () => clearInterval(t);
   }, [working, reload]);
 
-  if (error) return <Note kind="bad">{error} <Btn size="sm" onClick={() => void reload()}>Try again</Btn></Note>;
-  if (!data) return loading ? <Empty><span className="spin" style={{ margin: '0 auto' }} /></Empty> : null;
-  if (!data.length) return <Empty icon={<IconLibrary />}>No transcriptions yet. Transcribe something from the Page tab, or record in Live.{own && <><br />This sign-in sees only what the extension made.</>}</Empty>;
+  if (error) return <Note kind="bad">{error} <button type="button" className="pg-link" onClick={() => void reload()}>Try again</button></Note>;
+  if (!data) return loading ? <div className="empty"><span className="spin" style={{ margin: '0 auto' }} /></div> : null;
+  if (!data.length) return (
+    <div className="card2 empty2">
+      <span className="round round--lg"><HiDoc /></span>
+      <div className="empty2__text">No transcriptions yet. Transcribe something from the Page tab, upload a file, or record in Live.{own && <><br />This sign-in sees only what the extension made.</>}</div>
+    </div>
+  );
+  const groups: { label: string; items: Transcription[] }[] = [];
+  for (const t of data) {
+    const label = dayOf(t.lastRecordedAt ?? t.createdAt);
+    const g = groups.find((x) => x.label === label);
+    if (g) g.items.push(t); else groups.push({ label, items: [t] });
+  }
   return (
-    <Section title={own ? 'Recent, made by the extension' : 'Recent'} side={<Btn size="sm" kind="ghost" icon={<IconExternal />} onClick={() => openApp('/transcriptions')}>All</Btn>}>
-      <div className="list">
-        {data.map((t) => {
-          const when = t.lastRecordedAt ?? t.createdAt;
-          const dur = t.lastRecording?.durationS;
-          const failed = t.job?.state === 'failed';
-          return (
-            <div key={t.id} className="item item--click" role="link" tabIndex={0} onClick={() => void openApp(txPath(t))} onKeyDown={(e) => { if (e.key === 'Enter') void openApp(txPath(t)); }}>
-              <span className="item__icon">{t.live ? <IconLive /> : <IconFile />}</span>
-              <div className="item__main">
-                <div className="item__title" title={t.name}>{t.name}</div>
-                <div className="item__sub">{failed ? (t.job?.error || jobText(t.job!)) : [ago(when), dur ? clock(dur) : ''].filter(Boolean).join(' · ')}</div>
-              </div>
-              <div className="item__side">{state(t)}</div>
+    <>
+      {groups.map((g) => (
+        <div key={g.label} className="card2" style={{ padding: '12px 14px 2px' }}>
+          <Eyebrow side={g === groups[0] && own ? 'MADE BY THE EXTENSION' : undefined}>{g.label}</Eyebrow>
+          <div style={{ marginTop: 4 }}>{g.items.map((t) => <LibRow key={t.id} t={t} today={g.label === 'TODAY'} onChanged={() => void reload()} />)}</div>
+        </div>
+      ))}
+      <button type="button" className="hd__link" style={{ alignSelf: 'center' }} onClick={() => void openApp('/transcriptions')}>All transcriptions<HiExternal /></button>
+    </>
+  );
+}
+
+function LibRow({ t, today, onChanged }: { t: Transcription; today: boolean; onChanged: () => void }) {
+  const retry = useAction();
+  const { label, Icon } = sourceOf(t);
+  const job = t.job;
+  const cur = t.currentRecording?.state;
+  const dur = t.lastRecording?.durationS ?? job?.source?.durationS;
+  const pct = job ? jobPct(job) : null;
+  const working = !!job && ['fetching', 'transcribing'].includes(job.state);
+  const failed = job?.state === 'failed' || job?.state === 'stopped';
+  const meta = failed ? (job?.error || jobText(job!)).toUpperCase() : [label, dur ? clock(dur) : '', job?.state === 'queued' ? jobText(job).toUpperCase() : ''].filter(Boolean).join(' · ');
+  const chip = cur === 'live' ? <span className="chip chip--live">LIVE</span>
+    : cur === 'paused' ? <span className="chip chip--mute">PAUSED</span>
+    : working ? <span className="chip">{pct !== null ? `${pct}%` : 'WORKING'}</span>
+    : job?.state === 'queued' ? <span className="chip chip--mute">WAITING</span>
+    : job?.state === 'cropping' ? <span className="chip">TO TRIM</span>
+    : failed ? <span className="chip chip--bad">FAILED</span>
+    : today ? <span className="chip chip--ok">READY</span> : null;
+  const open = () => void openApp(txPath(t));
+  return (
+    <div className="lib-row">
+      <div className="lrow lrow--click" role="link" tabIndex={0} onClick={open} onKeyDown={(e) => { if (e.key === 'Enter') open(); }}>
+        <span className="round"><Icon /></span>
+        <div className="lrow__main">
+          <div className="lrow__title" title={t.name}>{t.name}</div>
+          <div className="lrow__meta" style={failed ? { color: 'var(--bad)' } : undefined} title={meta}>{meta}</div>
+          {working && <div className="lrow__bar"><i style={{ width: `${pct ?? 0}%` }} /></div>}
+          {(failed || job?.state === 'cropping') && (
+            <div className="lrow__acts" onClick={(e) => e.stopPropagation()}>
+              {failed && job && <button type="button" className="pg-link" disabled={retry.busy} onClick={() => void retry.run(async () => { await (await client()).jobs.retry(job.recordingId); onChanged(); })}>{retry.busy && <span className="spin" />}Try again</button>}
+              {job?.state === 'cropping' && <button type="button" className="pg-link" onClick={open}>Trim in the dashboard</button>}
+              {retry.error && <span className="pg-bad">{retry.error}</span>}
             </div>
-          );
-        })}
+          )}
+        </div>
+        {chip}
       </div>
-    </Section>
+    </div>
   );
 }

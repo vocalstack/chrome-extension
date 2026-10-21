@@ -29,6 +29,8 @@ export interface Account {
   scopes: string[];
   /** `own`: only what the extension created; `account`: everything. */
   reach?: 'own' | 'account';
+  /** A pasted key's last four characters, to tell keys apart (Settings). */
+  keyTail?: string;
 }
 
 interface Stored {
@@ -135,7 +137,7 @@ export async function signInWithKey(key: string): Promise<Account> {
   key = key.trim();
   if (!/^vs_key_/.test(key)) throw new AuthError('That is not a VocalStack API key: keys start with vs_key_.');
   const t = await exchange(env, key);
-  const acct: Account = { name: t.keyName || 'API key', keyId: t.apiKeyId, via: 'key', scopes: t.scopes };
+  const acct: Account = { name: t.keyName || 'API key', keyId: t.apiKeyId, via: 'key', scopes: t.scopes, keyTail: key.slice(-4) };
   await save(env, key, acct);
   return acct;
 }

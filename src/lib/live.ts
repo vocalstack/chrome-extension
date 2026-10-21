@@ -148,6 +148,9 @@ export const MEETING_HOSTS: { re: RegExp; name: string; key: MeetingKey }[] = [
   { re: /^https:\/\/discord\.com\/channels\//i, name: 'Discord', key: 'discord' },
 ];
 
+/** Settings: captions on every video played (default off; background/vcap.ts). */
+export const AUTO_CAPTIONS = 'captions.auto';
+
 /** Settings: offer to record when a tab joins a meeting (default on). */
 export const OFFER_KEY = 'meetings.offer';
 

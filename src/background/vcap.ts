@@ -8,14 +8,12 @@
 
 import { push, RpcError, type Handlers } from '../lib/rpc';
 import { account } from '../lib/auth';
-import type { VcapStart, VcapStatus } from '../lib/live';
+import { AUTO_CAPTIONS as AUTO_KEY, type VcapStart, type VcapStatus } from '../lib/live';
 import { transcribeVideo, sleep, vsClient } from './dub';
 import { videoFrame } from './live';
 import { scan } from './page';
 
 const STATE = 'vcap.state';
-/** Settings: captions on every video played (default off). */
-export const AUTO_KEY = 'captions.auto';
 const AUTO_SEEN = 'vcap.autoSeen';
 interface TabCap { status: VcapStatus; frameId: number; run: number }
 

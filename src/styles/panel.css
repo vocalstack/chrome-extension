@@ -471,3 +471,38 @@ label.item--click{cursor:pointer}
 .mcard__ready i{width:6px;height:6px;border-radius:50%;background:var(--ready)}
 .mcard__ready span{color:var(--ink-35)}
 .pg-link:disabled{opacity:.5;cursor:not-allowed}
+.welcome2{min-height:100%;flex:1;display:flex;flex-direction:column;align-items:center;padding:0 28px 22px}
+.welcome2__top{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding-top:28px}
+.welcome2__logo{width:220px;height:auto;display:block}
+.welcome2__head{font-size:17px;font-weight:600;letter-spacing:-.2px;margin-top:10px}
+.welcome2__text{max-width:280px;font-size:13px;font-weight:300;line-height:1.5;color:var(--ink-55);text-wrap:pretty}
+.welcome2__acts{width:100%;display:flex;flex-direction:column;gap:10px;margin-top:20px}
+.welcome2__env{width:100%;margin-top:14px;text-align:center}
+.keybox{border-radius:14px;background:var(--fill-04);padding:14px;display:flex;flex-direction:column;gap:10px}
+.keybox__input{box-sizing:border-box;width:100%;height:44px;padding:0 12px;border-radius:10px;border:1px solid var(--fill-10);background:var(--fill-06);color:var(--ink-96);font:500 13px var(--vs-font-mono);outline:none}
+.keybox__input:focus{border-color:var(--brand)}
+.keybox__input--bad,.keybox__input--bad:focus{border-color:var(--conf-low)}
+.keybox__err{font-size:12px;color:var(--conf-low)}
+.keybox__note{font-size:11.5px;font-weight:300;line-height:1.45;color:var(--ink-45);text-wrap:pretty}
+.acct{display:flex;align-items:center;gap:12px}
+.acct__av{flex:none;width:40px;height:40px;border-radius:50%;background:var(--fill-10);display:flex;align-items:center;justify-content:center;font:600 12px var(--vs-font-mono);color:var(--ink-62)}
+.version{text-align:center;font:500 10px var(--vs-font-mono);letter-spacing:.12em;color:var(--ink-30)}
+.dtile{flex:none;width:34px;border-radius:7px;overflow:hidden;background:var(--fill-08);text-align:center}
+.dtile__mon{font:600 7.5px var(--vs-font-mono);letter-spacing:.08em;color:var(--ink-45);padding:3px 0 1px;background:var(--fill-06)}
+.dtile__day{font:600 14px var(--vs-font-mono);color:var(--ink-80);padding:2px 0 4px}
+.vav{flex:none;width:34px;height:34px;border-radius:50%;background:color-mix(in oklab,var(--vc) 16%,transparent);color:var(--vc);display:flex;align-items:center;justify-content:center;font:600 11px var(--vs-font-mono)}
+.playbtn{flex:none;width:32px;height:32px;border-radius:50%;border:0;background:var(--fill-06);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--ink-80)}
+.playbtn:hover{background:var(--fill-12)}
+/* The screens the design does not draw (broadcast detail and form, voice
+   detail and new voice) take its surfaces: tinted cards, brand buttons. */
+.card{background:var(--fill-04);border:0;padding:14px}
+.list{background:var(--fill-04);border:0}
+.btn--primary{background:var(--brand);color:var(--brand-ink)}
+.btn--primary:hover{background:var(--brand);filter:brightness(1.06)}
+.search2{display:flex;align-items:center;gap:9px;height:40px;padding:0 6px 0 12px;border-radius:11px;background:var(--fill-06);color:var(--ink-40)}
+.search2 input{flex:1;min-width:0;border:0;background:none;outline:none;font-size:13px;font-weight:400;color:var(--ink-96)}
+.search2 input::placeholder{color:var(--ink-40);font-weight:300}
+.search2 input::-webkit-search-cancel-button{display:none}
+.search2:focus-within{box-shadow:0 0 0 1.5px var(--brand)}
+.lib-row .lrow{border-bottom:1px solid var(--hair)}
+.lib-row:last-child .lrow{border-bottom:0}
