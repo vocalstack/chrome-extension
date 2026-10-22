@@ -13,6 +13,7 @@ import { Badge, Btn, Empty, Field, IconBtn, LanguageSelect, Note, Section, ago, 
 import { IconArchive, IconBack, IconCheck, IconClose, IconCopy, IconExternal, IconLink, IconMic, IconPause, IconPlay, IconPlus, IconRestore, IconStop, IconTrash, IconUser } from '../../ui/icons';
 import { BroadcastForm } from './Form';
 import { isActive, sessionOf } from './shared';
+import { useWarm } from '../../ui/useWarm';
 
 export function BroadcastDetail({ initial, account, onSettings, live, onLive, onBack, onChanged }: {
   initial: Broadcast;
@@ -92,6 +93,8 @@ function GoLive({ b, account, onSettings, here, last, onLive }: { b: Broadcast; 
   const [conflict, setConflict] = useState(false);
   const act = useAction();
   const [, tick] = useState(0);
+  // Instant start: while Go live is on screen and in use, an engine stays loaded.
+  useWarm(!here && can(account, 'record'), lang);
   useEffect(() => {
     if (!here) return;
     const t = setInterval(() => tick((n) => n + 1), 1000);

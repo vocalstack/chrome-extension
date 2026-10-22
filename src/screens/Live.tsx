@@ -19,6 +19,7 @@ import { HiCaptions, HiCursor, HiExternal, HiMic, HiPause, HiPlayStroke, Meeting
 import { SpokenLanguageCard, useLang, useReadLang, useSpeakerLabels, useSpokenLang } from '../ui/langs';
 import { problemOf } from './page/errors';
 import { useActiveTab } from '../ui/useTab';
+import { useWarm } from '../ui/useWarm';
 
 type Source = 'tab' | 'tabmic' | 'mic';
 
@@ -120,6 +121,8 @@ export function LiveScreen({ account, live, intent, onIntentDone, onSettings }: 
   const sessions = [...live].sort((a, b) => b.startedAt - a.startedAt);
   const running = sessions.filter(isRunning);
   const ended = sessions.filter((s) => !isRunning(s));
+  // Instant start: while Start is on screen and in use, an engine stays loaded.
+  useWarm(prefsReady && mayRecord && !running.length, spoken);
 
   const go = () => start.run(() => rpc('live.start', {
     mode: isMeeting ? 'meeting' : 'record',

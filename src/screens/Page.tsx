@@ -16,7 +16,8 @@ import { MEDIA_PAGE, type FoundMedia } from '../lib/media';
 import { Note, errorText, useAction } from '../ui/kit';
 import { Eyebrow, Toggle } from '../ui/ds';
 import { HiAudio, HiCheck, HiChevronRight, HiDoc, HiGlobe, HiLang, HiMic, HiNone, HiVideo, HiVoices, MeetingLogo } from '../ui/icons';
-import { ReadInPicker, useLang, useReadLang } from '../ui/langs';
+import { ReadInPicker, useLang, useReadLang, useSpokenLang } from '../ui/langs';
+import { useWarm } from '../ui/useWarm';
 import { InvokeNotice, mmss, useInvoked } from './Live';
 import { problemOf } from './page/errors';
 import { created, patch, track, useTracked } from './page/tracker';
@@ -341,6 +342,9 @@ function MediaCards({ account, live, tabId, url, title, liveStream, onSettings, 
   const capAct = useAction();
   const dubAct = useAction();
   const mayRecord = can(account, 'record');
+  const [spoken, , spokenReady] = useSpokenLang();
+  // Instant start for a stream's Captions, which start a live recording.
+  useWarm(!!liveStream && spokenReady && mayRecord && !tabHolder(live, tabId), spoken);
 
   useEffect(() => {
     rpc('vcap.status', { tabId }).then(setCap, () => {});
