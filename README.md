@@ -2,6 +2,8 @@
 
 The VocalStack browser extension (Manifest V3). Private: load it unpacked; it is not in any store.
 
+Read more about the [VocalStack transcription extension for Chrome and Edge](https://vocalstack.com/chrome-transcription-extension/) on the [VocalStack website](https://vocalstack.com/).
+
 What it does, from the side panel (toolbar icon):
 
 - **This page** — finds the audio and video a page plays or links to (every frame, embedded players, media links), checks which ones VocalStack can fetch, and transcribes them. Live captions and dubbing for the page's video. Drop or pick a local file to upload it.
