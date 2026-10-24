@@ -3,9 +3,9 @@
 // (VS_WEBSTORE=1 scripts/package.sh); CI runs the same from
 // .github/workflows/publish-webstore.yml. One-time setup: PUBLISHING.md.
 //
-// Not live yet: with no store credentials it says what is missing and
-// exits 0, so the workflow stays green until the listing exists. The
-// PUBLISH_EXTENSION repo variable set to "false" skips it too.
+// With no store credentials it says what is missing and exits 0, unless
+// WEBSTORE_REQUIRED=true (a release, from build.yml), when it fails. The
+// PUBLISH_EXTENSION repo variable set to "false" skips it either way.
 //
 // Chrome Web Store API v2 (chrome-webstore-upload 6), which needs the
 // publisher id as well as the item id.
@@ -54,7 +54,11 @@ async function main() {
 
   const config = Object.fromEntries(Object.entries(NAMES).map(([k, env]) => [k, process.env[env]]));
   const missing = ['extensionId', 'publisherId', 'clientId', 'clientSecret', 'refreshToken'].filter((k) => !config[k]);
-  if (missing.length) skip(`no store credentials yet (${missing.map((k) => NAMES[k]).join(', ')}); see PUBLISHING.md.`);
+  if (missing.length) {
+    const why = `no store credentials (${missing.map((k) => NAMES[k]).join(', ')}); see PUBLISHING.md.`;
+    if (process.env.WEBSTORE_REQUIRED === 'true') { summary(`Failed: ${why}`); fail(why); }
+    skip(why);
+  }
 
   if (!existsSync(ZIP)) fail('output/vocalstack-webstore.zip is missing.', 'Run `npm run publish:webstore`, which builds it first.');
 

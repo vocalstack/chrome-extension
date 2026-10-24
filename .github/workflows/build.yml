@@ -12,7 +12,8 @@
 #   https://github.com/vocalstack/chrome-extension/releases/download/latest/vocalstack-chrome.zip
 #   https://github.com/vocalstack/chrome-extension/releases/download/latest/vocalstack-edge.zip
 # Unzip, then chrome://extensions (edge://extensions) → Developer mode →
-# Load unpacked → the unzipped folder.
+# Load unpacked → the unzipped folder. Then the webstore job publishes the
+# version to the Chrome Web Store (publish-webstore.yml).
 name: build
 
 on:
@@ -115,3 +116,13 @@ jobs:
             gh release create latest output/vocalstack-chrome.zip output/vocalstack-edge.zip \
               --target "$GITHUB_SHA" --latest=false --title "VocalStack for Chrome and Edge $tag (latest)" --notes "$notes"
           fi
+
+  # A released version goes to the Chrome Web Store, for everyone.
+  webstore:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    uses: ./.github/workflows/publish-webstore.yml
+    with:
+      target: default
+      publish: true
+    secrets: inherit

@@ -6,7 +6,7 @@ Three ways out of this repo:
 |---|---|---|
 | Unpacked builds (Chrome, Edge) | `.github/workflows/build.yml` on every push to main: run artifacts, and the `unpacked` pre-release (every main build) | live |
 | Releases | a version tag: `.github/workflows/build.yml` makes that version's release (GitHub's Latest) and moves the `latest` release to it; vocalstack.com serves `latest` | live |
-| Chrome Web Store | `.github/workflows/publish-webstore.yml`, run by hand; `scripts/publish-webstore.mjs` | wired, not set up: no listing yet |
+| Chrome Web Store | every release: `build.yml`'s webstore job runs `.github/workflows/publish-webstore.yml` (`scripts/publish-webstore.mjs`); also by hand | live once the API secrets are set |
 
 ## Releasing a version
 
@@ -23,6 +23,8 @@ The tag's build checks the tag matches the build's version, then publishes the r
 - `https://github.com/vocalstack/chrome-extension/releases/download/latest/vocalstack-edge.zip`
 
 vocalstack.com/downloads/vocalstack-chrome.zip and -edge.zip redirect to these links (vocalstack/transcribe `scripts/website_vercel.sh`), so the website offers a new version as soon as its release is out, with no deploy.
+
+Once the release is out, the same run uploads the version to the Chrome Web Store and submits it for everyone (the `webstore` job). Google reviews it before users get it.
 
 ## Unpacked
 
@@ -81,13 +83,15 @@ For local runs (`npm run publish:webstore`), the same names can go in `.env.loca
 
 ## Chrome Web Store: publishing
 
-Go to Actions → **publish-webstore** → Run workflow. The options:
+Every release publishes: after a version tag's build and release succeed, `build.yml` runs `publish-webstore.yml` with audience `default` and publish on. Missing credentials fail that job (the release itself is already out). If the previous version is still in Google's review, the store refuses the upload; the job stays green and its summary says so. Publish that version later by hand, or wait for the next release.
+
+By hand: Actions → **publish-webstore** → Run workflow. The options:
 - Audience: `trustedTesters` (the default) or `default` (everyone).
 - Publish: when off (the default), the run uploads a draft only.
 
-Without credentials the run is skipped, and stays green. If the same version is still in review, the run is skipped too.
+A run by hand without credentials is skipped, and stays green. If the same version is still in review, the run is skipped too.
 
-To publish every build on main once the listing is live, add `push: branches: [main]` to the workflow's `on:`. To pause publishing with no code change, run `gh variable set PUBLISH_EXTENSION --body false`; delete the variable to resume.
+To pause publishing with no code change, run `gh variable set PUBLISH_EXTENSION --body false`; delete the variable to resume.
 
 ## Edge Add-ons
 
