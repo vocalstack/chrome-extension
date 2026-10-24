@@ -14,6 +14,8 @@ import { VocalStack, type RealtimeSession, type Subscription } from '@vocalstack
 import { push, rpc, type LiveEvent } from '../lib/rpc';
 import type { LiveStatus } from '../lib/live';
 import type { OffCmd } from '../lib/offscreen';
+import { userText } from '../lib/errors';
+import { report } from '../lib/sentry';
 
 const RATE = 16000;
 /** Samples per socket chunk: a quarter of a second. */
@@ -47,6 +49,7 @@ const lives = new Map<string, Live>();
 class Coded extends Error {
   constructor(message: string, readonly code: string) {
     super(message);
+    this.name = 'Coded';
   }
 }
 
@@ -138,7 +141,7 @@ export async function startLive(cmd: Extract<OffCmd, { off: 'live.start' }>): Pr
       return l.status;
     }
     await teardown(l);
-    set(l, { state: 'failed', error: e instanceof Error ? e.message : String(e), errorCode: code });
+    set(l, { state: 'failed', error: userText(e), errorCode: code });
     forgetLater(l);
     throw e;
   }
@@ -151,7 +154,10 @@ async function openInputs(l: Live, streamId: string | undefined) {
     const tab = await md.getUserMedia({
       audio: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: streamId } } as MediaTrackConstraints,
       video: false,
-    }).catch((e) => { throw new Coded(`The tab could not be captured: ${(e as Error).message}`, 'tab_capture'); });
+    }).catch((e) => {
+      report(e, 'capture tab');
+      throw new Coded('This tab’s sound couldn’t be captured. Reload the tab, then start again.', 'tab_capture');
+    });
     l.streams.push(tab);
     // Capturing a tab silences it: play it back so the person still hears it.
     const a = new Audio();
@@ -166,7 +172,9 @@ async function openInputs(l: Live, streamId: string | undefined) {
       .catch((e: DOMException) => {
         if (e.name === 'NotAllowedError' || e.name === 'SecurityError') throw new Coded('VocalStack may not use the microphone yet. Allow it, then try again.', 'mic_permission');
         if (e.name === 'NotFoundError') throw new Coded('No microphone was found.', 'mic_missing');
-        throw new Coded(`The microphone could not be opened: ${e.message}`, 'mic_error');
+        if (e.name === 'NotReadableError') throw new Coded('The microphone is in use by another app, or the system won’t let the browser use it. Close the other app, then try again.', 'mic_error');
+        report(e, 'capture mic');
+        throw new Coded('The microphone couldn’t be opened. Try again.', 'mic_error');
       });
     l.streams.push(mic);
   }
@@ -247,7 +255,10 @@ async function read(l: Live) {
       }
     }
   } catch (e) {
-    if (!l.stopping) set(l, { error: e instanceof Error ? e.message : String(e), errorCode: (e as { code?: string }).code });
+    if (!l.stopping) {
+      report(e, 'live session');
+      set(l, { error: userText(e), errorCode: (e as { code?: string }).code });
+    }
   }
   if (!l.stopping) {
     // The session ended on its own: the plan's time limit, or a dropped

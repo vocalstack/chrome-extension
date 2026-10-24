@@ -3,6 +3,7 @@
  *  API's address, the tab's capture stream id) comes in the command. */
 
 import type { LiveStart, LiveStatus } from './live';
+import type { Failure } from './errors';
 
 export interface DubSentence {
   id: number;
@@ -23,7 +24,7 @@ export type OffCmd =
   | { off: 'dub.sync'; tabId: number; t: number; paused: boolean; rate: number; at: number }
   | { off: 'dub.stop'; tabId: number };
 
-export type OffAnswer = { ok: true; value?: unknown; statuses?: LiveStatus[] } | { ok: false; error: string; code?: string };
+export type OffAnswer = { ok: true; value?: unknown; statuses?: LiveStatus[] } | Failure;
 
 export function isOffCmd(m: unknown): m is OffCmd {
   return !!m && typeof (m as { off?: unknown }).off === 'string';

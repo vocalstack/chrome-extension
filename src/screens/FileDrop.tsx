@@ -5,10 +5,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { Transcription } from '@vocalstack/contract';
+import { VocalStackError } from '@vocalstack/js-sdk';
 import { currentEnv } from '../lib/env';
 import type { Account } from '../lib/auth';
 import { can, whyNot } from '../lib/access';
-import { rpc } from '../lib/rpc';
+import { rpc, RpcError } from '../lib/rpc';
 import { IconBtn, openApp } from '../ui/kit';
 import { IconAlert, IconCheck, IconClose, IconExternal, IconUpload } from '../ui/icons';
 import { problemOf } from './page/errors';
@@ -49,10 +50,14 @@ async function send(file: File, options: object, onProgress: (sent: number, tota
       let body: { error?: { code?: string; message?: string }; code?: string; message?: string } | null = null;
       try { body = JSON.parse(x.responseText); } catch { /* not JSON */ }
       if (x.status >= 200 && x.status < 300 && body) resolve(body as unknown as Transcription);
-      else reject({ status: x.status, code: body?.error?.code ?? body?.code, message: body?.error?.message ?? body?.message ?? `The upload failed (${x.status}).` });
+      else {
+        // Worded by its code like any API answer (lib/errors.ts).
+        const code = (body?.error?.code ?? body?.code ?? (x.status === 413 ? 'payload_too_large' : 'internal')) as ConstructorParameters<typeof VocalStackError>[0];
+        reject(new VocalStackError(code, body?.error?.message ?? body?.message ?? '', { status: x.status }));
+      }
     });
     // A file over the upload limit is cut off mid-body: it reads as a network error.
-    x.addEventListener('error', () => reject({ status: 0, message: 'The upload didn’t reach VocalStack. Check the connection, or the file may be over the upload limit.' }));
+    x.addEventListener('error', () => reject(new RpcError('The upload didn’t reach VocalStack. Check the connection, or the file may be over the upload limit.')));
     x.send(fd);
   });
 }

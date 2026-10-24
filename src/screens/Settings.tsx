@@ -7,7 +7,7 @@ import type { Account } from '../lib/auth';
 import { ENVS, type Env, type EnvName } from '../lib/env';
 import { rpc } from '../lib/rpc';
 import { AUTO_CAPTIONS, OFFER_KEY } from '../lib/live';
-import { Field, Note, useAction } from '../ui/kit';
+import { errorText, Field, Note, useAction } from '../ui/kit';
 import { HiKey } from '../ui/icons';
 import { Toggle } from '../ui/ds';
 import { SpeakerLabelsCard } from '../ui/langs';
@@ -19,7 +19,7 @@ export function EnvPicker({ env, compact }: { env: Env; compact?: boolean }) {
   const pick = async (name: EnvName) => {
     setBusy(true);
     setError('');
-    try { await rpc('env.set', { name }); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    try { await rpc('env.set', { name }); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   };
   const select = (
     <select className="select" aria-label="Environment" value={env.name} disabled={busy} onChange={(e) => void pick(e.target.value as EnvName)}>

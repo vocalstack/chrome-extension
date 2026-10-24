@@ -32,8 +32,10 @@ export function scopeProblem(said: string): Problem | null {
 export function problemOf(e: unknown): Problem {
   const err = e as { code?: string; status?: number; message?: string } | null;
   const code = err?.code;
+  // The API's own words where they're about the request (lib/errors.ts),
+  // else fixed copy: never its technical detail.
   const said = errorText(e);
-  const scope = scopeProblem(said);
+  const scope = code === 'forbidden' || !code ? scopeProblem(said) : null;
   if (scope) return scope;
   switch (code) {
     case 'insufficient_credit': return { text: 'Not enough credit left for this. Top up or change your plan in Billing.', billing: true };

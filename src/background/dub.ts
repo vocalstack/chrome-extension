@@ -9,6 +9,8 @@
  *  is shared per address (background/video.ts). */
 
 import { push, RpcError, type Handlers } from '../lib/rpc';
+import { userText } from '../lib/errors';
+import { report } from '../lib/sentry';
 import { currentEnv } from '../lib/env';
 import type { DubStart, DubStatus } from '../lib/live';
 import { off, videoFrame } from './live';
@@ -76,7 +78,7 @@ export function registerDub(): Handlers {
     const runId = Date.now();
     const first: DubStatus = { tabId: req.tabId, lang: req.lang, title: req.title, url: req.url, state: 'transcribing', progress: 0 };
     await put(req.tabId, { status: first, frameId: 0, run: runId });
-    run(req, runId).catch((e) => set({ ...first, state: 'failed', error: e instanceof Error ? e.message : String(e) }, runId));
+    run(req, runId).catch((e) => { report(e, 'dub'); set({ ...first, state: 'failed', error: userText(e) }, runId); });
     return first;
   };
   /** Dub on, no language to dub into: the voice stops, the dub waits. */

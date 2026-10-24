@@ -4,7 +4,9 @@
  *  relays. Captions go to the frame of the tab that holds the main video.
  *  The toolbar badge says REC while anything records. */
 
-import { push, RpcError, type Handlers, type LiveEvent, type Push } from '../lib/rpc';
+import { push, RpcError, rpcError, type Handlers, type LiveEvent, type Push } from '../lib/rpc';
+import { GENERIC, userText } from '../lib/errors';
+import { report } from '../lib/sentry';
 import { currentEnv } from '../lib/env';
 import { capturable, meetingHost, meetingOf, tabHolder, RECORDING_MODES, type LiveStart, type LiveStatus, type CaptionStyle } from '../lib/live';
 import type { OffAnswer, OffCmd } from '../lib/offscreen';
@@ -37,8 +39,8 @@ async function hasOffscreen(): Promise<boolean> {
 export async function off<T = unknown>(cmd: OffCmd): Promise<{ value?: T; statuses?: LiveStatus[] }> {
   await ensureOffscreen();
   const a = (await chrome.runtime.sendMessage(cmd)) as OffAnswer | undefined;
-  if (!a) throw new RpcError('The audio page did not answer.');
-  if (!a.ok) throw new RpcError(a.error, a.code);
+  if (!a) throw new RpcError('VocalStack’s audio didn’t start. Try again.');
+  if (!a.ok) throw rpcError(a);
   return a as { value?: T; statuses?: LiveStatus[] };
 }
 
@@ -96,7 +98,8 @@ async function streamIdFor(tab: chrome.tabs.Tab): Promise<string> {
       throw new RpcError('Click the VocalStack icon in Chrome’s toolbar while on this tab, then start again: Chrome lets VocalStack record a tab only after that.', 'invoke');
     }
     if (/active stream|already/i.test(m)) throw new RpcError('Another extension or browser feature is already using this tab’s sound. Stop it there, then start again.', 'tab_busy');
-    throw new RpcError(`The tab could not be captured: ${m}`, 'tab_capture');
+    report(e, 'capture stream id');
+    throw new RpcError('This tab’s sound couldn’t be captured. Reload the tab, then start again.', 'tab_capture');
   }
 }
 
@@ -344,7 +347,7 @@ export function registerLive(): Handlers {
 }
 
 function notifyError(e: unknown) {
-  chrome.notifications.create({ type: 'basic', iconUrl: chrome.runtime.getURL('/icon/128.png'), title: 'VocalStack', message: e instanceof Error ? e.message : String(e) });
+  chrome.notifications.create({ type: 'basic', iconUrl: chrome.runtime.getURL('/icon/128.png'), title: 'VocalStack', message: userText(e) || GENERIC });
 }
 
 /** Whether the extension may use the microphone; 'unknown' when the

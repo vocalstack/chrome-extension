@@ -5,5 +5,8 @@ import '@fontsource/inter/500.css';
 import '@fontsource/inter/600.css';
 import '../../styles/panel.css';
 import { App } from '../../ui/App';
+import { initSentry } from '../../lib/sentry';
+
+initSentry('panel');
 
 createRoot(document.getElementById('root')!).render(<App />);

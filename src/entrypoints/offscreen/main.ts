@@ -6,6 +6,10 @@
 import { isOffCmd, type OffAnswer, type OffCmd } from '../../lib/offscreen';
 import { forgetLive, listLive, liveHistory, pauseLive, setLive, startLive, stopLive } from '../../offscreen/capture';
 import { dubLoad, dubStop, dubSync } from '../../offscreen/dub';
+import { failure } from '../../lib/errors';
+import { initSentry, report } from '../../lib/sentry';
+
+initSentry('offscreen');
 
 async function handle(cmd: OffCmd): Promise<OffAnswer> {
   switch (cmd.off) {
@@ -24,6 +28,6 @@ async function handle(cmd: OffCmd): Promise<OffAnswer> {
 
 chrome.runtime.onMessage.addListener((msg, _sender, send: (a: OffAnswer) => void) => {
   if (!isOffCmd(msg)) return false;
-  handle(msg).then(send, (e: unknown) => send({ ok: false, error: e instanceof Error ? e.message : String(e), code: (e as { code?: string })?.code }));
+  handle(msg).then(send, (e: unknown) => { report(e, `offscreen ${msg.off}`); send(failure(e)); });
   return true;
 });

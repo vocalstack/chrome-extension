@@ -9,6 +9,8 @@ import type { Account } from './auth';
 import type { EnvName } from './env';
 import type { FoundMedia } from './media';
 import type { LiveStatus, LiveStart, DubStart, DubStatus, CaptionStyle, VcapStart, VcapStatus } from './live';
+import { failure, type Failure } from './errors';
+import { report } from './sentry';
 
 export interface Methods {
   'auth.account': [void, Account | null];
@@ -60,18 +62,24 @@ export type Args<M extends Method> = Methods[M][0];
 export type Answer<M extends Method> = Methods[M][1];
 
 interface Envelope { rpc: Method; args: unknown }
-type Reply = { ok: true; value: unknown } | { ok: false; error: string; code?: string };
+type Reply = { ok: true; value: unknown } | Failure;
 
+/** The extension's own error, worded for a person (lib/errors.ts). Across
+ *  a reply it carries the API's code, status and request id as well. */
 export class RpcError extends Error {
-  constructor(message: string, readonly code?: string) {
+  constructor(message: string, readonly code?: string, readonly status?: number, readonly requestId?: string) {
     super(message);
+    this.name = 'RpcError';
   }
 }
 
+/** A reply's failure, thrown again on the asking side. */
+export const rpcError = (f: Failure) => new RpcError(f.error, f.code, f.status, f.requestId);
+
 export async function rpc<M extends Method>(method: M, ...args: Args<M> extends void ? [] : [Args<M>]): Promise<Answer<M>> {
   const reply = (await chrome.runtime.sendMessage({ rpc: method, args: args[0] } satisfies Envelope)) as Reply | undefined;
-  if (!reply) throw new RpcError(`No answer to ${method}`);
-  if (!reply.ok) throw new RpcError(reply.error, reply.code);
+  if (!reply) throw new RpcError('VocalStack didn’t answer. Try again.');
+  if (!reply.ok) throw rpcError(reply);
   return reply.value as Answer<M>;
 }
 
@@ -86,7 +94,7 @@ export function serve(handlers: Handlers) {
     if (!h) return false;
     Promise.resolve()
       .then(() => h(msg.args as never, sender))
-      .then((value) => send({ ok: true, value }), (e: unknown) => send({ ok: false, error: e instanceof Error ? e.message : String(e), code: (e as { code?: string })?.code }));
+      .then((value) => send({ ok: true, value }), (e: unknown) => { report(e, `rpc ${msg.rpc}`); send(failure(e)); });
     return true;
   });
 }

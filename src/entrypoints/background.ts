@@ -11,8 +11,10 @@ import { registerDub } from '../background/dub';
 import { registerVcap } from '../background/vcap';
 import { registerMeetings } from '../background/meetings';
 import { showInPanel } from '../background/panel';
+import { initSentry } from '../lib/sentry';
 
 export default defineBackground(() => {
+  initSentry('background');
   // The toolbar icon opens the panel. Handled here rather than with
   // openPanelOnActionClick so the click also counts as invoking the
   // extension on the tab, which tab capture requires.

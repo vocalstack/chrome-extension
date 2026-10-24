@@ -6,6 +6,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { LanguageLists } from '@vocalstack/contract';
 import { client, currentEnv } from '../lib/client';
 import { IconAlert, IconInfo, IconCheck } from './icons';
+import { userText } from '../lib/errors';
+import { report } from '../lib/sentry';
 
 export function Btn({ kind, size, block, busy, icon, children, ...rest }: {
   kind?: 'primary' | 'live' | 'danger' | 'ghost';
@@ -69,11 +71,9 @@ export function Section({ title, side, children }: { title: string; side?: React
   );
 }
 
-/** An error's message, worded for a person. */
+/** An error's message, worded for a person (lib/errors.ts). */
 export function errorText(e: unknown): string {
-  if (!e) return '';
-  const m = (e as { message?: string }).message ?? String(e);
-  return m.replace(/^VocalStackError:\s*/, '');
+  return userText(e);
 }
 
 /** Load once (and again on `reload`), with loading and error state. */
@@ -89,6 +89,7 @@ export function useLoad<T>(load: () => Promise<T>, deps: unknown[] = []) {
       const v = await load();
       if (n === seq.current) { setData(v); setError(''); }
     } catch (e) {
+      report(e, 'panel load');
       if (n === seq.current) setError(errorText(e));
     } finally {
       if (n === seq.current) setLoading(false);
@@ -109,6 +110,7 @@ export function useAction() {
     try {
       return await fn();
     } catch (e) {
+      report(e, 'panel action');
       setError(errorText(e));
       return undefined;
     } finally {

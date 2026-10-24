@@ -10,6 +10,8 @@
  *  browser runs). */
 
 import { push, RpcError, type Handlers } from '../lib/rpc';
+import { userText } from '../lib/errors';
+import { report } from '../lib/sentry';
 import { account } from '../lib/auth';
 import { AUTO_CAPTIONS, type VcapStart, type VcapStatus } from '../lib/live';
 import { videoFrame } from './live';
@@ -71,7 +73,7 @@ async function start(req: VcapStart): Promise<VcapStatus> {
   const runId = Date.now();
   const first: VcapStatus = { tabId: req.tabId, lang: req.lang ?? null, url: req.url, title: req.title, state: 'transcribing', progress: 0, auto: req.auto };
   await put(req.tabId, { status: first, frameId: 0, run: runId });
-  run(req, runId).catch((e) => set({ ...first, state: 'failed', error: e instanceof Error ? e.message : String(e) }, runId));
+  run(req, runId).catch((e) => { report(e, 'video captions'); set({ ...first, state: 'failed', error: userText(e) }, runId); });
   return first;
 }
 

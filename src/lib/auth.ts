@@ -20,6 +20,8 @@
 
 import { currentEnv, type Env } from './env';
 import { push } from './rpc';
+import { apiText } from './errors';
+import { report, reportState } from './sentry';
 
 export interface Account {
   /** The account's display name, as Connect or the key exchange named it. */
@@ -64,6 +66,7 @@ async function pkce(): Promise<{ verifier: string; challenge: string }> {
 export class AuthError extends Error {
   constructor(message: string, readonly code = 'auth') {
     super(message);
+    this.name = 'AuthError';
   }
 }
 
@@ -106,14 +109,19 @@ export async function signInWithConnect(): Promise<Account> {
     back = await chrome.identity.launchWebAuthFlow({ url: url.toString(), interactive: true });
   } catch (e) {
     // The window was closed, or the dashboard could not be reached.
-    throw new AuthError(/did not approve|closed|canceled|cancelled/i.test(String(e)) ? 'Sign-in was cancelled.' : `Sign-in did not finish: ${String((e as Error)?.message ?? e)}`, 'cancelled');
+    if (/did not approve|closed|canceled|cancelled/i.test(String(e))) throw new AuthError('Sign-in was cancelled.', 'cancelled');
+    report(e, 'sign-in window');
+    throw new AuthError('Sign-in didn’t finish. Check your connection, then try again.', 'cancelled');
   }
   if (!back) throw new AuthError('Sign-in was cancelled.', 'cancelled');
   const answer = new URL(back).searchParams;
   if (answer.get('state') !== state) throw new AuthError('The sign-in answer did not match this request. Try again.');
   if (answer.get('error') === 'access_denied') throw new AuthError('You cancelled on the VocalStack screen.', 'cancelled');
   const code = answer.get('code');
-  if (!code) throw new AuthError(answer.get('error_description') ?? 'Sign-in did not return a code.');
+  if (!code) {
+    reportState(`Connect answered without a code: ${answer.get('error') ?? 'no error'}`, 'sign-in answer');
+    throw new AuthError('Sign-in didn’t finish. Try again.');
+  }
 
   const res = await fetch(`${env.api}/v1/connect/token`, {
     method: 'POST',
@@ -122,7 +130,8 @@ export async function signInWithConnect(): Promise<Account> {
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok || !body.access_token) {
-    throw new AuthError(body.error_description ?? body.error?.message ?? `Sign-in failed (${res.status}).`);
+    // invalid_grant: the code expired or was used (a slow or doubled sign-in).
+    throw new AuthError(body.error === 'invalid_grant' ? 'That sign-in expired. Sign in again.' : res.status >= 500 ? apiText('internal', '') : 'Sign-in didn’t finish. Try again.');
   }
   const acct: Account = { name: body.account?.name ?? 'VocalStack', keyId: body.key_id ?? '', via: 'connect', scopes: String(body.scope ?? '').split(/\s+/).filter(Boolean), reach: body.reach === 'own' ? 'own' : 'account' };
   await save(env, body.access_token, acct);
@@ -170,7 +179,11 @@ async function exchange(env: Env, key: string): Promise<Exchanged> {
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const msg = body?.error?.message ?? body?.message ?? `The key could not be checked (${res.status}).`;
+    const code = String(body?.error?.code ?? body?.code ?? '');
+    const msg = res.status === 401 ? 'That API key isn’t valid. It may have been revoked or have expired.'
+      : res.status === 429 ? apiText('rate_limited', '')
+      : res.status >= 500 ? apiText(code || 'internal', '')
+      : 'The key couldn’t be checked. Try again.';
     throw new AuthError(msg, res.status === 401 ? 'invalid_key' : 'auth');
   }
   const kt: KeyToken = { token: body.token, expiresAt: Date.parse(body.expiresAt), env: env.name };
