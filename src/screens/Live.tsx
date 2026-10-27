@@ -15,8 +15,8 @@ import { capturable, isRunning, meetingHost, tabHolder, RECORDING_MODES, type Li
 import { errorText, Note, openApp, useAction } from '../ui/kit';
 import { AccessNote, ProblemNote } from '../ui/access';
 import { Eyebrow, Switch, Toggle } from '../ui/ds';
-import { HiCaptions, HiCursor, HiExternal, HiMic, HiPause, HiPlayStroke, MeetingLogo, YouTubeLogo } from '../ui/icons';
-import { SpokenLanguageCard, useLang, useReadLang, useSpeakerLabels, useSpokenLang } from '../ui/langs';
+import { HiCaptions, HiExternal, HiWarn, Mark, HiMic, HiPause, HiPlayStroke, MeetingLogo, YouTubeLogo } from '../ui/icons';
+import { useLang, useReadLang, useSpeakerLabels, useSpokenLang } from '../ui/langs';
 import { problemOf } from './page/errors';
 import { useActiveTab } from '../ui/useTab';
 import { useWarm } from '../ui/useWarm';
@@ -32,12 +32,17 @@ export function mmss(seconds: number): string {
   return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-export const INVOKE_HINT = 'To record or caption this tab, click the VocalStack icon in Chrome’s toolbar once while on this tab.';
+const BROWSER_NAME = import.meta.env.BROWSER === 'edge' ? 'Edge' : 'Chrome';
 const BROWSER_PAGE = 'Chrome doesn’t let extensions record its own pages or the extension store. Open a web page, or use the microphone.';
 const SOURCE_NOTE: Record<Source, string> = {
   tab: 'Only sound from this tab is recorded.',
   tabmic: 'This tab and your microphone are recorded together, so your own voice is included.',
   mic: 'Only your microphone is recorded.',
+};
+/** What a source leaves out of the transcript. */
+const SOURCE_WARN: Partial<Record<Source, string>> = {
+  tab: 'Your microphone won’t be recorded, so your own voice will be missing from the transcript.',
+  mic: 'Sound from this tab won’t be recorded. Other people in the tab, and any video audio, will be missing.',
 };
 /** Stored choice (`liveInput`), as the earlier panel saved it too. */
 const fromStored = (v: unknown): Source | null => (v === 'tab' ? 'tab' : v === 'mic' ? 'mic' : v === 'both' || v === 'tabmic' ? 'tabmic' : null);
@@ -78,8 +83,31 @@ export function useInvoked(tabId: number | undefined, live: LiveStatus[]): boole
   return invoked;
 }
 
-export function InvokeNotice() {
-  return <div className="notice" role="status"><HiCursor /><div>{INVOKE_HINT}</div></div>;
+/** ONE CLICK: the toolbar, its VocalStack icon pressed by a pointer, and
+ *  what to do. While it shows, the real icon wears a "!" on this tab. */
+export function InvokeNotice({ tabId }: { tabId?: number }) {
+  useEffect(() => {
+    if (tabId === undefined) return;
+    void rpc('tab.badge', { tabId, on: true }).catch(() => {});
+    return () => { void rpc('tab.badge', { tabId, on: false }).catch(() => {}); };
+  }, [tabId]);
+  return (
+    <div className="invoke" role="status">
+      <div className="invoke__bar" aria-hidden="true">
+        <span className="invoke__omni" />
+        <span className="invoke__btn">
+          <span className="invoke__ping" />
+          <span className="invoke__icon"><Mark width={16} height={16} /></span>
+          <svg className="invoke__cursor" viewBox="0 0 24 24" width="22" height="22"><path d="M5 3l14 8.5-6.2 1.3 3.6 6.6-2.6 1.4-3.6-6.6L5.5 18z" fill="#fff" stroke="#131326" strokeWidth="1.2" strokeLinejoin="round" /></svg>
+        </span>
+        <span className="invoke__avatar" />
+      </div>
+      <div className="invoke__text">
+        <span className="invoke__chip">ONE CLICK</span>
+        <div>Click the <strong>VocalStack icon</strong> in {BROWSER_NAME}’s toolbar, up top, to record or caption this tab.</div>
+      </div>
+    </div>
+  );
 }
 
 export function LiveScreen({ account, live, intent, onIntentDone, onSettings }: {
@@ -91,8 +119,8 @@ export function LiveScreen({ account, live, intent, onIntentDone, onSettings }: 
 }) {
   const tab = useActiveTab();
   const meeting = meetingHost(tab?.url);
-  const [stored, setStored] = useState<Source>('tab');
-  /** This tab's own pick (a meeting tab starts on Tab + mic). */
+  const [stored, setStored] = useState<Source>('tabmic');
+  /** This tab's own pick (a meeting tab always starts on Tab + mic). */
   const [picked, setPicked] = useState<{ tabId?: number; v: Source } | null>(null);
   const [readLang, , readReady] = useReadLang();
   const [spoken, , spokenReady] = useSpokenLang();
@@ -148,21 +176,21 @@ export function LiveScreen({ account, live, intent, onIntentDone, onSettings }: 
       {!running.length && (
         <>
           <AccessNote account={account} need="record" onSettings={onSettings} />
-          {needsTab && tab && tabOk && (invoked === false || invokeFailed) && <InvokeNotice />}
+          {needsTab && tab && tabOk && (invoked === false || invokeFailed) && <InvokeNotice tabId={tab.id} />}
           {needsTab && tab && !tabOk && <Note>{BROWSER_PAGE}</Note>}
           {needsTab && holder && <Note>This tab is already being recorded (“{holder.name}”).</Note>}
           <div className="card2">
             <Eyebrow>AUDIO SOURCE</Eyebrow>
             <div className="card2__row">
               <Switch<Source> size="sm" label="Audio source" value={src} onChange={setSrc} options={[
-                { value: 'tab', label: 'This tab', disabled: !tabOk, title: !tabOk ? 'This page can’t be recorded' : undefined },
                 { value: 'tabmic', label: 'Tab + mic', disabled: !tabOk, title: !tabOk ? 'This page can’t be recorded' : undefined },
+                { value: 'tab', label: 'This tab', disabled: !tabOk, title: !tabOk ? 'This page can’t be recorded' : undefined },
                 { value: 'mic', label: 'Mic only' },
               ]} />
             </div>
             <p className="card2__note" style={{ fontSize: 11.5 }}>{SOURCE_NOTE[src]}</p>
+            {SOURCE_WARN[src] && <div className="srcwarn" role="alert"><HiWarn width={16} height={16} /><div>{SOURCE_WARN[src]}</div></div>}
           </div>
-          <SpokenLanguageCard />
           <button type="button" className="cta cta--live" disabled={!prefsReady || !mayRecord || (needsTab && (!tabOk || !!holder))} aria-busy={start.busy || undefined}
             title={!mayRecord ? whyNot(account, 'record') : undefined} onClick={() => void go()}>
             {start.busy ? <span className="spin" /> : <span className="cta__dot" />}{isMeeting ? 'Record Meeting' : 'Start Recording'}

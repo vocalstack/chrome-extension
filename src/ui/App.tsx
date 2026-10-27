@@ -1,6 +1,7 @@
-/** The side panel (design 3): sign-in, then a header (the reading
- *  language, Dashboard, Settings) over six areas in an icon tab strip,
- *  whose Live tab turns red while a session runs. */
+/** The side panel (design 3): sign-in, then a header (the spoken and
+ *  reading languages, Dashboard, Settings) over six areas in an icon tab
+ *  strip, whose Live tab turns red while a session runs. Header controls
+ *  and tabs explain themselves in tooltips. */
 
 import { useEffect, useState } from 'react';
 import type { Account } from '../lib/auth';
@@ -9,8 +10,9 @@ import { currentEnv, type Env } from '../lib/env';
 import { isRunning, type LiveStatus } from '../lib/live';
 import type { View } from '../background/panel';
 import { usePanelIntent } from './intent';
-import { HiBack, HiBroadcast, HiDoc, HiExternal, HiGear, HiGlobe, HiMic, HiUpload, HiVoices } from './icons';
-import { ReadInChip } from './langs';
+import { HiBack, HiBroadcast, HiCursor, HiDoc, HiExternal, HiGear, HiMic, HiUpload, HiVoices } from './icons';
+import { LangBar } from './langs';
+import { TipRow, useTip } from './tip';
 import { SignIn } from '../screens/SignIn';
 import { Settings } from '../screens/Settings';
 import { PageScreen } from '../screens/Page';
@@ -22,13 +24,13 @@ import { LibraryScreen } from '../screens/Library';
 import { FileDrop } from '../screens/FileDrop';
 
 type Area = Exclude<View, 'settings'>;
-const TABS: { view: Area; label: string; Icon: typeof HiGlobe }[] = [
-  { view: 'page', label: 'Page', Icon: HiGlobe },
-  { view: 'live', label: 'Live', Icon: HiMic },
-  { view: 'upload', label: 'Upload', Icon: HiUpload },
-  { view: 'broadcasts', label: 'Broadcasts', Icon: HiBroadcast },
-  { view: 'voices', label: 'Voices', Icon: HiVoices },
-  { view: 'library', label: 'Library', Icon: HiDoc },
+const TABS: { view: Area; label: string; tip: string; Icon: typeof HiCursor }[] = [
+  { view: 'page', label: 'Now', tip: 'What’s playing on this tab, ready to transcribe.', Icon: HiCursor },
+  { view: 'live', label: 'Live', tip: 'Record or caption this tab as it plays.', Icon: HiMic },
+  { view: 'upload', label: 'Upload', tip: 'Transcribe audio and video files.', Icon: HiUpload },
+  { view: 'broadcasts', label: 'Broadcasts', tip: 'Live sessions read on each listener’s device.', Icon: HiBroadcast },
+  { view: 'voices', label: 'Voices', tip: 'Voices for dubbing.', Icon: HiVoices },
+  { view: 'library', label: 'Library', tip: 'Every transcript, synced to your account.', Icon: HiDoc },
 ];
 
 const on = (s: LiveStatus) => s.state === 'live' || s.state === 'warming' || s.state === 'paused';
@@ -67,36 +69,9 @@ export function App() {
   const rec = live.some((s) => on(s) && isRunning(s));
   return (
     <div className="shell">
-      <div className="hd">
-        {view === 'settings' ? (
-          <>
-            <button type="button" className="hd__back" aria-label="Back" onClick={() => setView(lastArea)}><HiBack /></button>
-            <div className="hd__title">Settings</div>
-          </>
-        ) : (
-          <>
-            <ReadInChip />
-            {env && env.name !== 'production' && <span className="env-pill" title={`Environment: ${env.label}`}>{env.name === 'local' ? 'Local' : env.label}</span>}
-            <div className="hd__end">
-              {env && <a className="hd__link" href={env.app} target="_blank" rel="noopener" title="Open Dashboard in a new tab">Dashboard<HiExternal /></a>}
-              <button type="button" className="hd__icon" aria-label="Settings" title="Settings" onClick={() => setView('settings')}><HiGear /></button>
-            </div>
-          </>
-        )}
-      </div>
-      {view !== 'settings' && (
-        <div className="tabs2-wrap">
-          <nav className="tabs2" role="tablist" aria-label="Areas">
-            {TABS.map(({ view: v, label, Icon }) => (
-              <button key={v} type="button" role="tab" className={`tab2${v === 'live' && rec ? ' tab2--rec' : ''}`} aria-selected={view === v} title={label} aria-label={v === 'live' && rec ? `${label} (recording)` : label} onClick={() => setView(v)}>
-                {v === 'live' && rec && view === v && <i className="tab2__dot" />}
-                <span className="tab2__icon"><Icon />{v === 'live' && rec && view !== v && <i className="tab2__dot tab2__dot--corner" />}</span>
-                {view === v && <span className="tab2__label">{label}</span>}
-              </button>
-            ))}
-          </nav>
-        </div>
-      )}
+      <TipRow>
+        <Header view={view} env={env} rec={rec} onView={setView} onBack={() => setView(lastArea)} />
+      </TipRow>
       <main className="body2">
         {view === 'page' && <PageScreen account={account} live={live} intent={intent?.view === 'page' ? intent : null} onIntentDone={clearIntent} onSettings={() => setView('settings')} onLive={() => setView('live')} onLibrary={() => setView('library')} onUpload={() => setView('upload')} />}
         {view === 'live' && <LiveScreen account={account} live={live} intent={intent?.view === 'live' ? intent : null} onIntentDone={clearIntent} onSettings={() => setView('settings')} />}
@@ -108,5 +83,44 @@ export function App() {
       </main>
       <FileDrop account={account} onSettings={() => setView('settings')} onDropped={() => setView('upload')} />
     </div>
+  );
+}
+
+function Header({ view, env, rec, onView, onBack }: { view: View; env: Env | null; rec: boolean; onView: (v: View) => void; onBack: () => void }) {
+  const tip = useTip();
+  return (
+    <>
+      <div className="hd">
+        {view === 'settings' ? (
+          <>
+            <button type="button" className="hd__back" aria-label="Back" onClick={onBack}><HiBack /></button>
+            <div className="hd__title">Settings</div>
+          </>
+        ) : (
+          <>
+            <LangBar />
+            {env && env.name !== 'production' && <span className="env-pill" title={`Environment: ${env.label}`}>{env.name === 'local' ? 'Local' : env.label}</span>}
+            <div className="hd__end">
+              {env && <a className="hd__icon hd__icon--sm" href={env.app} target="_blank" rel="noopener" aria-label="Open Dashboard in a new tab" {...tip('Open Dashboard', `Opens ${new URL(env.app).host} in a new tab.`, { right: true })}><HiExternal /></a>}
+              <button type="button" className="hd__icon" aria-label="Settings" onClick={() => onView('settings')} {...tip('Settings', undefined, { right: true })}><HiGear /></button>
+            </div>
+          </>
+        )}
+      </div>
+      {view !== 'settings' && (
+        <div className="tabs2-wrap">
+          <nav className="tabs2" role="tablist" aria-label="Areas">
+            {TABS.map(({ view: v, label, tip: about, Icon }, i) => (
+              <button key={v} type="button" role="tab" className={`tab2${v === 'live' && rec ? ' tab2--rec' : ''}`} aria-selected={view === v} aria-label={v === 'live' && rec ? `${label} (recording)` : label}
+                {...(view === v ? {} : tip(label, about, { up: true, right: i >= 3 }))} onClick={() => onView(v)}>
+                {v === 'live' && rec && view === v && <i className="tab2__dot" />}
+                <span className="tab2__icon"><Icon />{v === 'live' && rec && view !== v && <i className="tab2__dot tab2__dot--corner" />}</span>
+                {view === v && <span className="tab2__label">{label}</span>}
+              </button>
+            ))}
+          </nav>
+        </div>
+      )}
+    </>
   );
 }

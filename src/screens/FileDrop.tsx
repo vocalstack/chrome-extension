@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Transcription } from '@vocalstack/contract';
 import { VocalStackError } from '@vocalstack/js-sdk';
 import { currentEnv } from '../lib/env';
+import { client } from '../lib/client';
 import type { Account } from '../lib/auth';
 import { can, whyNot } from '../lib/access';
 import { rpc, RpcError } from '../lib/rpc';
@@ -84,6 +85,30 @@ async function uploadOne(file: File, opts: UploadOptions): Promise<void> {
 /** Transcribe local files, one upload after another. */
 export async function uploadFiles(files: Iterable<File>, opts: UploadOptions = {}): Promise<void> {
   for (const f of files) await uploadOne(f, opts);
+}
+
+/** A web address to transcribe: a file or video page the server fetches,
+ *  or a live stream it records as it plays. */
+export interface Link { url: string; name: string; live?: boolean }
+
+/** Send links to transcribe, each tracked like an upload. */
+export async function transcribeLinks(links: Link[], opts: UploadOptions = {}): Promise<void> {
+  const vs = await client();
+  await Promise.all(links.map(async (l) => {
+    const key = track({ origin: 'page', name: l.name, url: l.url, phase: 'sending' });
+    try {
+      if (l.live) {
+        // A live stream: a live transcription the server pulls, started at
+        // once (the dashboard's New live transcription does the same).
+        const t = await vs.transcriptions.createLive({ name: l.name, source: { kind: 'stream', url: l.url } });
+        patch(key, { transcription: t });
+        await vs.transcriptions.startRecording(t.id);
+        patch(key, { phase: 'live' });
+      } else created(key, await vs.transcriptions.createFromUrl(l.url, { name: l.name, crop: false, settings: opts.settings }));
+    } catch (e) {
+      patch(key, { phase: 'error', problem: problemOf(e) });
+    }
+  }));
 }
 
 function Toast({ t, onSettings }: { t: Tracked; onSettings: () => void }) {

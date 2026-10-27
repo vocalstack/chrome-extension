@@ -66,8 +66,19 @@ async function invokedList(): Promise<{ tabId: number; origin: string }[]> {
 
 export async function markInvoked(tab: chrome.tabs.Tab | undefined) {
   if (tab?.id === undefined) return;
+  void invokeBadge(tab.id, false);
   const all = (await invokedList()).filter((x) => x.tabId !== tab.id);
   await chrome.storage.session.set({ [INVOKED]: [...all.slice(-100), { tabId: tab.id, origin: originOf(tab.url) }] });
+}
+
+/** The toolbar icon's "!" on a tab: the panel is asking for the click.
+ *  Off, the tab shows the global badge again (REC, II, CC). */
+async function invokeBadge(tabId: number, on: boolean) {
+  await chrome.action.setBadgeText({ tabId, text: on ? '!' : (null as unknown as string) }).catch(() => {});
+  if (on) {
+    await chrome.action.setBadgeBackgroundColor({ tabId, color: '#f78472' }).catch(() => {});
+    await chrome.action.setBadgeTextColor?.({ tabId, color: '#1b0f0e' }).catch(() => {});
+  }
 }
 
 async function forgetInvoked(tabId: number, url?: string) {
@@ -337,6 +348,7 @@ export function registerLive(): Handlers {
     },
     'live.translate': async ({ id, lang }) => { await off({ off: 'live.set', id, translateTo: lang }); },
     'tab.invoked': ({ tabId }) => wasInvoked(tabId),
+    'tab.badge': async ({ tabId, on }) => { await invokeBadge(tabId, on && !(await wasInvoked(tabId))); },
     'live.history': async ({ id }) => (await hasOffscreen() ? ((await off<never>({ off: 'live.history', id })).value ?? []) : []),
     'captions.style': async (style: CaptionStyle) => {
       await chrome.storage.local.set({ captionStyle: style });

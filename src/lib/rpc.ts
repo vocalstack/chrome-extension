@@ -43,6 +43,8 @@ export interface Methods {
   /** Whether the person invoked the extension on this tab (clicked its icon,
    *  a shortcut, a menu), which Chrome requires before a tab is captured. */
   'tab.invoked': [{ tabId: number }, boolean];
+  /** The toolbar icon's "!" badge on a tab, while the panel asks for the click. */
+  'tab.badge': [{ tabId: number; on: boolean }, void];
   /** The transcript so far of a running session (for a panel opened late). */
   'live.history': [{ id: string }, LiveEvent[]];
   'captions.style': [CaptionStyle, void];

@@ -1,16 +1,19 @@
-/** Languages in the panel design (design 3):
+/** Languages in the panel design (design 3), both in the header:
  *
- *  - the reading language: one for the whole panel (the header chip, READ
- *    IN). Transcripts, captions and dubs show in it; null reads as spoken.
- *    Kept in chrome.storage.local, so the background and every open panel
- *    follow it;
- *  - the spoken language of what is recorded or uploaded (Auto detect /
- *    Custom), and its speaker labels: one choice for Live and Upload. */
+ *  - the spoken language of what is recorded or uploaded (Auto detect, or
+ *    one language), the header's first chip; with the speaker labels (a
+ *    setting), one choice for Live and Upload;
+ *  - the reading language (READ IN), the chip after the arrow: transcripts,
+ *    captions and dubs show in it; null is no translation.
+ *
+ *  Kept in chrome.storage.local, so the background and every open panel
+ *  follow them. */
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { useLanguages } from './kit';
-import { LanguageChip, LanguagePicker, Switch, Eyebrow, type PickLang } from './ds';
-import { HiGlobe, HiLang } from './icons';
+import { LanguagePicker, Switch, Eyebrow, type PickLang } from './ds';
+import { HiArrowRight, HiChevronDown, HiGlobe, HiLang } from './icons';
+import { useTip } from './tip';
 
 export const READ_LANG = 'readLang';
 const SPOKEN = 'liveLang';
@@ -65,23 +68,42 @@ export function useLang(): (code: string | null | undefined) => { flag?: string;
   };
 }
 
-/** The header's reading-language chip and its READ IN picker. */
-export function ReadInChip() {
-  const [lang, setLang] = useReadLang();
-  const [open, setOpen] = useState(false);
-  const rows = usePickLangs('translation');
-  const info = useLang()(lang);
-  const label = info ? `Reading in ${info.name}` : 'Reading as spoken';
+const READ_NOTE = 'Transcripts, captions and dubs show in this language. Change it any time.';
+const readRows = (rows: PickLang[]): PickLang[] => [{ code: 'NONE', flag: <AsSpokenGlyph />, label: 'No translation' }, ...rows];
+
+/** The header's languages: the spoken language (Auto, or a flag and its
+ *  name), an arrow, and the reading language (No translation, or a flag
+ *  and its name), each opening its picker. */
+export function LangBar() {
+  const [spoken, setSpoken] = useSpokenLang();
+  const [read, setRead] = useReadLang();
+  const [open, setOpen] = useState<'spoken' | 'read' | null>(null);
+  const spokenRows = usePickLangs('transcription');
+  const readList = usePickLangs('translation');
+  const lang = useLang();
+  const sp = lang(spoken);
+  const rd = lang(read);
+  const tip = useTip();
   return (
-    <>
-      <button type="button" className={`read-chip${info ? ' read-chip--on' : ''}`} aria-label={label} title={label} onClick={() => setOpen(true)}>
-        {info ? <><span className="read-chip__flag">{info.flag}</span><span>{info.name}</span></> : <><HiLang width={16} height={16} /><span>As spoken</span></>}
-        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
+    <div className="langbar">
+      <button type="button" className="langbar__chip" aria-label={sp ? `Spoken language: ${sp.name}` : 'Spoken language: auto detect'} onClick={() => setOpen('spoken')}
+        {...tip('Spoken language', sp ? `${sp.name}. Click to change.` : 'Auto detect. Each line gets its own detected language.')}>
+        {sp ? <><span className="langbar__flag">{sp.flag}</span><span className="langbar__name">{sp.name}</span></> : <><HiLang width={16} height={16} /><span className="langbar__name">Auto</span></>}
+        <HiChevronDown className="langbar__chev" width={11} height={11} />
       </button>
-      <LanguagePicker open={open} onClose={() => setOpen(false)} title="READ IN" note="Transcripts, captions and dubs show in this language. Change it any time."
-        value={lang ?? 'NONE'} searchPlaceholder={`Search ${rows.length} languages`} languages={[{ code: 'NONE', flag: <AsSpokenGlyph />, label: 'As spoken' }, ...rows]}
-        onSelect={(c) => { setLang(c === 'NONE' ? null : c); setOpen(false); }} />
-    </>
+      <HiArrowRight className="langbar__arrow" width={13} height={13} />
+      <button type="button" className="langbar__chip langbar__chip--read" aria-label={rd ? `Reading in ${rd.name}` : 'No translation'} onClick={() => setOpen('read')}
+        {...tip('Translate into', rd ? `${rd.name}. Transcripts and captions show in this language.` : 'No translation. Shown as spoken.')}>
+        {rd ? <><span className="langbar__flag">{rd.flag}</span><span className="langbar__name">{rd.name}</span></> : <><HiLang width={16} height={16} /><span className="langbar__name">No translation</span></>}
+        <HiChevronDown className="langbar__chev" width={11} height={11} />
+      </button>
+      <LanguagePicker open={open === 'spoken'} onClose={() => setOpen(null)} title="SPOKEN LANGUAGE" note="The language spoken in what you record or upload. Auto detect gives each line its own detected language."
+        value={spoken ?? 'AUTO'} searchPlaceholder={`Search ${spokenRows.length} languages`} languages={[{ code: 'AUTO', flag: <AutoGlyph />, label: 'Auto detect' }, ...spokenRows]}
+        onSelect={(c) => { setSpoken(c === 'AUTO' ? null : c); setOpen(null); }} />
+      <LanguagePicker open={open === 'read'} onClose={() => setOpen(null)} title="READ IN" note={READ_NOTE}
+        value={read ?? 'NONE'} searchPlaceholder={`Search ${readList.length} languages`} languages={readRows(readList)}
+        onSelect={(c) => { setRead(c === 'NONE' ? null : c); setOpen(null); }} />
+    </div>
   );
 }
 
@@ -90,36 +112,9 @@ export function ReadInPicker({ open, onClose, onPicked }: { open: boolean; onClo
   const [lang, setLang] = useReadLang();
   const rows = usePickLangs('translation');
   return (
-    <LanguagePicker open={open} onClose={onClose} title="READ IN" note="Transcripts, captions and dubs show in this language. Change it any time."
-      value={lang ?? 'NONE'} searchPlaceholder={`Search ${rows.length} languages`} languages={[{ code: 'NONE', flag: <AsSpokenGlyph />, label: 'As spoken' }, ...rows]}
+    <LanguagePicker open={open} onClose={onClose} title="READ IN" note={READ_NOTE}
+      value={lang ?? 'NONE'} searchPlaceholder={`Search ${rows.length} languages`} languages={readRows(rows)}
       onSelect={(c) => { const v = c === 'NONE' ? null : c; setLang(v); onClose(); onPicked?.(v); }} />
-  );
-}
-
-/** SPOKEN LANGUAGE: Auto detect / Custom, the chip, and its note. */
-export function SpokenLanguageCard() {
-  const [lang, setLang] = useSpokenLang();
-  const [custom, setCustom] = useState(false);
-  const [open, setOpen] = useState(false);
-  const rows = usePickLangs('transcription');
-  const info = useLang()(lang);
-  const auto = !lang && !custom;
-  const pick = (v: 'auto' | 'custom') => {
-    if (v === 'auto') { setCustom(false); setLang(null); } else { setCustom(true); if (!lang) setOpen(true); }
-  };
-  return (
-    <div className="card2">
-      <Eyebrow>SPOKEN LANGUAGE</Eyebrow>
-      <div className="card2__row">
-        <Switch size="sm" label="Spoken language" value={auto ? 'auto' : 'custom'} onChange={pick} options={[{ value: 'auto', label: 'Auto detect' }, { value: 'custom', label: 'Custom' }]} />
-        <div className="card2__end"><LanguageChip flag={auto || !info ? <AutoGlyph /> : info.flag} code={auto || !info ? '' : lang!.toUpperCase()} label={info ? info.name : 'Detect automatically'} onClick={() => setOpen(true)} /></div>
-      </div>
-      <p className="card2__note">{auto
-        ? 'Each spoken segment in this recording gets its own detected language, so speakers can switch languages mid-conversation.'
-        : 'Naming the spoken language improves accuracy on noisy recordings and heavy accents.'}</p>
-      <LanguagePicker open={open} onClose={() => { setOpen(false); if (!lang) setCustom(false); }} title="SPOKEN LANGUAGE" note="The language spoken in this recording."
-        value={lang} languages={rows} onSelect={(c) => { setLang(c); setCustom(true); setOpen(false); }} />
-    </div>
   );
 }
 

@@ -1,26 +1,35 @@
-/** Page (design 3): the active tab, what it plays or links to (ticked,
- *  then Transcribe N Items), Captions and Dub for its video in the
- *  reading language, and — with nothing to transcribe — a way to record
- *  the tab (or the meeting) in Live. */
+/** Now (design 3): the active tab, and what to do with it.
+ *
+ *  - A video page (YouTube and the like): TRANSCRIBE THIS VIDEO, as Live
+ *    Transcription (the tab recorded as it plays, Floating Captions over
+ *    the video) or File Upload (the whole video fetched, in Upload's list);
+ *  - another page with media: what it plays or links to, ticked, then
+ *    Transcribe N Items;
+ *  - nothing to transcribe: record the tab in Live, or, in a meeting,
+ *    record the meeting at once.
+ *
+ *  While the tab is recorded, its card and a button lead to Live. */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { LinkProbe } from '@vocalstack/contract';
 import type { PanelIntent } from '../background/panel';
 import type { Account } from '../lib/auth';
 import { can, whyNot } from '../lib/access';
-import { capturable, meetingHost, tabHolder, type DubStatus, type LiveStatus, type VcapStatus } from '../lib/live';
+import { capturable, isRunning, meetingHost, tabHolder, type LiveStatus } from '../lib/live';
 import { AccessNote, ProblemNote } from '../ui/access';
 import { client } from '../lib/client';
-import { onPush, rpc, type Answer } from '../lib/rpc';
+import { rpc, type Answer } from '../lib/rpc';
 import { MEDIA_PAGE, type FoundMedia } from '../lib/media';
 import { Note, errorText, useAction } from '../ui/kit';
-import { Eyebrow, Toggle } from '../ui/ds';
-import { HiAudio, HiCheck, HiChevronRight, HiDoc, HiGlobe, HiLang, HiMic, HiNone, HiVideo, HiVoices, MeetingLogo } from '../ui/icons';
-import { ReadInPicker, useLang, useReadLang, useSpokenLang } from '../ui/langs';
+import { Eyebrow, Switch, Toggle } from '../ui/ds';
+import { HiArrowRight, HiAudio, HiCaptions, HiCheck, HiChevronRight, HiDoc, HiGlobe, HiMic, HiNone, HiUpload, HiVideo, MeetingLogo, YouTubeLogo } from '../ui/icons';
+import { useLang, useReadLang, useSpeakerLabels, useSpokenLang } from '../ui/langs';
 import { useWarm } from '../ui/useWarm';
 import { InvokeNotice, mmss, useInvoked } from './Live';
 import { problemOf } from './page/errors';
-import { created, patch, track, useTracked } from './page/tracker';
+import { patch, useTracked } from './page/tracker';
+import { transcribeLinks } from './FileDrop';
+import { queueLink } from './Upload';
 
 type Scan = Answer<'page.scan'>;
 
@@ -56,7 +65,11 @@ async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
   return t;
 }
 
-export function PageScreen({ account, live, intent, onIntentDone, onSettings, onLive, onLibrary }: {
+/** The meeting apps' short names: "Meet and your microphone…". */
+const SHORT: Record<string, string> = { meet: 'Meet', teams: 'Teams', zoom: 'Zoom', webex: 'Webex', whereby: 'Whereby', gather: 'Gather', discord: 'Discord' };
+const isYouTube = (u: string | undefined) => /^https?:\/\/(?:[\w-]+\.)?(?:youtube\.com|youtu\.be)\//i.test(u ?? '');
+
+export function PageScreen({ account, live, intent, onIntentDone, onSettings, onLive, onLibrary, onUpload }: {
   account: Account;
   live: LiveStatus[];
   intent: PanelIntent | null;
@@ -181,27 +194,12 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
     setSel(n);
   };
 
+  const linkOf = (r: Row) => ({ url: r.url, name: (r.title || host(r.url) || 'From the web').slice(0, 120), live: isLive(r) });
   const transcribe = async () => {
     if (!chosen.length || !mayRecord) return;
     setStarting(true);
     try {
-      const vs = await client();
-      await Promise.all(chosen.map(async (r) => {
-        const name = (r.title || host(r.url) || 'From the web').slice(0, 120);
-        const key = track({ origin: 'page', name, url: r.url, phase: 'sending' });
-        try {
-          if (isLive(r)) {
-            // A live stream: a live transcription the server pulls, started
-            // at once (the dashboard's New live transcription does the same).
-            const t = await vs.transcriptions.createLive({ name, source: { kind: 'stream', url: r.url } });
-            patch(key, { transcription: t });
-            await vs.transcriptions.startRecording(t.id);
-            patch(key, { phase: 'live' });
-          } else created(key, await vs.transcriptions.createFromUrl(r.url, { name, crop: false }));
-        } catch (e) {
-          patch(key, { phase: 'error', problem: problemOf(e) });
-        }
-      }));
+      await transcribeLinks(chosen.map(linkOf));
       setSel(new Set());
       onLibrary();
     } finally {
@@ -210,31 +208,47 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   };
 
   const meeting = meetingHost(scan?.url);
-  const hasVideo = !meeting && rows.some((r) => r.kind === 'video' || r.kind === 'embed' || !!r.streamOnly);
-  const liveStream = rows.find(isLive);
+  const videoPage = !meeting && !!scan && MEDIA_PAGE.test(scan.url);
   const tabOk = capturable(scan?.url);
   const failed = tracked.filter((t) => t.phase === 'error' && !t.hidden).slice(-2);
   // A scan again (the panel focused) keeps what the last one showed.
-  const empty = !rows.length && !scanError && (!scanning || !!scan);
+  const empty = !videoPage && !rows.length && !scanError && (!scanning || !!scan);
+  /** This tab's recording, while it runs: the card and a button lead to Live. */
+  const holder = scan ? tabHolder(live, scan.tabId) : undefined;
+  const recording = !!holder && isRunning(holder);
+  const startMeeting = useStartTab(scan?.tabId, onLive);
 
   return (
-    <div className="screen" data-screen-label="Page">
-      <div className="card2 site">
-        <span className="round">{meeting ? <MeetingLogo k={meeting.key} size={20} /> : <span className="sitedot" style={{ background: scan && MEDIA_PAGE.test(scan.url) ? 'var(--live)' : 'var(--ink-45)' }} />}</span>
+    <div className="screen screen--fill" data-screen-label="Now">
+      <div className={`card2 site${recording ? ' site--go' : ''}`} {...(recording ? { role: 'button', tabIndex: 0, title: 'Go to Live', onClick: onLive, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onLive(); } } } : {})}>
+        <span className="round">{meeting ? <MeetingLogo k={meeting.key} size={20} /> : isYouTube(scan?.url) ? <YouTubeLogo size={20} /> : <HiGlobe width={18} height={18} style={{ color: 'var(--ink-62)' }} />}</span>
         <div className="lrow__main">
           <div className="lrow__title" title={scan?.title}>{scan?.title || (scanning ? 'Reading this tab…' : 'This tab')}</div>
-          {scan && <div className="site__host">{host(scan.url)}</div>}
+          {scan && (
+            <div className="site__sub">
+              <i className={`site__dot${recording ? ' site__dot--rec' : ''}`} style={recording ? undefined : { background: videoPage ? 'var(--live)' : 'var(--ink-45)' }} />
+              <span className="site__app">{recording ? 'Recording' : meeting ? meeting.name : isYouTube(scan.url) ? 'YouTube' : 'Web page'}</span>
+              <span className="site__sep">·</span>
+              <span className="site__host">{recording ? 'Go to Live' : meeting ? 'Meeting in progress' : host(scan.url)}</span>
+            </div>
+          )}
         </div>
+        {recording && <HiChevronRight width={14} height={14} style={{ flex: 'none', color: 'var(--ink-45)' }} />}
+        {meeting && !recording && <p className="site__call">Record it for a live transcript, and a summary when it ends. {SHORT[meeting.key] ?? meeting.name} and your microphone are both recorded.</p>}
       </div>
 
-      {/* As the design: wherever this tab could be recorded or captioned
-          from the panel — nothing to transcribe (Record This Tab), or a
-          video with Captions and Dub. */}
-      {tabOk && invoked === false && (empty || hasVideo) && <InvokeNotice />}
+      {/* As the design: wherever this tab could be recorded from here — a
+          video page, or nothing to transcribe (Record This Tab). */}
+      {tabOk && invoked === false && (empty || videoPage) && !recording && <InvokeNotice tabId={scan?.tabId} />}
       <AccessNote account={account} need="record" onSettings={onSettings} />
       {scanError && <Note kind="warn">{scanError}</Note>}
 
-      {rows.length > 0 && (
+      {videoPage && scan && (
+        <VideoPick account={account} live={live} tabId={scan.tabId} url={scan.url} title={scan.title} durationS={rows.find((r) => r.playing)?.durationS ?? rows.find((r) => r.kind === 'video')?.durationS}
+          stream={rows.some(isLive)} recording={recording} onLive={onLive} onUpload={onUpload} onSettings={onSettings} />
+      )}
+
+      {!videoPage && rows.length > 0 && (
         <>
           <div className="card2" style={{ padding: '14px 14px 6px' }}>
             <Eyebrow side={`${rows.length} ${rows.length === 1 ? 'ITEM' : 'ITEMS'}`}>FOUND ON THIS PAGE</Eyebrow>
@@ -248,25 +262,133 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
           <button type="button" className="cta" disabled={!chosen.length || !mayRecord} aria-busy={starting || undefined} title={!mayRecord ? whyNot(account, 'record') : undefined} onClick={() => void transcribe()}>
             {starting && <span className="spin" />}{chosen.length > 1 ? `Transcribe ${chosen.length} Items` : chosen.length ? 'Transcribe' : 'Select Something to Transcribe'}
           </button>
-          {failed.map((t) => <ProblemNote key={t.key} error={t.problem?.text ?? 'That could not be started.'} onSettings={onSettings}><div style={{ marginTop: 6 }}><button type="button" className="pg-link" onClick={() => patch(t.key, { hidden: true })}>Dismiss</button></div></ProblemNote>)}
         </>
       )}
-
-      {scan && hasVideo && <MediaCards account={account} live={live} tabId={scan.tabId} url={scan.url} title={scan.title} liveStream={liveStream} onSettings={onSettings} onLive={onLive} />}
+      {failed.map((t) => <ProblemNote key={t.key} error={t.problem?.text ?? 'That could not be started.'} onSettings={onSettings}><div style={{ marginTop: 6 }}><button type="button" className="pg-link" onClick={() => patch(t.key, { hidden: true })}>Dismiss</button></div></ProblemNote>)}
 
       {empty && (
         <>
-          <div className="card2 empty2">
-            <span className="round round--lg">{meeting ? <HiMic /> : <HiNone />}</span>
-            <div className="empty2__head">{meeting ? `You’re in a ${meeting.name} call` : 'Nothing to transcribe here'}</div>
-            <div className="empty2__text">{meeting
-              ? 'Record the call to get a live transcript, and a summary with action items when it ends.'
-              : 'No audio or video was found on this page. Record the tab from Live, or upload a file.'}</div>
-          </div>
-          <button type="button" className="cta" onClick={onLive}><HiMic />{meeting ? 'Record This Meeting' : 'Record This Tab'}</button>
+          {!meeting && (
+            <div className="card2 empty2">
+              <span className="round round--lg"><HiNone /></span>
+              <div className="empty2__head">Nothing to transcribe here</div>
+              <div className="empty2__text">No audio or video was found on this page. Record the tab from Live, or upload a file.</div>
+            </div>
+          )}
+          {startMeeting.error && <ProblemNote error={startMeeting.error} onSettings={onSettings} />}
+          {recording
+            ? <GoLive onLive={onLive} />
+            : <button type="button" className="cta cta--end" disabled={!!meeting && !mayRecord} aria-busy={startMeeting.busy || undefined} onClick={meeting ? () => void startMeeting.run('meeting') : onLive}>
+                {startMeeting.busy ? <span className="spin" /> : <HiMic />}{meeting ? 'Record This Meeting' : 'Record This Tab'}
+              </button>}
         </>
       )}
     </div>
+  );
+}
+
+/** Go to Live Transcript: the button while this tab is recorded. */
+function GoLive({ onLive }: { onLive: () => void }) {
+  return <button type="button" className="cta cta--soft cta--end" onClick={onLive}><i className="cta__live" />Go to Live Transcript<HiArrowRight width={15} height={15} /></button>;
+}
+
+/** Start recording the tab from Now: a meeting (tab and microphone) or a
+ *  video (the tab alone, with or without Floating Captions), in the
+ *  header's languages; then Live shows it. */
+function useStartTab(tabId: number | undefined, onLive: () => void) {
+  const act = useAction();
+  const [spoken] = useSpokenLang();
+  const [read] = useReadLang();
+  const [labels] = useSpeakerLabels();
+  const run = (kind: 'meeting' | 'video', overlay = true) => act.run(async () => {
+    await rpc('live.start', { mode: kind === 'meeting' ? 'meeting' : 'record', input: { tab: true, mic: kind === 'meeting' }, tabId, spokenLanguage: spoken, translateTo: read, speakerLabels: labels, overlay });
+    onLive();
+  });
+  return { run, busy: act.busy, error: act.error };
+}
+
+type VideoMode = 'live' | 'upload';
+
+/** TRANSCRIBE THIS VIDEO: Live Transcription or File Upload, then the
+ *  chosen one's view (a switch to change it, what happens, Floating
+ *  Captions for Live) and its button at the bottom. */
+function VideoPick({ account, live, tabId, url, title, durationS, stream, recording, onLive, onUpload, onSettings }: {
+  account: Account; live: LiveStatus[]; tabId: number; url: string; title: string; durationS?: number; stream: boolean; recording: boolean;
+  onLive: () => void; onUpload: () => void; onSettings: () => void;
+}) {
+  const [mode, setMode] = useState<VideoMode | null>(null);
+  const [floating, setFloating] = useState(true);
+  const [read] = useReadLang();
+  const readName = useLang()(read)?.name;
+  const [spoken, , spokenReady] = useSpokenLang();
+  const mayRecord = can(account, 'record');
+  const start = useStartTab(tabId, onLive);
+  // Instant start: while Live Transcription is on offer, an engine stays loaded.
+  useWarm(spokenReady && mayRecord && !recording && mode !== 'upload' && !tabHolder(live, tabId), spoken);
+  useEffect(() => { setMode(null); }, [url]);
+
+  const toUpload = () => {
+    queueLink({ url, name: (title || host(url) || 'From the web').slice(0, 120), host: isYouTube(url) ? 'YouTube' : host(url), durationS, live: stream });
+    onUpload();
+  };
+
+  if (!mode || recording) {
+    return (
+      <>
+        <Eyebrow>TRANSCRIBE THIS VIDEO</Eyebrow>
+        <div className="stack" style={{ gap: 10 }}>
+          {recording
+            ? <PickCard icon={<HiMic />} live head="Live Transcription" badge text="Go to the live transcript." onClick={onLive} />
+            : <PickCard icon={<HiMic />} head="Live Transcription" text="Transcribe the audio as it plays, with floating captions over the video." onClick={() => setMode('live')} />}
+          <PickCard icon={<HiUpload />} head="File Upload" text="The whole video is fetched and transcribed at once, with a full transcript in your Library." onClick={toUpload} />
+        </div>
+      </>
+    );
+  }
+
+  const isLiveMode = mode === 'live';
+  return (
+    <>
+      <Switch<VideoMode> label="How to transcribe" value={mode} onChange={setMode} options={[
+        { value: 'live', label: 'Live Transcription', icon: <HiMic width={15} height={15} /> },
+        { value: 'upload', label: 'File Upload', icon: <HiUpload width={15} height={15} /> },
+      ]} />
+      <div className="card2 empty2">
+        <span className="round round--lg">{isLiveMode ? <HiMic /> : <HiUpload />}</span>
+        <div className="empty2__head">{isLiveMode ? 'Ready to caption this video' : 'Ready to transcribe this video'}</div>
+        <div className="empty2__text" style={{ maxWidth: 290 }}>{isLiveMode
+          ? 'The audio from this tab is transcribed as it plays, with floating captions over the video.'
+          : 'The whole video is fetched and transcribed at once, with a full transcript in your Library.'}</div>
+      </div>
+      {isLiveMode && (
+        <div className="card2 onpage row" style={{ gap: 12 }}>
+          <span className={`onpage__icon${floating ? ' onpage__icon--on' : ''}`}><HiCaptions width={16} height={16} /></span>
+          <div className="lrow__main">
+            <div className="mcard__label">Floating Captions</div>
+            <div className="pref__sub">Subtitles in a floating window over the video, in {readName ?? 'the spoken language'}.</div>
+          </div>
+          <Toggle label="Floating Captions" checked={floating} onChange={setFloating} />
+        </div>
+      )}
+      {start.error && <ProblemNote error={start.error} onSettings={onSettings} />}
+      <button type="button" className="cta cta--end" disabled={!mayRecord} aria-busy={start.busy || undefined} title={!mayRecord ? whyNot(account, 'record') : undefined}
+        onClick={isLiveMode ? () => void start.run('video', floating) : toUpload}>
+        {start.busy ? <span className="spin" /> : isLiveMode ? <HiMic /> : <HiUpload />}{isLiveMode ? 'Start Live Transcription' : 'Transcribe Video'}
+      </button>
+    </>
+  );
+}
+
+function PickCard({ icon, head, text, live, badge, onClick }: { icon: React.ReactNode; head: string; text: string; live?: boolean; badge?: boolean; onClick: () => void }) {
+  return (
+    <button type="button" className="card2 pick" onClick={onClick}>
+      <span className={`round ${live ? 'round--live' : 'round--brand'}`}>{icon}</span>
+      <span className="lrow__main">
+        <span className="pick__head">{head}{badge && <span className="pick__badge"><i />IN PROGRESS</span>}</span>
+        <span className="pick__text">{text}</span>
+      </span>
+      <HiChevronRight width={14} height={14} style={{ flex: 'none', color: 'var(--ink-45)' }} />
+    </button>
   );
 }
 
@@ -313,140 +435,6 @@ function FoundRow({ r, page, probe: p, selectable, ticked, started, onToggle, on
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-/** What VocalStack transcribes for this tab's video: the main video's own
- *  file when it has one, an embedded player's page, else the page. */
-async function videoSource(tabId: number, pageUrl: string): Promise<string> {
-  const scan = await rpc('page.scan', { tabId }).catch(() => null);
-  const media = scan?.media ?? [];
-  const playing = (k: string) => media.filter((m) => m.kind === k && !m.streamOnly).sort((a, b) => Number(!!b.playing) - Number(!!a.playing) || (b.durationS ?? 0) - (a.durationS ?? 0));
-  return playing('video')[0]?.url ?? playing('embed')[0]?.url ?? pageUrl;
-}
-
-/** Captions and Dub for the tab's video, in the reading language. On a
- *  live stream, Captions records it (a live transcription) shown on the
- *  page. */
-function MediaCards({ account, live, tabId, url, title, liveStream, onSettings, onLive }: {
-  account: Account; live: LiveStatus[]; tabId: number; url: string; title: string; liveStream?: Row; onSettings: () => void; onLive: () => void;
-}) {
-  const [readLang] = useReadLang();
-  const lang = useLang();
-  const read = lang(readLang)?.name ?? 'the spoken language';
-  const [cap, setCap] = useState<VcapStatus | null>(null);
-  const [dub, setDub] = useState<DubStatus | null>(null);
-  const [dubWant, setDubWant] = useState(false);
-  const [picking, setPicking] = useState(false);
-  const capAct = useAction();
-  const dubAct = useAction();
-  const mayRecord = can(account, 'record');
-  const [spoken, , spokenReady] = useSpokenLang();
-  // Instant start for a stream's Captions, which start a live recording.
-  useWarm(!!liveStream && spokenReady && mayRecord && !tabHolder(live, tabId), spoken);
-
-  useEffect(() => {
-    rpc('vcap.status', { tabId }).then(setCap, () => {});
-    rpc('dub.status', { tabId }).then(setDub, () => {});
-    return onPush((p) => {
-      if (p.push === 'vcap.status' && p.status.tabId === tabId) setCap(p.status);
-      if (p.push === 'vcap.gone' && p.tabId === tabId) setCap(null);
-      if (p.push === 'dub.status' && p.status.tabId === tabId) setDub(p.status);
-    });
-  }, [tabId]);
-
-  const startDub = (l: string) => dubAct.run(async () => {
-    setDubWant(false);
-    const source = await videoSource(tabId, url);
-    setDub(await rpc('dub.start', { tabId, url: source, title, lang: l }));
-  });
-  const capOn = (v: boolean) => capAct.run(async () => {
-    if (!v) { await rpc('vcap.stop', { tabId }); setCap(null); return; }
-    const source = await videoSource(tabId, url);
-    setCap(await rpc('vcap.start', { tabId, url: source, title, lang: readLang }));
-  });
-  const dubOn = (v: boolean) => {
-    if (!v) { setDubWant(false); void dubAct.run(async () => { await rpc('dub.stop', { tabId }); setDub(null); }); return; }
-    if (dub?.state === 'waiting') { setPicking(true); return; }
-    if (!readLang) { setDubWant(true); setPicking(true); return; }
-    void startDub(readLang);
-  };
-
-  if (liveStream) {
-    // Captions of a stream: a recording of the tab, shown on the page.
-    const holder = tabHolder(live, tabId);
-    const on = !!holder?.overlay;
-    const liveCaps = (v: boolean) => capAct.run(async () => {
-      // Off: the recording this card started stops (the design's handler).
-      if (!v) { if (holder) await rpc('live.stop', { id: holder.id }); return; }
-      if (holder) { await rpc('live.overlay', { id: holder.id, on: true }); return; }
-      const g = await chrome.storage.local.get(['liveLang', 'speakerLabels']);
-      await rpc('live.start', { mode: 'record', input: { tab: true, mic: false }, tabId, overlay: true, translateTo: readLang, spokenLanguage: (g.liveLang as string) || null, speakerLabels: (g.speakerLabels as 'auto' | 'on' | 'off') ?? 'auto' });
-      onLive();
-    });
-    return (
-      <div className="screen">
-        <MediaCard label="Captions" sub={`Starts a live transcription and shows it on the page as the stream plays, in ${read}.`} icon={<HiLang />} on={on} busy={capAct.busy} disabled={!mayRecord} onChange={(v) => void liveCaps(v)}
-          ready={on ? 'LIVE CAPTIONS ON' : undefined} />
-        {capAct.error && <ProblemNote error={capAct.error} onSettings={onSettings} />}
-      </div>
-    );
-  }
-
-  const capSteps = ['Transcribing', ...(cap?.lang ? ['Translating'] : [])];
-  const capStage = !cap ? 0 : cap.state === 'transcribing' ? 0 : cap.state === 'translating' ? 1 : capSteps.length;
-  const dubSteps = ['Transcribing', 'Translating', 'Preparing the voice'];
-  const dubStage = !dub ? 0 : dub.state === 'transcribing' ? 0 : dub.state === 'translating' ? 1 : dub.state === 'voicing' ? 2 : 3;
-  const capLive = !!cap && cap.state !== 'failed';
-  const dubWaiting = dubWant || dub?.state === 'waiting';
-  const dubLive = !!dub && dub.state !== 'failed' && dub.state !== 'waiting';
-  const dubLang = dub ? lang(dub.lang)?.name : readLang ? read : null;
-  return (
-    <div className="screen">
-      <MediaCard label="Captions" sub={`Subtitles in sync with the video, in ${read}.`} icon={<HiLang />} on={capLive} busy={capAct.busy} disabled={!mayRecord} onChange={(v) => void capOn(v)}
-        steps={capLive && cap!.state !== 'on' ? capSteps : undefined} stage={capStage} pct={cap?.state === 'transcribing' ? cap.progress : cap?.state === 'translating' ? cap.progress : undefined}
-        ready={cap?.state === 'on' ? `CAPTIONS ON · ${cap.lang ? (lang(cap.lang)?.name ?? cap.lang).toUpperCase() : 'AS SPOKEN'}` : undefined} />
-      {cap?.state === 'failed' && <ProblemNote error={cap.error ?? 'The captions stopped.'} onSettings={onSettings} />}
-      {capAct.error && <ProblemNote error={capAct.error} onSettings={onSettings} />}
-      <MediaCard label="Dub" sub={dubLang ? `Hear the video spoken in ${dubLang}, in sync with the picture.` : 'Hear the video spoken in your reading language.'} icon={<HiVoices />} on={dubLive || dubWaiting} busy={dubAct.busy} disabled={!mayRecord} onChange={dubOn}
-        steps={dubLive && dub!.state !== 'playing' && dub!.state !== 'ready' ? dubSteps : undefined} stage={dubStage} pct={dub?.state === 'transcribing' ? dub.progress : undefined}
-        waiting={dubWaiting && !dubLive ? () => setPicking(true) : undefined}
-        ready={dub && (dub.state === 'playing' || dub.state === 'ready') ? `DUBBING IN ${(lang(dub.lang)?.name ?? dub.lang).toUpperCase()}` : undefined} />
-      {dub?.state === 'failed' && <ProblemNote error={dub.error ?? 'The dub stopped.'} onSettings={onSettings} />}
-      {dubAct.error && <ProblemNote error={dubAct.error} onSettings={onSettings} />}
-      <ReadInPicker open={picking} onClose={() => { setPicking(false); }} onPicked={(c) => { if (c && dubWant) void startDub(c); else if (!c) setDubWant(false); }} />
-    </div>
-  );
-}
-
-function MediaCard({ label, sub, icon, on, busy, disabled, onChange, steps, stage = 0, pct, waiting, ready }: {
-  label: string; sub: string; icon: React.ReactNode; on: boolean; busy?: boolean; disabled?: boolean; onChange: (v: boolean) => void;
-  steps?: string[]; stage?: number; pct?: number; waiting?: () => void; ready?: string;
-}) {
-  const n = steps?.length ?? 1;
-  const width = steps ? `${Math.round(((stage + (pct ?? 0.5)) / n) * 100)}%` : '0%';
-  return (
-    <div className="card2 mcard">
-      <div className="row" style={{ gap: 12 }}>
-        <span className={`round${on ? ' round--brand' : ''}`}>{icon}</span>
-        <div className="lrow__main"><div className="mcard__label">{label}</div><div className="pref__sub">{sub}</div></div>
-        <Toggle label={label} checked={on} busy={busy} disabled={disabled} onChange={onChange} />
-      </div>
-      {steps && (
-        <div className="stack" style={{ gap: 8 }}>
-          <div className="lrow__bar" style={{ marginTop: 0 }}><i style={{ width }} /></div>
-          <div className="steps">
-            {steps.map((st, i) => (
-              <span key={st} className="steps__st" style={{ color: i < stage ? 'var(--brand)' : i === stage ? 'var(--ink-96)' : 'var(--ink-30)' }}>
-                <i />{(i === stage ? `${st}…` : st).toUpperCase()}{i < steps.length - 1 && <span className="steps__sep">→</span>}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-      {waiting && <button type="button" className="mcard__pick" onClick={waiting}><span>Choose a language to dub into</span><HiChevronRight width={13} height={13} /></button>}
-      {ready && <div className="mcard__ready"><i />{ready}<span>· IN YOUR LIBRARY</span></div>}
     </div>
   );
 }
