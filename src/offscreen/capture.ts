@@ -7,15 +7,21 @@
  *    recording's publisher socket, as the dashboard records;
  *  - broadcast: a take in a broadcast, the same way.
  *
+ *  On YouTube the audio may come from the player's buffer instead, ahead
+ *  of playback (`ahead`: offscreen/ahead.ts), and the transcript's times
+ *  are then put on the video's clock.
+ *
  *  Every change of state is pushed as `live.status`; transcript events as
  *  `live.event` (the background forwards captions to the tab). */
 
 import { VocalStack, type RealtimeSession, type Subscription } from '@vocalstack/js-sdk';
 import { push, rpc, type LiveEvent } from '../lib/rpc';
-import type { LiveStatus } from '../lib/live';
+import { isRunning, type LiveStatus } from '../lib/live';
 import type { OffCmd } from '../lib/offscreen';
 import { userText } from '../lib/errors';
 import { report } from '../lib/sentry';
+import { AheadFeed } from './ahead';
+import type { AheadStats } from '../lib/ahead';
 
 const RATE = 16000;
 /** Samples per socket chunk: a quarter of a second. */
@@ -42,6 +48,8 @@ interface Live {
   levelAt: number;
   reading?: Promise<void>;
   history: LiveEvent[];
+  /** Reading ahead: the video's buffered audio, in place of the inputs. */
+  feed?: AheadFeed;
 }
 
 const lives = new Map<string, Live>();
@@ -58,8 +66,15 @@ function set(l: Live, patch: Partial<LiveStatus>) {
   push({ push: 'live.status', status: l.status });
 }
 
+/** A transcript event out to the panel and the captions; reading
+ *  ahead, it waits for the video first (AheadFeed.emit). */
 function emit(l: Live, event: LiveEvent) {
-  if (event.type === 'committed' || event.type === 'translated' || event.type === 'speaker') {
+  if (l.feed) l.feed.emit(event);
+  else publish(l, event);
+}
+
+function publish(l: Live, event: LiveEvent) {
+  if (event.type === 'committed' || event.type === 'translated' || event.type === 'speaker' || event.type === 'sentence') {
     l.history.push(event);
     if (l.history.length > KEEP) l.history.splice(0, l.history.length - KEEP);
   }
@@ -82,6 +97,7 @@ export async function startLive(cmd: Extract<OffCmd, { off: 'live.start' }>): Pr
       id: cmd.id, mode: s.mode, state: 'starting', input: s.input, name: cmd.name, tabId: s.tabId, tabTitle: cmd.tabTitle,
       startedAt: Date.now(), broadcastId: s.broadcastId, translateTo: s.translateTo ?? null, sentS: 0,
       spokenLanguage: s.spokenLanguage ?? null, overlay: !!s.overlay, speakerLabels: s.speakerLabels, meeting: s.meeting, host: s.host,
+      ...(s.ahead ? { ahead: true } : {}),
     },
     vs, streams: [], paused: false, stopping: false, buf: new Float32Array(CHUNK), fill: 0, sent: 0, peak: 0, levelAt: 0, history: [],
   };
@@ -92,14 +108,22 @@ export async function startLive(cmd: Extract<OffCmd, { off: 'live.start' }>): Pr
   const alive = () => { if (l.stopping) throw new Coded('Stopped before it started.', 'cancelled'); };
   try {
     // The inputs first: a refused microphone fails before anything is
-    // created on the account.
-    await openInputs(l, cmd.streamId);
+    // created on the account. Reading ahead has none: the content script
+    // sends the audio once it is live (ahead.data).
+    if (s.ahead) {
+      l.feed = new AheadFeed({
+        send: (pcm) => onPcm(l, pcm),
+        held: () => !capturing(l),
+        fail: (message) => { if (!l.stopping) { set(l, { errorCode: 'ahead' }); void finish(l, message); } },
+        publish: (ev) => publish(l, ev),
+      });
+    } else await openInputs(l, cmd.streamId);
     alive();
     set(l, { state: 'warming' });
     const onLoading = () => { if (l.status.state !== 'warming') set(l, { state: 'warming' }); };
     const lang = s.spokenLanguage ?? null;
     if (s.mode === 'captions') {
-      l.session = await vs.realtime.connect({ spokenLanguage: lang, ...(s.translateTo ? { translate: [s.translateTo] } : {}) }, { onLoading });
+      l.session = await vs.realtime.connect({ spokenLanguage: lang, ...(s.translateTo ? { translate: [s.translateTo] } : {}), ...(s.ahead ? { sentences: { enabled: true } } : {}) }, { onLoading });
       alive();
     } else if (s.mode === 'broadcast') {
       if (!s.broadcastId) throw new Coded('No broadcast was chosen.', 'invalid_options');
@@ -209,7 +233,7 @@ function onPcm(l: Live, block: Float32Array) {
     l.peak = 0;
     l.levelAt = now;
   }
-  if (l.paused || l.stopping || !l.session || l.status.state !== 'live') return;
+  if (!capturing(l)) return;
   let off = 0;
   while (off < block.length) {
     const n = Math.min(CHUNK - l.fill, block.length - off);
@@ -218,6 +242,21 @@ function onPcm(l: Live, block: Float32Array) {
     off += n;
     if (l.fill === CHUNK) flush(l);
   }
+}
+
+/** Audio goes to the session now. */
+function capturing(l: Live): boolean {
+  return !l.paused && !l.stopping && !!l.session && l.status.state === 'live';
+}
+
+/** Reading ahead: the video's clock and buffered audio, from the content
+ *  script; answered with how it is doing (Read-ahead debug). False: the
+ *  session has ended, stop sending. */
+export async function aheadData(cmd: Extract<OffCmd, { off: 'ahead.data' }>): Promise<AheadStats | false> {
+  const l = lives.get(cmd.id);
+  if (!l?.feed || l.stopping || !isRunning(l.status)) return false;
+  await l.feed.take(cmd.clock, cmd.chunk);
+  return l.feed.stats();
 }
 
 function flush(l: Live) {
@@ -236,7 +275,7 @@ async function read(l: Live) {
       const lang = l.status.translateTo;
       if (ev.type === 'transcript.committed') {
         const g = ev.segment;
-        emit(l, { type: 'committed', seq: g.seq, text: g.text, startS: g.start, endS: g.end, speaker: String(g.speaker) });
+        emit(l, { type: 'committed', seq: g.seq, text: g.text, startS: g.start, endS: g.end, speaker: String(g.speaker), ...words(l, g.words) });
         const tr = lang ? g.translations?.[lang] : undefined;
         if (tr) emit(l, { type: 'translated', seq: g.seq, lang: lang!, text: tr });
       } else if (ev.type === 'transcript.draft') {
@@ -247,6 +286,7 @@ async function read(l: Live) {
         }
       } else if (ev.type === 'transcript.sentence') {
         const st = ev.sentence;
+        sentenceOf(l, st);
         const tr = lang ? st.translations?.[lang] : undefined;
         if (tr && st.seqs.length) emit(l, { type: 'translated', seq: Math.max(...st.seqs), seqs: st.seqs, sentenceId: st.sentenceId, lang: lang!, text: tr });
       } else if (ev.type === 'transcript.translated') {
@@ -268,8 +308,21 @@ async function read(l: Live) {
   }
 }
 
-type Seg = { seq: number; text: string; start: number; end: number; speaker: number; language?: string | null; translations?: Record<string, string> };
-type Sent = { sentenceId: number; seqs: number[]; translations?: Record<string, string> };
+type Seg = { seq: number; text: string; start: number; end: number; speaker: number; language?: string | null; translations?: Record<string, string>; words?: { start: number; end: number; text: string }[] | null };
+
+/** A line's words with their times: reading ahead shows them one by one,
+ *  as the video reaches each. */
+function words(l: Live, ws: Seg['words']): { words?: { s: number; e: number; t: string }[] } {
+  return l.feed && ws?.length ? { words: ws.map((w) => ({ s: w.start, e: w.end, t: w.text })) } : {};
+}
+type Sent = { sentenceId: number; seqs: number[]; text: string; speaker: number; status?: string; suppressed?: boolean; translations?: Record<string, string> | null };
+
+/** Read ahead, the API's sentences go to the captions, which show them
+ *  whole (LiveEvent `sentence`). */
+function sentenceOf(l: Live, st: Sent) {
+  if (!l.feed || !st.seqs.length) return;
+  emit(l, { type: 'sentence', sentenceId: st.sentenceId, seqs: st.seqs, text: st.text, speaker: String(st.speaker), ...(st.status === 'dropped' || st.suppressed ? { dropped: true } : {}) });
+}
 
 /** A recording's transcript, as the dashboard reads it: committed and
  *  draft lines from the owner's subscription, and their translation when
@@ -288,12 +341,13 @@ async function follow(l: Live, rid: string) {
     const segment = (g: Seg) => {
       if (!seen.has(g.seq)) {
         seen.add(g.seq);
-        emit(l, { type: 'committed', seq: g.seq, text: g.text, startS: g.start, endS: g.end, speaker: String(g.speaker), lang: g.language ?? null });
+        emit(l, { type: 'committed', seq: g.seq, text: g.text, startS: g.start, endS: g.end, speaker: String(g.speaker), lang: g.language ?? null, ...words(l, g.words) });
       }
       const tr = lang ? g.translations?.[lang] : undefined;
       if (tr) emit(l, { type: 'translated', seq: g.seq, lang: lang!, text: tr });
     };
     const sentence = (st: Sent) => {
+      sentenceOf(l, st);
       const tr = lang ? st.translations?.[lang] : undefined;
       if (tr && st.seqs.length) emit(l, { type: 'translated', seq: Math.max(...st.seqs), seqs: st.seqs, sentenceId: st.sentenceId, lang: lang!, text: tr });
     };
@@ -435,6 +489,7 @@ async function endRecording(vs: VocalStack, rid: string, session: RealtimeSessio
 }
 
 async function teardown(l: Live) {
+  l.feed?.close();
   try { l.session?.close(); } catch { /* closed */ }
   try { l.sub?.close(); } catch { /* closed */ }
   for (const st of l.streams) st.getTracks().forEach((t) => t.stop());

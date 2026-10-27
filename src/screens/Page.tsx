@@ -2,7 +2,9 @@
  *
  *  - A video page (YouTube and the like): TRANSCRIBE THIS VIDEO, as Live
  *    Transcription (the tab recorded as it plays, Floating Captions over
- *    the video) or File Upload (the whole video fetched, in Upload's list);
+ *    the video) or, but on YouTube, File Upload (the whole video fetched,
+ *    in Upload's list). YouTube's Live Transcription reads the video's
+ *    audio ahead of playback (lib/ahead.ts): no File Upload there;
  *  - another page with media: what it plays or links to, ticked, then
  *    Transcribe N Items;
  *  - nothing to transcribe: record the tab in Live, or, in a meeting,
@@ -307,9 +309,9 @@ function useStartTab(tabId: number | undefined, onLive: () => void) {
 
 type VideoMode = 'live' | 'upload';
 
-/** TRANSCRIBE THIS VIDEO: Live Transcription or File Upload, then the
- *  chosen one's view (a switch to change it, what happens, Floating
- *  Captions for Live) and its button at the bottom. */
+/** TRANSCRIBE THIS VIDEO: Live Transcription or File Upload (not on
+ *  YouTube), then the chosen one's view (a switch to change it, what
+ *  happens, Floating Captions for Live) and its button at the bottom. */
 function VideoPick({ account, live, tabId, url, title, durationS, stream, recording, onLive, onUpload, onSettings }: {
   account: Account; live: LiveStatus[]; tabId: number; url: string; title: string; durationS?: number; stream: boolean; recording: boolean;
   onLive: () => void; onUpload: () => void; onSettings: () => void;
@@ -321,6 +323,7 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
   const [spoken, , spokenReady] = useSpokenLang();
   const mayRecord = can(account, 'record');
   const start = useStartTab(tabId, onLive);
+  const upload = !isYouTube(url);
   // Instant start: while Live Transcription is on offer, an engine stays loaded.
   useWarm(spokenReady && mayRecord && !recording && mode !== 'upload' && !tabHolder(live, tabId), spoken);
   useEffect(() => { setMode(null); }, [url]);
@@ -338,7 +341,7 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
           {recording
             ? <PickCard icon={<HiMic />} live head="Live Transcription" badge text="Go to the live transcript." onClick={onLive} />
             : <PickCard icon={<HiMic />} head="Live Transcription" text="Transcribe the audio as it plays, with floating captions over the video." onClick={() => setMode('live')} />}
-          <PickCard icon={<HiUpload />} head="File Upload" text="The whole video is fetched and transcribed at once, with a full transcript in your Library." onClick={toUpload} />
+          {upload && <PickCard icon={<HiUpload />} head="File Upload" text="The whole video is fetched and transcribed at once, with a full transcript in your Library." onClick={toUpload} />}
         </div>
       </>
     );
@@ -347,10 +350,12 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
   const isLiveMode = mode === 'live';
   return (
     <>
-      <Switch<VideoMode> label="How to transcribe" value={mode} onChange={setMode} options={[
-        { value: 'live', label: 'Live Transcription', icon: <HiMic width={15} height={15} /> },
-        { value: 'upload', label: 'File Upload', icon: <HiUpload width={15} height={15} /> },
-      ]} />
+      {upload && (
+        <Switch<VideoMode> label="How to transcribe" value={mode} onChange={setMode} options={[
+          { value: 'live', label: 'Live Transcription', icon: <HiMic width={15} height={15} /> },
+          { value: 'upload', label: 'File Upload', icon: <HiUpload width={15} height={15} /> },
+        ]} />
+      )}
       <div className="card2 empty2">
         <span className="round round--lg">{isLiveMode ? <HiMic /> : <HiUpload />}</span>
         <div className="empty2__head">{isLiveMode ? 'Ready to caption this video' : 'Ready to transcribe this video'}</div>

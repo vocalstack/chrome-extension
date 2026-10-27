@@ -32,7 +32,9 @@ async function set(s: VcapStatus, run: number) {
   if (ok) push({ push: 'vcap.status', status: s });
 }
 
-export interface Cue { s: number; e: number; t: string; o?: string }
+/** A sentence on the video: shown `t` (`o`: as said, when `t` is its
+ *  translation, `tr`), and the words said, which light up one by one. */
+export interface Cue { s: number; e: number; t: string; o?: string; tr?: boolean; w?: { s: number; e: number; t: string }[] }
 
 async function run(req: VcapStart, runId: number) {
   const { tabId } = req;
@@ -60,7 +62,12 @@ async function run(req: VcapStart, runId: number) {
     }
   }
   if (!(await current(tabId, runId))) return;
-  const cues: Cue[] = sentences.map((x) => (lang ? { s: x.start, e: x.end, t: tr[x.sentenceId] ?? x.text, o: x.text } : { s: x.start, e: x.end, t: x.text }));
+  const bySeq = new Map(snap.segments.map((g) => [g.seq, g]));
+  const wordsOf = (seqs: number[]) => seqs.flatMap((q) => bySeq.get(q)?.words ?? []).map((w) => ({ s: w.start, e: w.end, t: w.text }));
+  const cues: Cue[] = sentences.map((x) => ({
+    s: x.start, e: x.end, w: wordsOf(x.seqs),
+    ...(lang && tr[x.sentenceId] ? { t: tr[x.sentenceId]!, o: x.text, tr: true } : { t: x.text }),
+  }));
   const frameId = await videoFrame(tabId);
   await store.update(tabId, (d) => [d && d.run === runId ? { ...d, frameId } : d, undefined]);
   await chrome.tabs.sendMessage(tabId, { vcap: 'on', lang, cues }, { frameId }).catch(() => {});

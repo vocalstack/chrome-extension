@@ -7,6 +7,7 @@ import type { Account } from '../lib/auth';
 import { ENVS, type Env, type EnvName } from '../lib/env';
 import { rpc } from '../lib/rpc';
 import { AUTO_CAPTIONS, OFFER_KEY } from '../lib/live';
+import { AHEAD_DEBUG } from '../lib/ahead';
 import { errorText, Field, Note, useAction } from '../ui/kit';
 import { HiKey } from '../ui/icons';
 import { Toggle } from '../ui/ds';
@@ -35,14 +36,16 @@ export function Settings({ account }: { account: Account; env: Env | null; onBac
   const out = useAction();
   const [offerMeetings, setOfferMeetings] = useState(true);
   const [autoCaptions, setAutoCaptions] = useState(true);
+  const [aheadDebug, setAheadDebug] = useState(false);
   const [plan, setPlan] = useState<string | null>(null);
 
   useEffect(() => {
     // What the key may do now: it can be changed in the dashboard any time.
     void rpc('auth.refresh').catch(() => {});
-    chrome.storage.local.get([OFFER_KEY, AUTO_CAPTIONS]).then((g) => {
+    chrome.storage.local.get([OFFER_KEY, AUTO_CAPTIONS, AHEAD_DEBUG]).then((g) => {
       setOfferMeetings(g[OFFER_KEY] !== false);
       setAutoCaptions(g[AUTO_CAPTIONS] !== false);
+      setAheadDebug(g[AHEAD_DEBUG] === true);
     });
     // The plan, when this sign-in may read billing (a key may not).
     if (account.via === 'connect') client().then((vs) => vs.billing.get()).then((b) => setPlan(b.enabled && b.plan ? b.plan.name : null), () => {});
@@ -52,6 +55,7 @@ export function Settings({ account }: { account: Account; env: Env | null; onBac
   const isKey = account.via === 'key';
   const prefs: { label: string; sub: string; on: boolean; set: (v: boolean) => void }[] = [
     { label: 'Captions on videos', sub: 'Turn captions on by themselves on every video you play. Each one is transcribed and uses credit.', on: autoCaptions, set: (v) => { setAutoCaptions(v); void chrome.storage.local.set({ [AUTO_CAPTIONS]: v }); } },
+    { label: 'Read-ahead debug', sub: 'On YouTube, show over the video how far ahead of it the buffer, the audio sent and the transcript are, and how early each line came back.', on: aheadDebug, set: (v) => { setAheadDebug(v); void chrome.storage.local.set({ [AHEAD_DEBUG]: v }); } },
     { label: 'Offer to record meetings', sub: 'Offer to record when you join a call in a supported meeting app. Click the notification to open this panel.', on: offerMeetings, set: (v) => { setOfferMeetings(v); void chrome.storage.local.set({ [OFFER_KEY]: v }); } },
   ];
 

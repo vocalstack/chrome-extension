@@ -4,6 +4,7 @@
 
 import type { LiveStart, LiveStatus } from './live';
 import type { Failure } from './errors';
+import type { AheadChunk, AheadClock } from './ahead';
 
 export interface DubSentence {
   id: number;
@@ -22,7 +23,10 @@ export type OffCmd =
   | { off: 'dub.load'; tabId: number; api: string; recordingId: string; lang: string; voice?: string | null; sentences: DubSentence[] }
   /** The page video's clock: `t` media seconds at `at` (ms since epoch). */
   | { off: 'dub.sync'; tabId: number; t: number; paused: boolean; rate: number; at: number }
-  | { off: 'dub.stop'; tabId: number };
+  | { off: 'dub.stop'; tabId: number }
+  /** From the content script reading ahead (content/ahead.ts): the
+   *  video's clock, and buffered audio when there is new. */
+  | { off: 'ahead.data'; id: string; clock: AheadClock; chunk?: AheadChunk };
 
 export type OffAnswer = { ok: true; value?: unknown; statuses?: LiveStatus[] } | Failure;
 

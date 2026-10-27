@@ -432,7 +432,7 @@ label.item--click{cursor:pointer}
 .vs-lang-chip__code{font-family:var(--vs-font-mono);font-size:11px;font-weight:600;letter-spacing:.04em}
 .vs-lang-chip__code:empty{display:none}
 .vs-lang-chip__chevron{color:var(--vs-text-muted)}
-.vs-sheet-scrim{position:absolute;inset:0;background:rgba(5,6,21,.7);display:flex;flex-direction:column;justify-content:flex-end;z-index:98}
+.vs-sheet-scrim{position:fixed;inset:0;background:rgba(5,6,21,.7);display:flex;flex-direction:column;justify-content:flex-end;z-index:98}
 .vs-sheet{background:var(--vs-surface-raised);border-top:1px solid var(--vs-border);border-radius:26px 26px 0 0;padding:12px 0 24px;display:flex;flex-direction:column;max-height:86%;min-height:0;overflow:hidden}
 .vs-sheet__grip{flex:none;width:34px;height:4px;border-radius:9999px;background:var(--vs-border-strong);margin:0 auto 16px}
 .vs-sheet__head{flex:none;padding:0 20px;display:flex;align-items:baseline;justify-content:space-between}

@@ -8,9 +8,12 @@
  *  with a search box, and × hides it. Lives in a closed shadow root in
  *  the top layer, so the page's styles cannot reach it and it shows over
  *  full-screen video. Fed by the background (`{caption}` events and
- *  `{captionStatus}`). */
+ *  `{captionStatus}`). A session reading ahead (YouTube, lib/ahead.ts)
+ *  sends its lines before they are said, on the video's clock: they wait,
+ *  then show whole, greyed, and light up word by word as each is said. */
 
 import type { LiveEvent } from '../lib/rpc';
+import { AHEAD_LEAD, videoIdOf } from '../lib/ahead';
 import { mainVideo, visibleArea } from './video';
 
 type Labels = 'auto' | 'on' | 'off';
@@ -18,34 +21,44 @@ type Menu = 'lang' | 'tr';
 const esc = (t: string) => t.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
 interface Line { seq: number; text: string; speaker: string }
 interface Said { key: number; seq: number; tr: string }
-interface Cue { s: number; e: number; t: string; o?: string }
-interface Status { state: string; mode: string; spokenLanguage: string | null; translateTo: string | null; speakerLabels: Labels; host?: string }
+interface Cue { s: number; e: number; t: string; o?: string; tr?: boolean; w?: { s: number; e: number; t: string }[] }
+interface Status { state: string; mode: string; spokenLanguage: string | null; translateTo: string | null; speakerLabels: Labels; host?: string; ahead?: boolean }
+/** A line read ahead: its times (and its words') on video `vid`'s clock. */
+interface Timed { seq: number; s: number; e: number; text: string; speaker: string; vid?: string; words?: { s: number; e: number; t: string }[] }
+/** What can show read ahead: a line, or a sentence's translation. */
+interface Unit { key: string; s: number; e: number; text: string; speaker: string; words?: Timed['words']; translated?: boolean }
 interface Lang { code: string; flag?: string; name: string; native?: string }
 /** Where the person put the window: its corner as a share of the
  *  viewport, its width, and the text's height once resized. */
 interface Geo { fx: number; fy: number; w: number; th: number | null }
-interface Shown { key: string; who: string; color: string; text: string }
+/** `said`: how much of the text has been said (the rest is greyed). */
+interface Shown { key: string; who: string; color: string; text: string; said?: number }
 
 const GEO_KEY = 'captionWindow';
 const LANES = ['#55abe5', '#f78472', '#7fd6b4'];
 const MIN_W = 380;
 const MIN_H = 120;
 const EASE = 'cubic-bezier(.2,.7,.2,1)';
+/** Read ahead: a line stays this long after its last word, unless the next starts. */
+const HOLD_S = 3;
+/** Read ahead: how many lines and translations are kept. */
+const KEEP_TIMED = 2000;
 
 const svg = (d: string, size: number, width = 1.6) =>
   `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
 const CHEVRON = svg('m19.5 8.25-7.5 7.5-7.5-7.5', 10, 2.2);
 const LANG = svg('m10.5 21 5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 0 1 6-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 0 1-3.827-5.802', 14);
 const ARROW = svg('M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3', 11, 1.8);
-const SEARCH = svg('m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z', 14, 1.8);
+const SEARCH = svg('m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z', 16, 1.8);
 const CLOSE = svg('M6 18 18 6M6 6l12 12', 14, 1.8);
-const CHECK = svg('m4.5 12.75 6 6 9-13.5', 14, 2.2);
+const CHECK = svg('m4.5 12.75 6 6 9-13.5', 16, 2.2);
 const GRIP = '<svg viewBox="0 0 10 16" width="10" height="16" fill="currentColor" aria-hidden="true"><circle cx="2.5" cy="3" r="1.3"/><circle cx="7.5" cy="3" r="1.3"/><circle cx="2.5" cy="8" r="1.3"/><circle cx="7.5" cy="8" r="1.3"/><circle cx="2.5" cy="13" r="1.3"/><circle cx="7.5" cy="13" r="1.3"/></svg>';
 const CORNER = '<svg viewBox="0 0 10 10" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M9 3 3 9M9 6.5 6.5 9"/></svg>';
 
 const CSS = `
 :host{all:initial}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 .win{position:fixed;pointer-events:auto;touch-action:none;user-select:none;padding:14px 18px 16px;border-radius:16px;background:rgba(10,11,24,.82);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);box-shadow:0 0 0 1px rgba(255,255,255,.1),0 16px 40px rgba(0,0,0,.45);color:#eaecfa;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased;text-align:left;line-height:normal}
 .rz{position:absolute;z-index:5;touch-action:none}
 .rz-n,.rz-s{left:12px;right:12px;height:8px;cursor:ns-resize}.rz-n{top:-4px}.rz-s{bottom:-4px}
@@ -70,7 +83,9 @@ const CSS = `
 .btn .name{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .btn .flag{font-size:13px;line-height:1}
 .arrow{flex:none;display:flex;color:rgba(234,236,250,.45)}
-.rest{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:500 9.5px ui-monospace,Menlo,monospace;letter-spacing:.12em;color:rgba(234,236,250,.45)}
+.buf{flex:none;display:flex;align-items:center;gap:7px;font:500 9.5px ui-monospace,Menlo,monospace;letter-spacing:.12em;color:rgba(234,236,250,.62)}
+.buf i{width:11px;height:11px;border:1.5px solid rgba(234,236,250,.22);border-top-color:#55abe5;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 .grow{flex:1}
 .x{flex:none;width:24px;height:24px;border:0;padding:0;border-radius:50%;background:none;display:flex;align-items:center;justify-content:center;cursor:pointer;color:rgba(234,236,250,.55)}
 .x:hover{background:rgba(255,255,255,.1)}
@@ -78,24 +93,30 @@ const CSS = `
 .inner{display:flex;flex-direction:column;justify-content:flex-end;gap:6px}
 .ln{font-size:19px;font-weight:400;line-height:1.4;color:#eaecfa;text-wrap:pretty;transition:color .4s ease}
 .ln--prev{color:rgba(234,236,250,.55)}
+.ln .todo{color:rgba(234,236,250,.32)}
 .ln b{font-size:13px;font-weight:600;margin-right:8px}
 .wait{font-size:15px;font-weight:300;color:rgba(234,236,250,.55)}
-.pop{position:absolute;left:12px;z-index:6;width:290px;max-height:300px;overflow-y:auto;padding:6px;border-radius:12px;background:rgba(16,17,34,.96);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);box-shadow:0 0 0 1px rgba(255,255,255,.1),0 16px 40px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:2px;cursor:default;scrollbar-width:none}
-.pop::-webkit-scrollbar{width:0;height:0}
-.pop--up{bottom:calc(100% + 8px)}.pop--down{top:calc(100% + 8px)}
-.pop__title{padding:8px 10px 6px;font:500 9px ui-monospace,Menlo,monospace;letter-spacing:.14em;color:rgba(234,236,250,.4)}
-.find{margin:0 4px 6px;display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;border-radius:9px;background:rgba(255,255,255,.07);color:rgba(234,236,250,.45)}
-.find input{flex:1;min-width:0;height:100%;padding:0;border:0;outline:none;background:transparent;color:#eaecfa;font:400 13px Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;user-select:text}
-.find input::placeholder{color:rgba(234,236,250,.4)}
-.none{padding:14px 10px;font-size:12.5px;font-weight:300;color:rgba(234,236,250,.5)}
-.opt{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border:0;border-radius:8px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
-.opt:hover{background:rgba(255,255,255,.08)}
-.opt[aria-checked="true"]{background:rgba(85,171,229,.12)}
-.opt__flag{flex:none;width:20px;font-size:15px;line-height:1;text-align:center}
-.opt__main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
-.opt__label{font-size:13px;font-weight:500;color:#eaecfa}
-.opt__sub{font-size:11.5px;font-weight:300;line-height:1.4;color:rgba(234,236,250,.5);text-wrap:pretty}
-.opt svg{flex:none;color:#55abe5}
+.scrim{position:fixed;inset:0;z-index:10;pointer-events:auto;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(5,6,21,.7);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased;line-height:normal;text-align:left}
+.sheet{width:min(400px,100%);max-height:min(560px,86vh);display:flex;flex-direction:column;padding:16px 0 12px;border-radius:20px;background:#1b1b33;box-shadow:0 0 0 1px rgba(255,255,255,.1),0 24px 60px rgba(0,0,0,.6);color:#eaecfa;overflow:hidden}
+.sheet__head{flex:none;padding:0 20px;display:flex;align-items:baseline;justify-content:space-between}
+.sheet__title{font:600 11px ui-monospace,"SF Mono",Menlo,Monaco,Consolas,monospace;letter-spacing:.12em;color:#848eae}
+.sheet__done{border:0;padding:0;background:none;cursor:pointer;font:500 13px Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;color:#85b4e0}
+.sheet__note{flex:none;padding:8px 20px 0;font-size:11.5px;line-height:1.45;color:#848eae;text-wrap:pretty}
+.sheet__search{flex:none;margin:12px 20px 0;padding:11px 13px;border-radius:12px;background:rgba(255,255,255,.04);display:flex;align-items:center;gap:9px;color:#848eae}
+.sheet__search input{flex:1;min-width:0;height:22px;padding:0;border:0;outline:none;background:transparent;color:#eaecfa;font:400 14px Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;user-select:text}
+.sheet__search input::placeholder{color:#848eae}
+.sheet__body{flex:1 1 0%;min-height:120px;overflow-y:auto;overscroll-behavior:contain;margin-top:8px;padding:0 20px;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.2) transparent}
+.row{display:flex;align-items:center;gap:12px;width:100%;min-height:44px;padding:11px 6px;border:0;border-radius:12px;background:none;color:inherit;text-align:left;cursor:pointer;font-family:inherit}
+.row:hover{background:rgba(255,255,255,.05)}
+.row[aria-selected="true"]{background:rgba(255,255,255,.1)}
+.row__flag{flex:none;width:24px;display:flex;justify-content:center;font-size:19px;line-height:1;color:rgba(234,236,250,.62)}
+.row__main{flex:1;min-width:0}
+.row__label{display:block;font-size:15.5px;font-weight:400;color:#eaecfa}
+.row[aria-selected="true"] .row__label{font-weight:600}
+.row__native{display:block;margin-top:2px;font-size:11.5px;color:#848eae}
+.row__check{flex:none;width:16px;display:flex;justify-content:center;color:#3382cc}
+.cc{display:inline-flex;align-items:center;justify-content:center;height:15px;padding:0 3px;border:1.5px solid currentColor;border-radius:4px;font:700 8.5px ui-monospace,Menlo,monospace;letter-spacing:.04em;box-sizing:border-box}
+.more{padding:12px 6px 6px;font:500 10.5px ui-monospace,"SF Mono",Menlo,monospace;letter-spacing:.06em;color:#848eae}
 button:focus{outline:none}
 button:focus-visible{outline:2px solid rgba(85,171,229,.6);outline-offset:1px}
 `;
@@ -121,6 +142,16 @@ export function startOverlay() {
   let cues: Cue[] | null = null;
   let cue = -1;
   let cueTimer: number | undefined;
+  /** Read ahead: the lines to come and gone, and sentences' translations. */
+  let timed: Timed[] = [];
+  let timedTr = new Map<number, { seqs: number[]; text: string }>();
+  /** Read ahead: the API's sentences, which the captions show whole. */
+  let timedSent = new Map<number, { seqs: number[]; text: string; speaker: string }>();
+  let aheadTimer: number | undefined;
+  /** Read ahead: how far past the playhead the transcript reaches (null:
+   *  nothing yet), from content/ahead.ts in this frame. */
+  let lead: number | null = null;
+  let aheadShown = '';
   let timer: number | undefined;
   let geo: Geo | null = null;
   let menu: Menu | null = null;
@@ -158,11 +189,10 @@ export function startOverlay() {
     win.className = 'win';
     win.innerHTML = ['n', 's', 'w', 'e', 'nw', 'ne', 'sw'].map((d) => `<div class="rz rz-${d}" data-rz="${d}" aria-hidden="true"></div>`).join('')
       + `<div class="rz rz-se" data-rz="se" title="Drag to resize">${CORNER}</div>`
-      + '<div class="pop-slot"></div>'
       + `<div class="hd" title="Drag to move"><span class="grip">${GRIP}</span><span class="pill"></span>`
-      + `<span class="langs"><button type="button" class="btn" data-menu="lang" aria-haspopup="menu"></button>`
-      + `<span class="arrow">${ARROW}</span><button type="button" class="btn" data-menu="tr" aria-haspopup="menu"></button></span>`
-      + '<span class="rest"></span><span class="grow"></span>'
+      + `<span class="langs"><button type="button" class="btn" data-menu="lang" aria-haspopup="dialog"></button>`
+      + `<span class="arrow">${ARROW}</span><button type="button" class="btn" data-menu="tr" aria-haspopup="dialog"></button></span>`
+      + '<span class="buf" hidden><i></i>BUFFERING</span><span class="grow"></span>'
       + `<button type="button" class="x" aria-label="Hide captions" title="Hide captions">${CLOSE}</button></div>`
       + '<div class="txt"><div class="inner"></div></div>';
     root.appendChild(win);
@@ -182,6 +212,12 @@ export function startOverlay() {
   function unmount() {
     if (timer) clearInterval(timer);
     if (cueTimer) clearInterval(cueTimer);
+    if (aheadTimer) clearInterval(aheadTimer);
+    aheadTimer = undefined;
+    timed = [];
+    timedTr = new Map();
+    timedSent = new Map();
+    aheadShown = '';
     cues = null;
     cue = -1;
     document.removeEventListener('fullscreenchange', reparent);
@@ -242,8 +278,6 @@ export function startOverlay() {
     win.style.width = `${w}px`;
     win.style.left = `${x}px`;
     win.style.top = `${y}px`;
-    const pop = root?.querySelector<HTMLElement>('.pop');
-    if (pop) pop.className = `pop ${y > 320 ? 'pop--up' : 'pop--down'}`;
   }
 
   function saveGeo(next: Geo) {
@@ -255,7 +289,6 @@ export function startOverlay() {
   function onPointerDown(e: PointerEvent) {
     if (e.button !== 0 || !win) return;
     const t = e.target as HTMLElement;
-    if (t.closest('.pop')) return;
     const dir = t.closest<HTMLElement>('[data-rz]')?.dataset.rz;
     if (!dir && (!t.closest('.hd') || t.closest('button'))) return;
     e.preventDefault();
@@ -308,7 +341,6 @@ export function startOverlay() {
     query = '';
     loadLangs();
     renderMenu();
-    root?.querySelector<HTMLInputElement>('.find input')?.focus();
   }
 
   /** Change the session from the next words on, and keep the choice for
@@ -328,72 +360,70 @@ export function startOverlay() {
     render();
   }
 
+  /** The language picker, as the side panel's (ui/ds.tsx LanguagePicker):
+   *  a sheet over the darkened page, its search, flagged rows with each
+   *  language's own name, a check on the one in use. */
   function renderMenu() {
-    const slot = root?.querySelector<HTMLElement>('.pop-slot');
-    if (!slot || !win) return;
-    // Languages arriving redraw the menu: the search keeps its focus.
-    const typing = (root as ShadowRoot | null)?.activeElement?.tagName === 'INPUT';
-    slot.textContent = '';
+    if (!root || !win) return;
+    // Languages arriving redraw the picker: the search keeps its focus.
+    const typing = root.activeElement?.tagName === 'INPUT';
+    root.querySelector('.scrim')?.remove();
     for (const b of win.querySelectorAll<HTMLElement>('[data-menu]')) b.setAttribute('aria-expanded', String(b.dataset.menu === menu));
     if (!menu || !status) return;
-    const pop = document.createElement('div');
-    pop.setAttribute('role', 'menu');
-    pop.className = `pop ${win.offsetTop > 320 ? 'pop--up' : 'pop--down'}`;
-    const title = document.createElement('div');
-    title.className = 'pop__title';
-    title.textContent = menu === 'lang' ? 'SPOKEN LANGUAGE' : 'READ IN';
-    pop.appendChild(title);
-    const find = document.createElement('label');
-    find.className = 'find';
-    find.innerHTML = SEARCH;
+    const spoken = menu === 'lang';
+    const title = spoken ? 'SPOKEN LANGUAGE' : 'READ IN';
+    const scrim = document.createElement('div');
+    scrim.className = 'scrim';
+    scrim.setAttribute('role', 'dialog');
+    scrim.setAttribute('aria-modal', 'true');
+    scrim.setAttribute('aria-label', title);
+    scrim.onclick = (e) => { if (e.target === scrim) { menu = null; renderMenu(); } };
+    const sheet = document.createElement('div');
+    sheet.className = 'sheet';
+    sheet.innerHTML = `<div class="sheet__head"><span class="sheet__title">${title}</span><button type="button" class="sheet__done">Done</button></div>`
+      + `<div class="sheet__note">${spoken ? 'The language spoken in this video. A change applies from the next words on.' : 'Transcripts, captions and dubs show in this language. Change it any time.'}</div>`
+      + `<label class="sheet__search">${SEARCH}</label><div class="sheet__body" role="listbox"></div>`;
+    sheet.querySelector<HTMLElement>('.sheet__done')!.onclick = () => { menu = null; renderMenu(); };
+    const pool = spoken ? langs : trLangs;
     const input = document.createElement('input');
-    Object.assign(input, { type: 'text', value: query, placeholder: 'Search languages', autocomplete: 'off', spellcheck: false });
-    input.setAttribute('aria-label', 'Search languages');
+    const placeholder = pool.length ? `Search ${pool.length} languages` : 'Search languages';
+    Object.assign(input, { type: 'text', value: query, placeholder, autocomplete: 'off', spellcheck: false });
+    input.setAttribute('aria-label', placeholder);
     // Typing here is not the page's: keep its shortcuts (YouTube's k, f, m…) out.
     for (const t of ['keydown', 'keyup', 'keypress'] as const) input.addEventListener(t, (e) => { if ((e as KeyboardEvent).key !== 'Escape') e.stopPropagation(); });
     input.oninput = () => { query = input.value; fill(); };
-    find.appendChild(input);
-    pop.appendChild(find);
-    const list = document.createElement('div');
-    pop.appendChild(list);
-    const opt = (label: string, sub: string, flag: string, on: boolean, pick: () => void) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'opt';
-      b.setAttribute('role', 'menuitemradio');
-      b.setAttribute('aria-checked', String(on));
-      if (flag) { const f = document.createElement('span'); f.className = 'opt__flag'; f.textContent = flag; b.appendChild(f); }
-      const main = document.createElement('span');
-      main.className = 'opt__main';
-      const l = document.createElement('span'); l.className = 'opt__label'; l.textContent = label; main.appendChild(l);
-      if (sub) { const s = document.createElement('span'); s.className = 'opt__sub'; s.textContent = sub; main.appendChild(s); }
-      b.appendChild(main);
-      if (on) b.insertAdjacentHTML('beforeend', CHECK);
-      b.onclick = pick;
-      list.appendChild(b);
-    };
+    sheet.querySelector('.sheet__search')!.appendChild(input);
+    const body = sheet.querySelector<HTMLElement>('.sheet__body')!;
+    const cur = spoken ? status.spokenLanguage : status.translateTo;
+    const rows: { flag: string; label: string; native?: string; on: boolean; pick: () => void }[] = [
+      spoken
+        ? { flag: LANG.replace(/width="14" height="14"/, 'width="19" height="19"'), label: 'Auto detect', on: !cur, pick: () => change({ spokenLanguage: null }) }
+        : { flag: '<span class="cc">CC</span>', label: 'No translation', on: !cur, pick: () => change({ translateTo: null }) },
+      ...pool.map((l) => ({ flag: esc(l.flag ?? ''), label: l.name, native: l.native, on: cur === l.code, pick: () => change(spoken ? { spokenLanguage: l.code } : { translateTo: l.code }) })),
+    ];
     const fill = () => {
-      list.textContent = '';
+      body.textContent = '';
       const q = query.trim().toLowerCase();
-      const hit = (label: string, sub: string) => !q || `${label} ${sub}`.toLowerCase().includes(q);
-      const rows: [string, string, string, boolean, () => void][] = [];
-      if (menu === 'lang') {
-        const cur = status!.spokenLanguage;
-        rows.push(['Auto detect', 'Each line gets its own detected language.', '', !cur, () => change({ spokenLanguage: null })]);
-        for (const l of langs) rows.push([l.native ?? l.name, l.native ? l.name : '', l.flag ?? '', cur === l.code, () => change({ spokenLanguage: l.code })]);
-      } else {
-        const cur = status!.translateTo;
-        rows.push(['No translation', 'Shown as spoken.', '', !cur, () => change({ translateTo: null })]);
-        for (const l of trLangs) rows.push([l.native ?? l.name, l.native ? l.name : '', l.flag ?? '', cur === l.code, () => change({ translateTo: l.code })]);
+      const shown = q ? rows.filter((r) => `${r.label} ${r.native ?? ''}`.toLowerCase().includes(q)) : rows;
+      for (const r of shown) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'row';
+        b.setAttribute('role', 'option');
+        b.setAttribute('aria-selected', String(r.on));
+        b.innerHTML = `<span class="row__flag">${r.flag}</span><span class="row__main"><span class="row__label"></span>${r.native ? '<span class="row__native"></span>' : ''}</span><span class="row__check">${r.on ? CHECK : ''}</span>`;
+        b.querySelector('.row__label')!.textContent = r.label;
+        if (r.native) b.querySelector('.row__native')!.textContent = r.native;
+        b.onclick = r.pick;
+        body.appendChild(b);
       }
-      const shown = rows.filter(([label, sub]) => hit(label, sub));
-      for (const r of shown) opt(...r);
-      if (!shown.length) { const n = document.createElement('div'); n.className = 'none'; n.textContent = `No languages match “${query.trim()}”.`; list.appendChild(n); }
+      if (!shown.length) { const n = document.createElement('div'); n.className = 'more'; n.textContent = `No match for “${query.trim()}”`; body.appendChild(n); }
     };
     fill();
-    slot.appendChild(pop);
-    if (typing) input.focus();
-    list.querySelector<HTMLElement>('[aria-checked="true"]')?.scrollIntoView({ block: 'nearest' });
+    scrim.appendChild(sheet);
+    root.appendChild(scrim);
+    if (typing || !query) input.focus();
+    body.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
   }
 
   /** The header: state, the session's languages, where it comes from. */
@@ -423,20 +453,22 @@ export function startOverlay() {
       trBtn.title = trTip;
       trBtn.setAttribute('aria-label', trTip);
     }
-    win.querySelector<HTMLElement>('.rest')!.textContent = (status?.host ?? location.host).replace(/^www\./, '').toUpperCase();
+    win.querySelector<HTMLElement>('.buf')!.hidden = !buffering();
   }
 
   /** The two lines shown: the one before, dimmed, and the one being said. */
   function shown(): Shown[] {
     if (cues) {
       if (cue < 0) return [];
-      return [cues[cue - 1], cues[cue]].filter((c): c is Cue => !!c).map((c) => ({ key: `q${c.s}`, who: '', color: '', text: c.t }));
+      return [cues[cue - 1], cues[cue]].filter((c): c is Cue => !!c).map((c, i, all) => ({ key: `q${c.s}`, who: '', color: '', text: c.t,
+        ...(i === all.length - 1 ? { said: reached({ key: '', s: c.s, e: c.e, text: c.t, speaker: '', words: c.w, translated: c.tr }) } : {}) }));
     }
     const names: Record<string, string> = { ...Object.fromEntries(Object.entries(voiced).filter(([, v]) => v)), ...Object.fromEntries(Object.entries(typed).filter(([, v]) => v)) };
     const labels = status?.speakerLabels ?? 'auto';
-    const voices = new Set(lines.map((l) => l.speaker));
+    const voices = new Set((status?.ahead ? timed : lines).map((l) => l.speaker));
     const show = labels === 'on' || (labels !== 'off' && voices.size > 1) || (labels !== 'off' && Object.keys(names).length > 0);
     const tag = (sp: string) => ({ who: show ? names[sp] || `Speaker ${Number(sp) + 1}` : '', color: LANES[(Number(sp) || 0) % LANES.length]! });
+    if (status?.ahead) return due().map((u, i, all) => ({ key: u.key, ...tag(u.speaker), text: u.text, ...(i === all.length - 1 ? { said: reached(u) } : {}) }));
     const last = lines[lines.length - 1];
     const next = `c${(last?.seq ?? 0) + 1}`;
     const items: Shown[] = [];
@@ -449,6 +481,86 @@ export function startOverlay() {
       if (draft) items.push({ key: next, ...tag(last?.speaker ?? '0'), text: draft });
     }
     return items.slice(-2);
+  }
+
+  /** Read ahead: the units of this video, in time order: the API's
+   *  sentences (in the reading language, their translation), timed by the
+   *  lines they group; a line no sentence holds yet shows alone. */
+  function units(): Unit[] {
+    const vid = videoIdOf(location.href);
+    const mine = timed.filter((l) => !l.vid || l.vid === vid);
+    const bySeq = new Map(mine.map((l) => [l.seq, l]));
+    const covered = new Set<number>();
+    const out: Unit[] = [];
+    const group = (key: string, seqs: number[], text: string, translated: boolean) => {
+      const ls = seqs.map((q) => bySeq.get(q)).filter((l): l is Timed => !!l).sort((a, b) => a.seq - b.seq);
+      if (!ls.length || ls.some((l) => covered.has(l.seq))) return;
+      for (const l of ls) covered.add(l.seq);
+      out.push({ key, s: Math.min(...ls.map((l) => l.s)), e: Math.max(...ls.map((l) => l.e)), text, speaker: ls[0]!.speaker, words: ls.flatMap((l) => l.words ?? []), translated });
+    };
+    if (status?.translateTo) for (const [key, tr] of timedTr) group(`t${key}`, tr.seqs, tr.text, true);
+    for (const [id, st] of timedSent) group(`s${id}`, st.seqs, st.text, false);
+    for (const l of mine) if (!covered.has(l.seq)) out.push({ key: `c${l.seq}`, s: l.s, e: l.e, text: l.text, speaker: l.speaker, words: l.words });
+    return out.sort((a, b) => a.s - b.s);
+  }
+
+  /** Read ahead: what the video has reached. The unit under its clock
+   *  (until HOLD_S after it ends) and the one before, if just said. */
+  function due(): Unit[] {
+    const v = mainVideo();
+    if (!v) return [];
+    const t = v.currentTime;
+    const all = units();
+    let i = -1;
+    for (let k = 0; k < all.length; k++) { if (all[k]!.s > t) break; i = k; }
+    const cur = all[i];
+    if (!cur || t > cur.e + HOLD_S) return [];
+    const prev = all[i - 1];
+    return prev && cur.s - prev.e < HOLD_S ? [prev, cur] : [cur];
+  }
+
+  /** A unit as far as the video has reached: up to its last word begun. */
+  /** How much of a unit has been said: up to the end of its last word
+   *  begun, as a length of its text. A translation (or a text worded
+   *  otherwise than its words) goes by the share of words begun, to the
+   *  end of a word. */
+  function reached(u: Unit): number {
+    const t = mainVideo()?.currentTime ?? Infinity;
+    const ws = u.words ?? [];
+    if (!ws.length) return u.text.length;
+    if (!u.translated) {
+      let end = 0;
+      let from = 0;
+      let matched = true;
+      for (const [i, w] of ws.entries()) {
+        const word = w.t.trim();
+        const at = u.text.indexOf(word, from);
+        if (at < 0) { matched = false; break; }
+        from = at + word.length;
+        if (w.s > t) return i ? end : from;
+        end = from;
+      }
+      if (matched) return u.text.length;
+    }
+    const begun = ws.filter((w) => w.s <= t).length;
+    if (begun >= ws.length) return u.text.length;
+    const cut = Math.ceil((u.text.length * Math.max(begun, 1)) / ws.length);
+    // To the end of that word; a text written without spaces, as it is.
+    if (!/\s/.test(u.text)) return cut;
+    const space = u.text.slice(cut).search(/\s/);
+    return space < 0 ? u.text.length : cut + space;
+  }
+
+  /** Read ahead and live: the transcript is under a second ahead of the
+   *  video, so the captions may not keep up. */
+  function buffering(): boolean {
+    return !!status?.ahead && status.state === 'live' && !cues && (lead === null || lead < 1);
+  }
+
+  /** Read ahead: draw again when what is due changes. */
+  function tickAhead() {
+    const sig = `${buffering()}|${shown().map((x) => `${x.key}:${x.said ?? ''}:${x.text}`).join('|')}`;
+    if (sig !== aheadShown) { aheadShown = sig; render(); }
   }
 
   function render() {
@@ -465,7 +577,7 @@ export function startOverlay() {
     if (!items.length) {
       const w = document.createElement('div');
       w.className = 'wait';
-      w.textContent = cues ? '' : status?.state === 'paused' ? 'Paused.' : status && status.state !== 'live' ? 'Getting ready…' : 'Listening…';
+      w.textContent = cues ? '' : status?.state === 'paused' ? 'Paused.' : status && status.state !== 'live' ? 'Getting ready…' : status?.ahead ? (timed.length ? '' : 'Reading ahead…') : 'Listening…';
       inner.appendChild(w);
     }
     items.forEach((it, i) => {
@@ -473,7 +585,14 @@ export function startOverlay() {
       d.className = `ln${i < items.length - 1 ? ' ln--prev' : ''}`;
       d.dataset.k = it.key;
       if (it.who) { const b = document.createElement('b'); b.style.color = it.color; b.textContent = it.who; d.appendChild(b); }
-      d.appendChild(document.createTextNode(it.text));
+      if (it.said === undefined || it.said >= it.text.length) d.appendChild(document.createTextNode(it.text));
+      else {
+        // Read ahead: the whole line, greyed past what has been said.
+        const todo = document.createElement('span');
+        todo.className = 'todo';
+        todo.textContent = it.text.slice(it.said);
+        d.append(document.createTextNode(it.text.slice(0, it.said)), todo);
+      }
       inner.appendChild(d);
     });
     for (const el of inner.querySelectorAll<HTMLElement>('[data-k]')) {
@@ -512,8 +631,10 @@ export function startOverlay() {
       cue = next;
       if (win) win.style.visibility = cue < 0 ? 'hidden' : '';
       render();
-    }
+    } else tickAhead();
   }
+
+  document.addEventListener(AHEAD_LEAD, (e) => { lead = (e as CustomEvent<number | null>).detail; });
 
   chrome.runtime.onMessage.addListener((msg, _sender, send) => {
     if (msg?.vcap === 'off') { if (cues) unmount(); return false; }
@@ -526,7 +647,7 @@ export function startOverlay() {
       trLang = msg.lang ?? null;
       cues = [...((msg.cues as Cue[]) ?? [])].sort((a, b) => a.s - b.s);
       mount();
-      cueTimer = window.setInterval(follow, 200);
+      cueTimer = window.setInterval(follow, 100);
       follow();
       render();
       return false;
@@ -549,6 +670,7 @@ export function startOverlay() {
     if (msg?.captionStatus) {
       const was = status;
       status = msg.captionStatus as Status;
+      if (status.ahead && !aheadTimer) aheadTimer = window.setInterval(tickAhead, 100);
       if (!was || was.state !== status.state || was.translateTo !== status.translateTo || was.spokenLanguage !== status.spokenLanguage || was.speakerLabels !== status.speakerLabels || was.host !== status.host) {
         render();
         if (menu) renderMenu();
@@ -558,6 +680,21 @@ export function startOverlay() {
     if (msg?.caption === undefined) return false;
     if (msg.caption === 'off') { if (msg.id === sessionId) unmount(); return false; }
     const ev = msg.caption as LiveEvent;
+    if (status?.ahead && ev.type === 'sentence') {
+      if (ev.dropped) timedSent.delete(ev.sentenceId);
+      else timedSent.set(ev.sentenceId, { seqs: ev.seqs, text: ev.text, speaker: ev.speaker });
+      if (timedSent.size > KEEP_TIMED) timedSent.delete(timedSent.keys().next().value!);
+      return false;
+    }
+    if (status?.ahead && (ev.type === 'committed' || ev.type === 'translated')) {
+      // Kept until the video gets there (tickAhead draws it then).
+      if (ev.type === 'committed') timed = [...timed.filter((x) => x.seq !== ev.seq), { seq: ev.seq, s: ev.startS, e: ev.endS, text: ev.text, speaker: ev.speaker ?? '0', vid: ev.vid, words: ev.words }].sort((a, b) => a.s - b.s).slice(-KEEP_TIMED);
+      else {
+        timedTr.set(ev.sentenceId ?? -1 - ev.seq, { seqs: ev.seqs ?? [ev.seq], text: ev.text });
+        if (timedTr.size > KEEP_TIMED) timedTr.delete(timedTr.keys().next().value!);
+      }
+      return false;
+    }
     if (ev.type === 'committed') {
       // A line sent again (a subscription reopened) replaces itself.
       lines = [...lines.filter((x) => x.seq !== ev.seq), { seq: ev.seq, text: ev.text, speaker: ev.speaker ?? '0' }].sort((a, b) => a.seq - b.seq).slice(-8);

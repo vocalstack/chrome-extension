@@ -39,6 +39,9 @@ export interface LiveStart {
   /** Set by the background from the tab: its meeting service and host. */
   meeting?: MeetingKey;
   host?: string;
+  /** Set by the background on YouTube: the session is fed the video's
+   *  buffered audio, ahead of playback, not the tab's sound (lib/ahead.ts). */
+  ahead?: boolean;
 }
 
 export type LiveState = 'starting' | 'warming' | 'live' | 'paused' | 'stopping' | 'done' | 'failed';
@@ -71,6 +74,8 @@ export interface LiveStatus {
   summary?: string | null;
   /** 0..1 input level, for the meter. */
   level?: number;
+  /** Fed the video's buffered audio ahead of playback (LiveStart.ahead). */
+  ahead?: boolean;
 }
 
 export interface CaptionStyle {

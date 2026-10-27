@@ -46,6 +46,9 @@ export interface Methods {
   'tab.invoked': [{ tabId: number }, boolean];
   /** The toolbar icon's "!" badge on a tab, while the panel asks for the click. */
   'tab.badge': [{ tabId: number; on: boolean }, void];
+  /** A content script on YouTube, loaded again: the session reading
+   *  ahead on its tab, if one is (content/ahead.ts). */
+  'live.ahead': [void, { id: string } | null];
   /** The transcript so far of a running session (for a panel opened late). */
   'live.history': [{ id: string }, LiveEvent[]];
   'captions.style': [CaptionStyle, void];
@@ -117,7 +120,9 @@ export type Push =
 
 /** What a live session tells the panel and the captions overlay. */
 export type LiveEvent =
-  | { type: 'committed'; seq: number; text: string; startS: number; endS: number; speaker?: string | null; lang?: string | null }
+  /** Read ahead (lib/ahead.ts): `startS`, `endS` and the words' `s`, `e`
+   *  are on video `vid`'s clock, not the session's. */
+  | { type: 'committed'; seq: number; text: string; startS: number; endS: number; speaker?: string | null; lang?: string | null; words?: { s: number; e: number; t: string }[]; vid?: string }
   /** A speaker's name: typed by a person (`person`), or recognised from a
    *  voice the account holds (`voice`). An empty `name` takes it back. A
    *  typed name outranks a recognised one, as the server ranks them. */
@@ -127,7 +132,11 @@ export type LiveEvent =
    *  `sentenceId`), which is how live sessions translate. */
   | { type: 'translated'; seq: number; seqs?: number[]; sentenceId?: number; lang: string; text: string }
   /** The draft's translation, when the session translates. */
-  | { type: 'draftTranslated'; lang: string; text: string };
+  | { type: 'draftTranslated'; lang: string; text: string }
+  /** The API's sentence: which lines (`seqs`) it groups, and its text,
+   *  replaced whole as it grows; `dropped` takes it back. Read ahead only:
+   *  the captions show sentences, never a line cut mid-sentence. */
+  | { type: 'sentence'; sentenceId: number; seqs: number[]; text: string; speaker: string; dropped?: boolean };
 
 export function push(p: Push): void {
   chrome.runtime.sendMessage(p).catch(() => { /* nobody listening */ });

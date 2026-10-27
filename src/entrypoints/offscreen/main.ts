@@ -1,10 +1,12 @@
 /** The offscreen document: the extension's audio. It captures tabs and
  *  the microphone and streams them to VocalStack (offscreen/capture.ts),
- *  and plays dubs in time with the page's video (offscreen/dub.ts).
+ *  and plays dubs in time with the page's video (offscreen/dub.ts). On
+ *  YouTube a session may be fed the video's buffered audio instead
+ *  (offscreen/ahead.ts), which the content script sends straight here.
  *  The background creates it on first need and talks to it with `OffCmd`. */
 
 import { isOffCmd, type OffAnswer, type OffCmd } from '../../lib/offscreen';
-import { forgetLive, listLive, liveHistory, pauseLive, setLive, startLive, stopLive } from '../../offscreen/capture';
+import { aheadData, forgetLive, listLive, liveHistory, pauseLive, setLive, startLive, stopLive } from '../../offscreen/capture';
 import { dubLoad, dubStop, dubSync } from '../../offscreen/dub';
 import { failure } from '../../lib/errors';
 import { initSentry, report } from '../../lib/sentry';
@@ -23,6 +25,7 @@ async function handle(cmd: OffCmd): Promise<OffAnswer> {
     case 'dub.load': await dubLoad(cmd); return { ok: true };
     case 'dub.sync': dubSync(cmd); return { ok: true };
     case 'dub.stop': dubStop(cmd.tabId); return { ok: true };
+    case 'ahead.data': return { ok: true, value: await aheadData(cmd) };
   }
 }
 

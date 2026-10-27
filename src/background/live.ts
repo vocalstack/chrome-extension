@@ -2,13 +2,15 @@
  *  (only the service worker may, right after the person invoked the
  *  extension on that tab), makes sure the offscreen document exists, and
  *  relays. Captions go to the frame of the tab that holds the main video.
- *  The toolbar badge says REC while anything records. */
+ *  On YouTube, a tab's recording is fed the video's buffered audio ahead
+ *  of playback instead of the tab's sound (lib/ahead.ts), when the page
+ *  can give it. The toolbar badge says REC while anything records. */
 
 import { push, RpcError, rpcError, type Handlers, type LiveEvent, type Push } from '../lib/rpc';
 import { GENERIC, userText } from '../lib/errors';
 import { report } from '../lib/sentry';
 import { currentEnv } from '../lib/env';
-import { capturable, meetingHost, meetingOf, tabHolder, RECORDING_MODES, type LiveStart, type LiveStatus, type CaptionStyle } from '../lib/live';
+import { capturable, isRunning, meetingHost, meetingOf, tabHolder, RECORDING_MODES, type LiveStart, type LiveStatus, type CaptionStyle } from '../lib/live';
 import type { OffAnswer, OffCmd } from '../lib/offscreen';
 import { showInPanel } from './panel';
 import { vsClient } from './video';
@@ -125,6 +127,14 @@ export async function videoFrame(tabId: number): Promise<number> {
   return best.frameId;
 }
 
+/** The frame that can feed a tab's session the video's buffered audio,
+ *  ahead of playback (content/ahead.ts), if one can. */
+async function aheadFrame(tabId: number): Promise<number | null> {
+  const frameId = await videoFrame(tabId);
+  const r = (await chrome.tabs.sendMessage(tabId, { ahead: 'probe' }, { frameId }).catch(() => null)) as { ready?: boolean } | null;
+  return r?.ready ? frameId : null;
+}
+
 /** Where each running session's captions go: captions sessions, and
  *  recordings shown as captions on their tab. Kept in session storage too,
  *  so captions survive the service worker going to sleep. */
@@ -154,14 +164,15 @@ async function overlay(s: LiveStatus, on: boolean) {
   setTarget(s.id, t);
   await off({ off: 'live.set', id: s.id, overlay: true });
   tellTarget(t, { ...s, overlay: true });
-  const history = ((await off<LiveEvent[]>({ off: 'live.history', id: s.id })).value ?? []).slice(-6);
-  for (const event of history) await chrome.tabs.sendMessage(t.tabId, { caption: event, id: s.id, hide: t.hide }, { frameId: t.frameId }).catch(() => {});
+  const all = (await off<LiveEvent[]>({ off: 'live.history', id: s.id })).value ?? [];
+  // Read ahead, the lines still to come are in the history too.
+  for (const event of s.ahead ? all : all.slice(-6)) await chrome.tabs.sendMessage(t.tabId, { caption: event, id: s.id, hide: t.hide }, { frameId: t.frameId }).catch(() => {});
 }
 
 /** What the floating captions show of a session: its state, languages,
  *  speaker labels and host. */
 function tellTarget(t: Target, s: LiveStatus) {
-  const status = { state: s.state, mode: s.mode, spokenLanguage: s.spokenLanguage ?? null, translateTo: s.translateTo ?? null, speakerLabels: s.speakerLabels ?? 'auto', host: s.host };
+  const status = { state: s.state, mode: s.mode, spokenLanguage: s.spokenLanguage ?? null, translateTo: s.translateTo ?? null, speakerLabels: s.speakerLabels ?? 'auto', host: s.host, ahead: !!s.ahead };
   chrome.tabs.sendMessage(t.tabId, { captionStatus: status, id: s.id, hide: t.hide }, { frameId: t.frameId }).catch(() => {});
 }
 
@@ -212,8 +223,13 @@ export async function startLive(start: LiveStart, invokedTab?: chrome.tabs.Tab):
       throw new RpcError(`This tab is already being recorded (“${holder.name}”). Its transcript is in Live; you can show it as captions on the tab from there.`, 'tab_busy');
     }
   }
+  // The tab's sound alone, on YouTube: the video's buffered audio instead,
+  // so the captions are ready before the words are said.
+  const feeder = tab?.id !== undefined && start.input.tab && !start.input.mic && (start.mode === 'record' || start.mode === 'captions')
+    ? await aheadFrame(tab.id) : null;
+  if (feeder !== null) start = { ...start, ahead: true };
   let streamId: string | undefined;
-  if (tab && start.input.tab) {
+  if (tab && start.input.tab && feeder === null) {
     // A capture just stopped may take a moment to let the tab go.
     for (let i = 0; ; i++) {
       try { streamId = await streamIdFor(tab); break; } catch (e) {
@@ -230,7 +246,9 @@ export async function startLive(start: LiveStart, invokedTab?: chrome.tabs.Tab):
   const where = tab?.url ? { meeting: meetingHost(tab.url)?.key, host: hostOf(tab.url) } : {};
   const cmd: OffCmd = { off: 'live.start', id, api: env.api, start: { ...start, ...where, tabId: tab?.id ?? start.tabId }, name: defaultName(start, tab), streamId, tabTitle: tab?.title };
   try {
-    return (await off<LiveStatus>(cmd)).value!;
+    const status = (await off<LiveStatus>(cmd)).value!;
+    if (feeder !== null) await chrome.tabs.sendMessage(tab!.id!, { ahead: 'start', id }, { frameId: feeder }).catch(() => {});
+    return status;
   } catch (e) {
     dropTarget(id);
     throw e;
@@ -289,6 +307,8 @@ export function registerLive(): Handlers {
     if (msg?.push === 'live.status') {
       void badge();
       const st = msg.status;
+      // Reading ahead ended: the page stops sending.
+      if (st.ahead && st.tabId !== undefined && ['done', 'failed'].includes(st.state)) chrome.tabs.sendMessage(st.tabId, { ahead: 'stop', id: st.id }).catch(() => {});
       void targetsLoaded.then(() => {
         if (['done', 'failed'].includes(st.state)) { dropTarget(st.id); return; }
         const t = captionTargets.get(st.id);
@@ -328,6 +348,10 @@ export function registerLive(): Handlers {
     'live.stop': async ({ id }) => { await off({ off: 'live.stop', id }); },
     'live.pause': async ({ id, paused }) => { await off({ off: 'live.pause', id, paused }); },
     'live.list': () => listLive(),
+    'live.ahead': async (_, sender) => {
+      const s = (await listLive()).find((x) => x.ahead && x.tabId === sender.tab?.id && isRunning(x) && x.state !== 'stopping');
+      return s ? { id: s.id } : null;
+    },
     'live.forget': async ({ id }) => {
       if (await hasOffscreen()) await off({ off: 'live.forget', id });
       else push({ push: 'live.gone', id });

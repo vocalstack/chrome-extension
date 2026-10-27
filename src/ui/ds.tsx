@@ -53,8 +53,9 @@ export interface PickLang {
   voice?: boolean;
 }
 
-/** The language sheet: search, flagged rows, a checkmark. Absolutely
- *  positioned over the panel (`.shell` is `position: relative`). */
+/** The language sheet: search, flagged rows, a checkmark. Fixed over the
+ *  whole panel: the header that opens it sits in a `position: relative`
+ *  tooltip row, which would otherwise hold it. */
 export function LanguagePicker({ open, onClose, value, onSelect, languages, title, note, searchPlaceholder }: {
   open: boolean;
   onClose: () => void;
