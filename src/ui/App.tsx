@@ -7,7 +7,9 @@ import { useEffect, useState } from 'react';
 import type { Account } from '../lib/auth';
 import { onPush, rpc } from '../lib/rpc';
 import { currentEnv, type Env } from '../lib/env';
-import { isRunning, type LiveStatus } from '../lib/live';
+import { capturable, isRunning, type LiveStatus } from '../lib/live';
+import { useActiveTab } from './useTab';
+import { useInvoked } from '../screens/Live';
 import type { View } from '../background/panel';
 import { usePanelIntent } from './intent';
 import { HiBack, HiBroadcast, HiCursor, HiDoc, HiExternal, HiGear, HiMic, HiUpload, HiVoices } from './icons';
@@ -67,6 +69,26 @@ export function App() {
 
   /** A session running: the Live tab shows it. */
   const rec = live.some((s) => on(s) && isRunning(s));
+  return <Panel account={account} env={env} view={view} setView={setView} lastArea={lastArea} live={live} rec={rec} intent={intent} clearIntent={clearIntent} />;
+}
+
+/** The toolbar icon's "!" on the active tab while the extension still
+ *  needs a click there before it may record it. */
+function useInvokeBadge(live: LiveStatus[]) {
+  const tab = useActiveTab();
+  const invoked = useInvoked(tab?.id, live);
+  const need = !!tab?.id && capturable(tab.url) && invoked === false;
+  useEffect(() => {
+    if (!tab?.id) return;
+    void rpc('tab.badge', { tabId: tab.id, on: need }).catch(() => {});
+  }, [tab?.id, need]);
+}
+
+function Panel({ account, env, view, setView, lastArea, live, rec, intent, clearIntent }: {
+  account: Account; env: Env | null; view: View; setView: (v: View) => void; lastArea: Area; live: LiveStatus[]; rec: boolean;
+  intent: ReturnType<typeof usePanelIntent>[0]; clearIntent: () => void;
+}) {
+  useInvokeBadge(live);
   return (
     <div className="shell">
       <TipRow>
@@ -81,7 +103,7 @@ export function App() {
         {view === 'library' && <LibraryScreen account={account} intent={intent?.view === 'library' ? intent : null} onIntentDone={clearIntent} />}
         {view === 'settings' && <Settings account={account} env={env} onBack={() => setView(lastArea)} />}
       </main>
-      <FileDrop account={account} onSettings={() => setView('settings')} onDropped={() => setView('upload')} />
+      <FileDrop account={account} onSettings={() => setView('settings')} onDropped={() => setView('upload')} quiet={view === 'upload'} />
     </div>
   );
 }
@@ -113,7 +135,6 @@ function Header({ view, env, rec, onView, onBack }: { view: View; env: Env | nul
             {TABS.map(({ view: v, label, tip: about, Icon }, i) => (
               <button key={v} type="button" role="tab" className={`tab2${v === 'live' && rec ? ' tab2--rec' : ''}`} aria-selected={view === v} aria-label={v === 'live' && rec ? `${label} (recording)` : label}
                 {...(view === v ? {} : tip(label, about, { up: true, right: i >= 3 }))} onClick={() => onView(v)}>
-                {v === 'live' && rec && view === v && <i className="tab2__dot" />}
                 <span className="tab2__icon"><Icon />{v === 'live' && rec && view !== v && <i className="tab2__dot tab2__dot--corner" />}</span>
                 {view === v && <span className="tab2__label">{label}</span>}
               </button>

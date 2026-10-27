@@ -25,7 +25,7 @@ import { Eyebrow, Switch, Toggle } from '../ui/ds';
 import { HiArrowRight, HiAudio, HiCaptions, HiCheck, HiChevronRight, HiDoc, HiGlobe, HiMic, HiNone, HiUpload, HiVideo, MeetingLogo, YouTubeLogo } from '../ui/icons';
 import { useLang, useReadLang, useSpeakerLabels, useSpokenLang } from '../ui/langs';
 import { useWarm } from '../ui/useWarm';
-import { InvokeNotice, mmss, useInvoked } from './Live';
+import { InvokeNotice, MEETING_SHORT, mmss, useInvoked } from './Live';
 import { problemOf } from './page/errors';
 import { patch, useTracked } from './page/tracker';
 import { transcribeLinks } from './FileDrop';
@@ -65,8 +65,6 @@ async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
   return t;
 }
 
-/** The meeting apps' short names: "Meet and your microphone…". */
-const SHORT: Record<string, string> = { meet: 'Meet', teams: 'Teams', zoom: 'Zoom', webex: 'Webex', whereby: 'Whereby', gather: 'Gather', discord: 'Discord' };
 const isYouTube = (u: string | undefined) => /^https?:\/\/(?:[\w-]+\.)?(?:youtube\.com|youtu\.be)\//i.test(u ?? '');
 
 export function PageScreen({ account, live, intent, onIntentDone, onSettings, onLive, onLibrary, onUpload }: {
@@ -234,7 +232,7 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
           )}
         </div>
         {recording && <HiChevronRight width={14} height={14} style={{ flex: 'none', color: 'var(--ink-45)' }} />}
-        {meeting && !recording && <p className="site__call">Record it for a live transcript, and a summary when it ends. {SHORT[meeting.key] ?? meeting.name} and your microphone are both recorded.</p>}
+        {meeting && !recording && <p className="site__call">Record it for a live transcript, and a summary when it ends. {MEETING_SHORT[meeting.key] ?? meeting.name} and your microphone are both recorded.</p>}
       </div>
 
       {/* As the design: wherever this tab could be recorded from here — a

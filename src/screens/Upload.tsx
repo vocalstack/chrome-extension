@@ -1,8 +1,9 @@
 /** Upload (design 3): local audio and video files, picked or dropped
  *  (anywhere on the panel: FileDrop adds them here), and videos sent from
  *  Now (File Upload); Transcribe sends each as its own transcription, in
- *  the header's spoken language with the speaker labels setting, and opens
- *  the Library, where they show as they go. */
+ *  the header's spoken language with the speaker labels setting, and
+ *  TRANSCRIBING lists them as they go, each opening in the Library when
+ *  ready. */
 
 import { useRef, useSyncExternalStore } from 'react';
 import type { Account } from '../lib/auth';
@@ -12,6 +13,7 @@ import { HiCloud, HiFile, HiPlus, HiVideo, HiX } from '../ui/icons';
 import { Note } from '../ui/kit';
 import { AccessNote } from '../ui/access';
 import { useSpeakerLabels, useSpokenLang } from '../ui/langs';
+import { jobPct, jobText, patch, useTracked } from './page/tracker';
 import { isMedia, measure, transcribeLinks, uploadFiles, type Link } from './FileDrop';
 
 /** A local file, or a video on the web (from Now). */
@@ -51,6 +53,7 @@ const sub = (f: () => void) => { subs.add(f); return () => { subs.delete(f); }; 
 
 const KIND: Record<string, string> = { 'audio/mpeg': 'MP3', 'audio/mp4': 'M4A', 'audio/x-m4a': 'M4A', 'audio/wav': 'WAV', 'audio/x-wav': 'WAV', 'video/mp4': 'MP4', 'video/webm': 'WEBM', 'audio/webm': 'WEBM', 'audio/ogg': 'OGG', 'audio/flac': 'FLAC', 'video/quicktime': 'MOV' };
 const nameOf = (q: Queued) => q.file?.name ?? q.link!.name;
+const metaOf = (q: Queued) => (q.file ? [kindOf(q.file), mb(q.file.size)] : [q.link!.host.toUpperCase()]).concat(q.durationS ? [mmss(q.durationS)] : []).join(' · ');
 const kindOf = (f: File) => KIND[f.type] ?? (f.name.match(/\.([a-z0-9]+)$/i)?.[1] ?? '').toUpperCase();
 const mb = (b: number) => (b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${(b / 1e6).toFixed(1)} MB`);
 const mmss = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -69,14 +72,14 @@ export function UploadScreen({ account, onSettings, onLibrary }: { account: Acco
   const start = () => {
     if (!files.length || !mayRecord) return;
     const all = take();
-    const opts = { settings: { spokenLanguage: lang, speakerLabels: labels } };
-    void transcribeLinks(all.flatMap((q) => (q.link ? [q.link] : [])), opts);
+    const metas = new Map(all.map((q) => [q.file ?? q.link, metaOf(q)] as const));
+    const opts = { settings: { spokenLanguage: lang, speakerLabels: labels }, metaOf: (f: File) => metas.get(f) ?? '' };
+    void transcribeLinks(all.flatMap((q) => (q.link ? [{ ...q.link, meta: metaOf(q) }] : [])), opts, 'file');
     void uploadFiles(all.flatMap((q) => (q.file ? [q.file] : [])), opts);
-    onLibrary();
   };
 
   return (
-    <div className="screen" data-screen-label="Upload">
+    <div className="screen screen--fill" data-screen-label="Upload">
       <AccessNote account={account} need="record" onSettings={onSettings} />
       <input ref={input} type="file" accept="audio/*,video/*" multiple hidden onChange={(e) => { if (e.target.files) queueFiles(Array.from(e.target.files)); e.target.value = ''; }} />
       <div className="card2">
@@ -95,7 +98,7 @@ export function UploadScreen({ account, onSettings, onLibrary }: { account: Acco
                 {q.link ? <HiVideo width={17} height={17} style={{ color: 'var(--brand)', flex: 'none' }} /> : <HiFile width={17} height={17} style={{ color: 'var(--brand)', flex: 'none' }} />}
                 <div className="lrow__main">
                   <div className="file__name" title={nameOf(q)}>{nameOf(q)}</div>
-                  <div className="file__meta">{(q.file ? [kindOf(q.file), mb(q.file.size)] : [q.link!.host.toUpperCase()]).concat(q.durationS ? [mmss(q.durationS)] : []).join(' · ')}</div>
+                  <div className="file__meta">{metaOf(q)}</div>
                 </div>
                 <button type="button" className="file__x" title="Remove" aria-label={`Remove ${nameOf(q)}`} onClick={() => remove(q.id)}><HiX width={14} height={14} /></button>
               </div>
@@ -106,9 +109,44 @@ export function UploadScreen({ account, onSettings, onLibrary }: { account: Acco
         )}
         {bad.length > 0 && <div style={{ marginTop: 10 }}><Note kind="warn">{bad.length === 1 ? `“${bad[0]}” is not an audio or video file.` : `${bad.length} files are not audio or video.`}</Note></div>}
       </div>
-      <button type="button" className="cta" disabled={!files.length || !mayRecord} title={!mayRecord ? whyNot(account, 'record') : undefined} onClick={start}>
+      <Jobs onLibrary={onLibrary} />
+      <button type="button" className="cta cta--end" disabled={!files.length || !mayRecord} title={!mayRecord ? whyNot(account, 'record') : undefined} onClick={start}>
         {files.length > 1 ? `Transcribe ${files.length} Files` : 'Transcribe'}
       </button>
+    </div>
+  );
+}
+
+/** TRANSCRIBING: what Upload sent in this panel, with its progress, and
+ *  READY · OPEN (the Library) when done. */
+function Jobs({ onLibrary }: { onLibrary: () => void }) {
+  const jobs = useTracked('file').filter((t) => !t.hidden);
+  if (!jobs.length) return null;
+  return (
+    <div className="card2 jobs">
+      <Eyebrow>TRANSCRIBING</Eyebrow>
+      {jobs.slice().reverse().map((t) => {
+        const done = t.phase === 'done' || t.phase === 'live';
+        const bad = t.phase === 'error' || t.phase === 'failed';
+        // Uploading is the first fifth of the bar, the transcription the rest.
+        const up = t.total ? (t.sent ?? 0) / t.total : 0;
+        const job = jobPct(t.job);
+        const pct = t.phase === 'uploading' ? Math.round(up * 20) : t.phase === 'working' ? 20 + Math.round((job ?? 0) * 0.8) : t.phase === 'sending' ? 0 : 100;
+        return (
+          <div key={t.key} className="job">
+            <div className="job__row">
+              <div className="lrow__main">
+                <div className="job__name" title={t.name}>{t.name}</div>
+                <div className={`job__meta${bad ? ' job__meta--bad' : ''}`}>{bad ? (t.problem?.text ?? jobText(t.job)) : t.meta || jobText(t.job)}</div>
+              </div>
+              {done ? <button type="button" className="job__open" onClick={onLibrary}>READY · OPEN</button>
+                : bad ? <button type="button" className="file__x" aria-label={`Dismiss ${t.name}`} onClick={() => patch(t.key, { hidden: true })}><HiX width={14} height={14} /></button>
+                : <span className="job__pct">{pct}%</span>}
+            </div>
+            {!done && !bad && <div className="lrow__bar" style={{ marginTop: 0 }}><i style={{ width: `${pct}%` }} /></div>}
+          </div>
+        );
+      })}
     </div>
   );
 }

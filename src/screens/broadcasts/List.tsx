@@ -48,8 +48,7 @@ export function BroadcastList({ account, onSettings, items, loading, error, live
 
   const mayChange = can(account, 'change');
   return (
-    <div className="screen" data-screen-label="Broadcasts">
-      <button type="button" className="cta" disabled={!mayChange} title={mayChange ? undefined : 'This sign-in may not make changes'} onClick={onNew}><HiPlus />New Broadcast</button>
+    <div className="screen screen--fill" data-screen-label="Broadcasts">
       <AccessNote account={account} need="change" onSettings={onSettings} />
       {error && <Note kind="bad">{error}</Note>}
       {!items && loading && <div className="empty"><span className="spin" style={{ margin: '0 auto' }} /></div>}
@@ -90,6 +89,7 @@ export function BroadcastList({ account, onSettings, items, loading, error, live
           })}
         </div>
       )}
+      <button type="button" className="cta cta--end" disabled={!mayChange} title={mayChange ? undefined : 'This sign-in may not make changes'} onClick={onNew}><HiPlus />New Broadcast</button>
     </div>
   );
 }

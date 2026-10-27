@@ -64,7 +64,11 @@ async function send(file: File, options: object, onProgress: (sent: number, tota
 }
 
 /** What every file of one Transcribe is sent with. */
-export interface UploadOptions { settings?: { spokenLanguage?: string | null; speakerLabels?: 'auto' | 'on' | 'off' } }
+export interface UploadOptions {
+  settings?: { spokenLanguage?: string | null; speakerLabels?: 'auto' | 'on' | 'off' };
+  /** Each file's line in Upload's list. */
+  metaOf?: (f: File) => string;
+}
 
 async function uploadOne(file: File, opts: UploadOptions): Promise<void> {
   const name = file.name.replace(/\.[^.]+$/, '').slice(0, 120) || 'Upload';
@@ -72,10 +76,10 @@ async function uploadOne(file: File, opts: UploadOptions): Promise<void> {
     track({ origin: 'file', name: file.name, phase: 'error', problem: { text: 'Not an audio or video file.' } });
     return;
   }
-  const key = track({ origin: 'file', name, phase: 'uploading', sent: 0, total: file.size });
+  const key = track({ origin: 'file', name, meta: opts.metaOf?.(file), phase: 'uploading', sent: 0, total: file.size });
   try {
     const durationS = await measure(file);
-    const t = await send(file, { name, crop: false, durationS, ...opts }, (sent, total) => patch(key, { sent, total }));
+    const t = await send(file, { name, crop: false, durationS, settings: opts.settings }, (sent, total) => patch(key, { sent, total }));
     created(key, t);
   } catch (e) {
     patch(key, { phase: 'error', problem: problemOf(e) });
@@ -89,13 +93,14 @@ export async function uploadFiles(files: Iterable<File>, opts: UploadOptions = {
 
 /** A web address to transcribe: a file or video page the server fetches,
  *  or a live stream it records as it plays. */
-export interface Link { url: string; name: string; live?: boolean }
+export interface Link { url: string; name: string; live?: boolean; meta?: string }
 
 /** Send links to transcribe, each tracked like an upload. */
-export async function transcribeLinks(links: Link[], opts: UploadOptions = {}): Promise<void> {
+export async function transcribeLinks(links: Link[], opts: UploadOptions = {}, origin: 'page' | 'file' = 'page'): Promise<void> {
+  if (!links.length) return;
   const vs = await client();
   await Promise.all(links.map(async (l) => {
-    const key = track({ origin: 'page', name: l.name, url: l.url, phase: 'sending' });
+    const key = track({ origin, name: l.name, url: l.url, meta: l.meta, phase: 'sending' });
     try {
       if (l.live) {
         // A live stream: a live transcription the server pulls, started at
@@ -145,10 +150,11 @@ function Toast({ t, onSettings }: { t: Tracked; onSettings: () => void }) {
   );
 }
 
-export function FileDrop({ account, onSettings, onDropped }: { account: Account; onSettings: () => void; onDropped: () => void }) {
+export function FileDrop({ account, onSettings, onDropped, quiet }: { account: Account; onSettings: () => void; onDropped: () => void; quiet?: boolean }) {
   const [over, setOver] = useState(false);
   const [all, setAll] = useState(false);
-  const toasts = useTracked('file').filter((t) => !t.hidden);
+  // On Upload, its TRANSCRIBING list shows them instead.
+  const toasts = useTracked('file').filter((t) => !t.hidden && !quiet);
   const accountRef = useRef(account);
   accountRef.current = account;
   const droppedRef = useRef(onDropped);

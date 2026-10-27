@@ -23,6 +23,9 @@ import { useWarm } from '../ui/useWarm';
 
 type Source = 'tab' | 'tabmic' | 'mic';
 
+/** The meeting apps' short names. */
+export const MEETING_SHORT: Record<string, string> = { meet: 'Meet', teams: 'Teams', zoom: 'Zoom', webex: 'Webex', whereby: 'Whereby', gather: 'Gather', discord: 'Discord' };
+
 /** 04:12, 1:02:09: the design's clock. */
 export function mmss(seconds: number): string {
   const t = Math.max(0, Math.floor(seconds));
@@ -84,13 +87,8 @@ export function useInvoked(tabId: number | undefined, live: LiveStatus[]): boole
 }
 
 /** ONE CLICK: the toolbar, its VocalStack icon pressed by a pointer, and
- *  what to do. While it shows, the real icon wears a "!" on this tab. */
-export function InvokeNotice({ tabId }: { tabId?: number }) {
-  useEffect(() => {
-    if (tabId === undefined) return;
-    void rpc('tab.badge', { tabId, on: true }).catch(() => {});
-    return () => { void rpc('tab.badge', { tabId, on: false }).catch(() => {}); };
-  }, [tabId]);
+ *  what to do. (The real icon wears a "!" meanwhile: App's useInvokeBadge.) */
+export function InvokeNotice(_: { tabId?: number }) {
   return (
     <div className="invoke" role="status">
       <div className="invoke__bar" aria-hidden="true">
@@ -254,7 +252,6 @@ function RecordingCard({ s, account, onSettings, only }: { s: LiveStatus; accoun
   }, [s.state]);
 
   const elapsed = s.sentS ?? (Date.now() - s.startedAt) / 1000;
-  const source = `${s.input.tab && s.input.mic ? 'TAB + MIC' : s.input.tab ? 'TAB' : 'MIC'}${s.host && s.input.tab ? ` · ${s.host.replace(/^www\./, '').toUpperCase()}` : ''}`;
   const tr = s.translateTo ? lang(s.translateTo) : null;
   const detected = s.spokenLanguage ?? [...lines].reverse().find((l) => l.lang)?.lang ?? null;
   const recLang = tr ? (detected ? `${(lang(detected)?.name ?? detected).toUpperCase()} → ${tr.name.toUpperCase()}` : `→ ${tr.name.toUpperCase()}`) : 'AS SPOKEN';
@@ -270,6 +267,9 @@ function RecordingCard({ s, account, onSettings, only }: { s: LiveStatus; accoun
     : !s.input.tab ? <HiMic width={18} height={18} />
     : /(^|\.)youtube\.com$/.test(host) ? <YouTubeLogo size={20} />
     : <i className="rec-head__dot" />;
+  /** "YouTube · Recording this tab": where, then what is recorded (or the state). */
+  const app = s.meeting ? MEETING_SHORT[s.meeting] ?? s.meeting : !s.input.tab ? 'Microphone' : /(^|\.)youtube\.com$/.test(host) ? 'YouTube' : host || 'This tab';
+  const what = state ? `${state[0]}${state.slice(1).toLowerCase()}` : s.input.tab && s.input.mic ? 'Recording tab + your mic' : s.input.tab ? 'Recording this tab' : 'Recording your mic';
   const onStop = () => void stop.run(() => rpc('live.stop', { id: s.id }));
   const reading = tr ? tr.name : 'the spoken language';
 
@@ -279,7 +279,10 @@ function RecordingCard({ s, account, onSettings, only }: { s: LiveStatus; accoun
         <span className="rec-head__icon">{icon}</span>
         <div className="lrow__main">
           <div className="rec-head__title"><span title={s.name}>{s.name}</span></div>
-          <div className="rec-head__src">{state && <span className="rec-head__state">{state} · </span>}{source}</div>
+          <div className="site__sub">
+            <i className={`site__dot${s.state === 'live' ? ' site__dot--rec' : ''}`} style={s.state === 'live' ? undefined : { background: 'var(--warn)' }} />
+            <span className="site__app">{app}</span><span className="site__sep">·</span><span className="site__host">{what}</span>
+          </div>
         </div>
         <span className={`rec-head__time${s.state === 'live' ? '' : ' rec-head__time--off'}`}>{state === 'STARTING' || state === 'STOPPING' ? <span className="spin" /> : mmss(elapsed)}</span>
       </div>

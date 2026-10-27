@@ -166,7 +166,7 @@ function tellTarget(t: Target, s: LiveStatus) {
 }
 
 /** The spoken-language list, once per service worker. */
-let spokenLangs: Promise<{ code: string; flag?: string; name: string; native?: string }[]> | null = null;
+const langLists: Partial<Record<'transcription' | 'translation', Promise<{ code: string; flag?: string; name: string; native?: string }[]>>> = {};
 
 function wait(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 const hostOf = (url: string) => { try { return new URL(url).host; } catch { return undefined; } };
@@ -338,13 +338,14 @@ export function registerLive(): Handlers {
       await overlay(s, on);
     },
     'live.settings': async ({ id, ...patch }) => { await off({ off: 'live.set', id, ...patch }); },
-    'live.langs': () => {
-      spokenLangs ??= vsClient().then((vs) => vs.languages.list()).then((l) => {
-        const codes = new Set(l.transcription ?? []);
+    'live.langs': (args) => {
+      const list = args?.list === 'translation' ? 'translation' : 'transcription';
+      langLists[list] ??= vsClient().then((vs) => vs.languages.list()).then((l) => {
+        const codes = new Set(l[list] ?? []);
         return l.languages.filter((x) => codes.has(x.code)).sort((a, b) => a.name.localeCompare(b.name))
           .map((x) => ({ code: x.code, flag: x.flag ?? undefined, name: x.name, native: x.native && x.native !== x.name ? x.native : undefined }));
-      }).catch((e) => { spokenLangs = null; throw e; });
-      return spokenLangs;
+      }).catch((e) => { delete langLists[list]; throw e; });
+      return langLists[list]!;
     },
     'live.translate': async ({ id, lang }) => { await off({ off: 'live.set', id, translateTo: lang }); },
     'tab.invoked': ({ tabId }) => wasInvoked(tabId),

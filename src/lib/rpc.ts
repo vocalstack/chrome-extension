@@ -37,7 +37,8 @@ export interface Methods {
   'live.settings': [{ id: string; spokenLanguage?: string | null; speakerLabels?: 'auto' | 'on' | 'off' }, void];
   /** The languages a live session can be spoken in, for the floating
    *  captions' menu (a content script cannot call the API). */
-  'live.langs': [void, { code: string; flag?: string; name: string; native?: string }[]];
+  /** A language list (transcription by default) for the captions window's menus. */
+  'live.langs': [{ list?: 'transcription' | 'translation' }, { code: string; flag?: string; name: string; native?: string }[]];
   /** Translate a running session into another language (null: stop translating). */
   'live.translate': [{ id: string; lang: string | null }, void];
   /** Whether the person invoked the extension on this tab (clicked its icon,

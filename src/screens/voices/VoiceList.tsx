@@ -85,7 +85,7 @@ export function VoiceList({ onOpen, onNew }: { onOpen: (v: Voice) => void; onNew
   };
 
   return (
-    <div className="screen" data-screen-label="Voices">
+    <div className="screen screen--fill" data-screen-label="Voices">
       <div className="card2">
         <Eyebrow>VOICE LANGUAGE</Eyebrow>
         <div className="card2__row">
@@ -134,7 +134,7 @@ export function VoiceList({ onOpen, onNew }: { onOpen: (v: Voice) => void; onNew
           })}
         </div>
       </div>
-      <button type="button" className="cta cta--dashed" onClick={onNew}><HiPlus width={15} height={15} />Clone a Voice</button>
+      <button type="button" className="cta cta--dashed cta--end" onClick={onNew}><HiPlus width={15} height={15} />Clone a Voice</button>
       <LanguagePicker open={open} onClose={() => setOpen(false)} title="VOICE LANGUAGE" note="Show only the voices that speak this language."
         value={lang ?? 'ALL'} searchPlaceholder={`Search ${rows.length} languages`}
         languages={[{ code: 'ALL', flag: <HiGlobe width={20} height={20} />, label: 'All languages', native: 'Every voice' }, ...rows.map((r) => ({ ...r, voice: false }))]}

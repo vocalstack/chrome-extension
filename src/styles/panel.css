@@ -469,8 +469,8 @@ label.item--click{cursor:pointer}
 .lpill i{width:6px;height:6px;border-radius:50%;background:var(--live);animation:vsx-dot 1.4s ease-in-out infinite}
 .lpill--paused{background:var(--warn-soft);color:var(--warn)}
 .lpill--wait{background:var(--fill-08);color:var(--ink-62)}
-.rec-head{display:flex;align-items:center;gap:12px}
-.rec-head__icon{flex:none;width:40px;height:40px;border-radius:50%;background:var(--fill-06);display:flex;align-items:center;justify-content:center;color:var(--ink-70)}
+.rec-head{flex:none;display:flex;align-items:center;gap:12px;padding:12px 14px}
+.rec-head__icon{flex:none;width:32px;height:32px;border-radius:50%;background:var(--fill-06);display:flex;align-items:center;justify-content:center;color:var(--ink-70)}
 .rec-head__dot{width:8px;height:8px;border-radius:50%;background:var(--live)}
 .rec-head__time{flex:none;font:500 15px var(--vs-font-mono);letter-spacing:.02em;color:var(--live);font-variant-numeric:tabular-nums}
 .rec-head__time--off{color:var(--ink-45)}
@@ -502,6 +502,16 @@ label.item--click{cursor:pointer}
 .site__host{min-width:0;font-weight:300;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .site__call{flex:1 0 100%;margin:0;font-size:12.5px;font-weight:300;line-height:1.45;color:var(--ink-62);text-wrap:pretty}
 .screen--fill{flex:1 0 auto}
+.jobs{display:flex;flex-direction:column;gap:6px}
+.jobs .eyebrow{padding-bottom:5px}
+.job{display:flex;flex-direction:column;gap:9px;padding:10px 12px;border-radius:12px;background:var(--fill-08)}
+.job__row{display:flex;align-items:center;gap:10px}
+.job__name{font-size:13.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.job__meta{margin-top:3px;font:500 10.5px var(--vs-font-mono);color:var(--ink-45);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.job__meta--bad{font:400 12px/1.4 inherit;white-space:normal;color:var(--conf-low)}
+.job__pct{flex:none;font:500 11px var(--vs-font-mono);color:var(--brand);font-variant-numeric:tabular-nums}
+.job__open{flex:none;padding:3px 8px;border:0;border-radius:99px;background:var(--ready-soft);color:var(--ready);font:500 9.5px var(--vs-font-mono);letter-spacing:.1em;cursor:pointer}
+.job__open:hover{filter:brightness(1.1)}
 .cta--end{margin-top:auto;flex:none}
 .cta__live{width:7px;height:7px;border-radius:50%;background:var(--live);animation:vsx-dot 1.4s ease-in-out infinite}
 .cta--soft .cta__live+svg,.cta--soft svg:last-child{width:15px;height:15px}

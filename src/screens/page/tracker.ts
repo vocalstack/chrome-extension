@@ -15,6 +15,8 @@ export interface Tracked {
   name: string;
   /** The address it came from (page items), to mark them as started. */
   url?: string;
+  /** What it is, for Upload's list: "MP3 · 12.4 MB · 03:12". */
+  meta?: string;
   phase: Phase;
   /** Uploading: bytes sent of total. */
   sent?: number;
