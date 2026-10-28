@@ -9,7 +9,7 @@ import { VocalStack } from '@vocalstack/js-sdk';
 import type { Transcription } from '@vocalstack/contract';
 import { accessToken } from '../lib/auth';
 import { currentEnv } from '../lib/env';
-import { RpcError } from '../lib/rpc';
+import { RpcError, type Handlers } from '../lib/rpc';
 import { MEDIA_PAGE } from '../lib/media';
 import { scan } from './page';
 
@@ -97,6 +97,26 @@ export async function transcribeVideo(vs: VocalStack, req: { url: string; title?
     await sleep(3000);
   }
   return ids;
+}
+
+const PLAYER_LABEL = 'Video player';
+
+/** The video player for a page's video: its transcription (the one the
+ *  dub and captions share, in the spoken language), and that
+ *  transcription's share link, opened on the player while the job runs. */
+export function registerVideo(): Handlers {
+  return {
+    'video.player': async ({ tabId, url, title }) => {
+      const vs = await vsClient();
+      const env = await currentEnv();
+      const { transcriptionId } = await idsFor(vs, await keyOf(url), { url, title });
+      const links = await vs.transcriptions.listShareLinks(transcriptionId);
+      const link = links.find((l) => l.label === PLAYER_LABEL && !l.revokedAt)
+        ?? await vs.transcriptions.createShareLink(transcriptionId, { label: PLAYER_LABEL, allowDownload: false, allowExport: false });
+      const tab = await chrome.tabs.get(tabId).catch(() => null);
+      await chrome.tabs.create({ url: `${env.video}/${link.code}`, ...(tab ? { index: tab.index + 1, openerTabId: tabId, windowId: tab.windowId } : {}) });
+    },
+  };
 }
 
 /** What VocalStack transcribes for a tab's video: the main video's own

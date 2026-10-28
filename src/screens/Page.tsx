@@ -4,18 +4,23 @@
  *    Transcription (the tab recorded as it plays, Floating Captions over
  *    the video) or, but on YouTube, File Upload (the whole video fetched,
  *    in Upload's list). YouTube's Live Transcription reads the video's
- *    audio ahead of playback (lib/ahead.ts): no File Upload there;
+ *    audio ahead of playback (lib/ahead.ts): no File Upload there, but
+ *    the Embedded Video Player (transcribed on the server, opened on
+ *    video.vocalstack.com in a new tab);
  *  - another page with media: what it plays or links to, ticked, then
  *    Transcribe N Items;
  *  - nothing to transcribe: record the tab in Live, or, in a meeting,
- *    record the meeting at once.
+ *    record the meeting at once;
+ *  - VocalStack's own page (the video player, a shared transcript): it is
+ *    transcribed already, nothing on offer.
  *
  *  While the tab is recorded, its card and a button lead to Live. */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { LinkProbe } from '@vocalstack/contract';
+import type { LinkProbe, TranscriptionJob } from '@vocalstack/contract';
 import type { PanelIntent } from '../background/panel';
 import type { Account } from '../lib/auth';
+import { ENVS, currentEnv } from '../lib/env';
 import { can, whyNot } from '../lib/access';
 import { capturable, isRunning, meetingHost, tabHolder, type LiveStatus } from '../lib/live';
 import { AccessNote, ProblemNote } from '../ui/access';
@@ -24,12 +29,12 @@ import { rpc, type Answer } from '../lib/rpc';
 import { MEDIA_PAGE, type FoundMedia } from '../lib/media';
 import { Note, errorText, useAction } from '../ui/kit';
 import { Eyebrow, Switch, Toggle } from '../ui/ds';
-import { HiArrowRight, HiAudio, HiCaptions, HiCheck, HiChevronRight, HiDoc, HiGlobe, HiMic, HiNone, HiUpload, HiVideo, MeetingLogo, YouTubeLogo } from '../ui/icons';
+import { HiArrowRight, HiAudio, HiCaptions, HiCheck, HiChevronRight, HiDoc, HiGlobe, HiMic, HiNone, HiUpload, HiVideo, Mark, MeetingLogo, YouTubeLogo } from '../ui/icons';
 import { useLang, useReadLang, useSpeakerLabels, useSpokenLang } from '../ui/langs';
 import { useWarm } from '../ui/useWarm';
 import { InvokeNotice, MEETING_SHORT, mmss, useInvoked } from './Live';
 import { problemOf } from './page/errors';
-import { patch, useTracked } from './page/tracker';
+import { jobPct, jobText, patch, phaseOf, useTracked } from './page/tracker';
 import { transcribeLinks } from './FileDrop';
 import { queueLink } from './Upload';
 
@@ -66,6 +71,10 @@ async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
   const [t] = await chrome.tabs.query(w?.id !== undefined ? { active: true, windowId: w.id } : { active: true, lastFocusedWindow: true });
   return t;
 }
+
+/** VocalStack's own pages: the video player, shared transcripts, the dashboard. */
+const OWN_HOSTS = new Set(Object.values(ENVS).flatMap((e) => [e.app, e.live, e.video].map(host)));
+const isOwn = (u: string | undefined) => !!u && (/^https?:\/\/(?:[\w-]+\.)*vocalstack\.com(?:[:/]|$)/i.test(u) || OWN_HOSTS.has(host(u)));
 
 const isYouTube = (u: string | undefined) => /^https?:\/\/(?:[\w-]+\.)?(?:youtube\.com|youtu\.be)\//i.test(u ?? '');
 
@@ -150,9 +159,10 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   // The rows: the click first, then what the tab has, then what the
   // server found on a page.
   const pageUrl = scan?.url ?? '';
+  const own = isOwn(pageUrl);
   const base: Row[] = [];
-  if (pinned) base.push({ ...(scan?.media.find((m) => m.url === pinned.url) ?? pinned), from: 'click' });
-  for (const m of scan?.media ?? []) if (m.url !== pinned?.url) base.push(m);
+  if (own) { /* transcribed already: nothing listed */ } else if (pinned) base.push({ ...(scan?.media.find((m) => m.url === pinned.url) ?? pinned), from: 'click' });
+  if (!own) for (const m of scan?.media ?? []) if (m.url !== pinned?.url) base.push(m);
   const rows: Row[] = [];
   for (const r of base) {
     rows.push(r);
@@ -208,11 +218,11 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   };
 
   const meeting = meetingHost(scan?.url);
-  const videoPage = !meeting && !!scan && MEDIA_PAGE.test(scan.url);
+  const videoPage = !meeting && !own && !!scan && MEDIA_PAGE.test(scan.url);
   const tabOk = capturable(scan?.url);
   const failed = tracked.filter((t) => t.phase === 'error' && !t.hidden).slice(-2);
   // A scan again (the panel focused) keeps what the last one showed.
-  const empty = !videoPage && !rows.length && !scanError && (!scanning || !!scan);
+  const empty = !own && !videoPage && !rows.length && !scanError && (!scanning || !!scan);
   /** This tab's recording, while it runs: the card and a button lead to Live. */
   const holder = scan ? tabHolder(live, scan.tabId) : undefined;
   const recording = !!holder && isRunning(holder);
@@ -221,13 +231,13 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   return (
     <div className="screen screen--fill" data-screen-label="Now">
       <div className={`card2 site${recording ? ' site--go' : ''}`} {...(recording ? { role: 'button', tabIndex: 0, title: 'Go to Live', onClick: onLive, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onLive(); } } } : {})}>
-        <span className="round">{meeting ? <MeetingLogo k={meeting.key} size={20} /> : isYouTube(scan?.url) ? <YouTubeLogo size={20} /> : <HiGlobe width={18} height={18} style={{ color: 'var(--ink-62)' }} />}</span>
+        <span className="round">{meeting ? <MeetingLogo k={meeting.key} size={20} /> : isYouTube(scan?.url) ? <YouTubeLogo size={20} /> : own ? <Mark width={18} height={18} alt="" /> : <HiGlobe width={18} height={18} style={{ color: 'var(--ink-62)' }} />}</span>
         <div className="lrow__main">
           <div className="lrow__title" title={scan?.title}>{scan?.title || (scanning ? 'Reading this tab…' : 'This tab')}</div>
           {scan && (
             <div className="site__sub">
               <i className={`site__dot${recording ? ' site__dot--rec' : ''}`} style={recording ? undefined : { background: videoPage ? 'var(--live)' : 'var(--ink-45)' }} />
-              <span className="site__app">{recording ? 'Recording' : meeting ? meeting.name : isYouTube(scan.url) ? 'YouTube' : 'Web page'}</span>
+              <span className="site__app">{recording ? 'Recording' : meeting ? meeting.name : isYouTube(scan.url) ? 'YouTube' : own ? 'VocalStack' : 'Web page'}</span>
               <span className="site__sep">·</span>
               <span className="site__host">{recording ? 'Go to Live' : meeting ? 'Meeting in progress' : host(scan.url)}</span>
             </div>
@@ -242,6 +252,8 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
       {tabOk && invoked === false && (empty || videoPage) && !recording && <InvokeNotice tabId={scan?.tabId} />}
       <AccessNote account={account} need="record" onSettings={onSettings} />
       {scanError && <Note kind="warn">{scanError}</Note>}
+
+      {own && !recording && <OwnPage url={pageUrl} />}
 
       {videoPage && scan && (
         <VideoPick account={account} live={live} tabId={scan.tabId} url={scan.url} title={scan.title} durationS={rows.find((r) => r.playing)?.durationS ?? rows.find((r) => r.kind === 'video')?.durationS}
@@ -287,6 +299,64 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   );
 }
 
+/** A shared transcription's code in a VocalStack address: the video
+ *  player's `/<code>`, or the app's `/t/<code>` and `/v/<code>`. */
+const shareCode = (u: string) => { try { return new URL(u).pathname.match(/^\/(?:[tv]\/)?([a-z0-9]{8,})\/?$/i)?.[1] ?? null; } catch { return null; } };
+
+/** The job of a shared transcription, read by its share code (no sign-in:
+ *  the player's own call), from the API of the environment the page is on. */
+async function sharedJob(pageUrl: string, code: string): Promise<TranscriptionJob | null> {
+  const env = Object.values(ENVS).find((e) => [e.app, e.live, e.video].map(host).includes(host(pageUrl))) ?? ENVS.production;
+  const cur = await currentEnv();
+  const api = cur.name === env.name ? cur.api : env.api;
+  const r = await fetch(`${api}/app/shared/${encodeURIComponent(code)}`);
+  if (!r.ok) throw new Error(`shared ${r.status}`);
+  return ((await r.json()) as { job?: TranscriptionJob | null }).job ?? null;
+}
+
+/** VocalStack's own page: its transcription's progress while the job runs
+ *  (read every few seconds), then that it is transcribed. */
+function OwnPage({ url }: { url: string }) {
+  const code = shareCode(url);
+  const [job, setJob] = useState<TranscriptionJob | null | undefined>(code ? undefined : null);
+  useEffect(() => {
+    if (!code) { setJob(null); return; }
+    setJob(undefined);
+    let stop = false;
+    let timer = 0;
+    const read = async () => {
+      const j = await sharedJob(url, code).catch(() => null);
+      if (stop) return;
+      setJob(j);
+      if (j && phaseOf(j) === 'working') timer = window.setTimeout(() => void read(), 3000);
+    };
+    void read();
+    return () => { stop = true; clearTimeout(timer); };
+  }, [url, code]);
+
+  const working = job === undefined || (!!job && phaseOf(job) === 'working');
+  const failed = !!job && phaseOf(job) === 'failed';
+  if (working) {
+    const pct = job ? jobPct(job) : null;
+    const step = !job ? 'Checking this video…' : job.state === 'queued' ? jobText(job) : job.state === 'fetching' ? 'Fetching the video' : 'Transcribing';
+    return (
+      <div className="card2 own">
+        {pct === null ? <span className="spin own__spin" /> : <div className="own__pct">{pct}<small>%</small></div>}
+        <div className="own__step">{step}</div>
+        {pct !== null && <div className="progress own__bar"><i style={{ width: `${pct ?? 0}%` }} /></div>}
+        {job && <div className="own__note">The transcript fills in on the page as it goes.</div>}
+      </div>
+    );
+  }
+  return (
+    <div className="card2 empty2">
+      <span className={`own__icon${failed ? ' own__icon--bad' : ' own__icon--done'}`}>{failed ? <HiNone /> : <HiCheck />}</span>
+      <div className="empty2__head">{failed ? 'This video wasn’t transcribed' : 'This video is transcribed'}</div>
+      <div className="empty2__text">{failed ? jobText(job!) : 'Its transcript plays along on this page.'}</div>
+    </div>
+  );
+}
+
 /** Go to Live Transcript: the button while this tab is recorded. */
 function GoLive({ onLive }: { onLive: () => void }) {
   return <button type="button" className="cta cta--soft cta--end" onClick={onLive}><i className="cta__live" />Go to Live Transcript<HiArrowRight width={15} height={15} /></button>;
@@ -324,6 +394,8 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
   const mayRecord = can(account, 'record');
   const start = useStartTab(tabId, onLive);
   const upload = !isYouTube(url);
+  const player = useAction();
+  const openPlayer = () => void player.run(() => rpc('video.player', { tabId, url, title: (title || '').replace(/ - YouTube$/, '').slice(0, 120) || undefined }));
   // Instant start: while Live Transcription is on offer, an engine stays loaded.
   useWarm(spokenReady && mayRecord && !recording && mode !== 'upload' && !tabHolder(live, tabId), spoken);
   useEffect(() => { setMode(null); }, [url]);
@@ -342,7 +414,12 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
             ? <PickCard icon={<HiMic />} live head="Live Transcription" badge text="Go to the live transcript." onClick={onLive} />
             : <PickCard icon={<HiMic />} head="Live Transcription" text="Transcribe the audio as it plays, with floating captions over the video." onClick={() => setMode('live')} />}
           {upload && <PickCard icon={<HiUpload />} head="File Upload" text="The whole video is fetched and transcribed at once, with a full transcript in your Library." onClick={toUpload} />}
+          {!upload && (
+            <PickCard icon={<HiVideo />} head="Embedded Video Player" text="Open the video on VocalStack, with its transcript beside it, in a new tab."
+              busy={player.busy} disabled={!mayRecord} title={!mayRecord ? whyNot(account, 'record') : undefined} onClick={openPlayer} />
+          )}
         </div>
+        {player.error && <ProblemNote error={player.error} onSettings={onSettings} />}
       </>
     );
   }
@@ -382,15 +459,17 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
   );
 }
 
-function PickCard({ icon, head, text, live, badge, onClick }: { icon: React.ReactNode; head: string; text: string; live?: boolean; badge?: boolean; onClick: () => void }) {
+function PickCard({ icon, head, text, live, badge, busy, disabled, title, onClick }: {
+  icon: React.ReactNode; head: string; text: string; live?: boolean; badge?: boolean; busy?: boolean; disabled?: boolean; title?: string; onClick: () => void;
+}) {
   return (
-    <button type="button" className="card2 pick" onClick={onClick}>
+    <button type="button" className="card2 pick" onClick={onClick} disabled={disabled || busy} aria-busy={busy || undefined} title={title}>
       <span className={`round ${live ? 'round--live' : 'round--brand'}`}>{icon}</span>
       <span className="lrow__main">
         <span className="pick__head">{head}{badge && <span className="pick__badge"><i />IN PROGRESS</span>}</span>
         <span className="pick__text">{text}</span>
       </span>
-      <HiChevronRight width={14} height={14} style={{ flex: 'none', color: 'var(--ink-45)' }} />
+      {busy ? <span className="spin" /> : <HiChevronRight width={14} height={14} style={{ flex: 'none', color: 'var(--ink-45)' }} />}
     </button>
   );
 }

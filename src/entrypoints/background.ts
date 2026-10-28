@@ -9,6 +9,7 @@ import { registerPage } from '../background/page';
 import { anyRunning, markInvoked, registerLive } from '../background/live';
 import { registerDub } from '../background/dub';
 import { registerVcap } from '../background/vcap';
+import { registerVideo } from '../background/video';
 import { registerMeetings } from '../background/meetings';
 import { showInPanel } from '../background/panel';
 import { initSentry } from '../lib/sentry';
@@ -57,6 +58,7 @@ export default defineBackground(() => {
     ...registerLive(),
     ...registerDub(),
     ...registerVcap(),
+    ...registerVideo(),
     ...registerMeetings(),
   };
   serve(handlers);

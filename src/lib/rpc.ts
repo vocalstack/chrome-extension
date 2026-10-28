@@ -55,6 +55,9 @@ export interface Methods {
   'vcap.start': [VcapStart, VcapStatus];
   'vcap.stop': [{ tabId: number }, void];
   'vcap.status': [{ tabId: number }, VcapStatus | null];
+  /** A YouTube video transcribed on the server, opened on the video
+   *  player (its share link) in a new tab next to it. */
+  'video.player': [{ tabId: number; url: string; title?: string }, void];
   'dub.start': [DubStart, DubStatus];
   'dub.stop': [{ tabId: number }, void];
   'dub.status': [{ tabId: number }, DubStatus | null];

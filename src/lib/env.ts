@@ -13,12 +13,14 @@ export interface Env {
   app: string;
   /** Where listeners open a broadcast. */
   live: string;
+  /** Where a transcription's share link opens on the video player. */
+  video: string;
 }
 
 export const ENVS: Record<EnvName, Env> = {
-  production: { name: 'production', label: 'Production', api: 'https://api.vocalstack.com', app: 'https://app.vocalstack.com', live: 'https://live.vocalstack.com' },
-  e2e: { name: 'e2e', label: 'e2e', api: 'https://api.e2e.vocalstack.com', app: 'https://app.e2e.vocalstack.com', live: 'https://app.e2e.vocalstack.com' },
-  local: { name: 'local', label: 'This computer', api: 'http://localhost:8080', app: 'http://localhost:5176', live: 'http://localhost:5176' },
+  production: { name: 'production', label: 'Production', api: 'https://api.vocalstack.com', app: 'https://app.vocalstack.com', live: 'https://live.vocalstack.com', video: 'https://video.vocalstack.com' },
+  e2e: { name: 'e2e', label: 'e2e', api: 'https://api.e2e.vocalstack.com', app: 'https://app.e2e.vocalstack.com', live: 'https://app.e2e.vocalstack.com', video: 'https://app.e2e.vocalstack.com/v' },
+  local: { name: 'local', label: 'This computer', api: 'http://localhost:8080', app: 'http://localhost:5176', live: 'http://localhost:5176', video: 'http://localhost:5176/v' },
 };
 
 const KEY = 'env';

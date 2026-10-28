@@ -516,7 +516,9 @@ label.item--click{cursor:pointer}
 .cta__live{width:7px;height:7px;border-radius:50%;background:var(--live);animation:vsx-dot 1.4s ease-in-out infinite}
 .cta--soft .cta__live+svg,.cta--soft svg:last-child{width:15px;height:15px}
 .pick{display:flex;align-items:center;gap:12px;width:100%;padding:14px;border:0;color:inherit;font:inherit;text-align:left;cursor:pointer}
-.pick:hover{background:var(--fill-08)}
+.pick:hover:not(:disabled){background:var(--fill-08)}
+.pick:disabled{cursor:default}
+.pick:disabled:not([aria-busy]){opacity:.55}
 .pick .round svg{width:16px;height:16px}
 .pick__head{display:flex;align-items:center;gap:8px;min-width:0;font-size:13.5px;font-weight:600}
 .pick__text{display:block;margin-top:2px;font-size:11.5px;font-weight:300;line-height:1.4;color:var(--ink-45);text-wrap:pretty}
@@ -531,6 +533,17 @@ label.item--click{cursor:pointer}
 .found__foot .spin{width:12px;height:12px}
 .empty2{display:flex;flex-direction:column;align-items:center;gap:8px;padding:28px 20px;text-align:center}
 .empty2__head{margin-top:4px;font-size:14px;font-weight:600}
+.own__icon{display:flex;align-items:center;justify-content:center;width:36px;height:36px;color:var(--ink-70)}
+.own__icon svg{width:36px;height:36px}
+.own{display:flex;flex-direction:column;align-items:center;padding:26px 24px 22px;text-align:center}
+.own__pct{font-size:40px;font-weight:600;line-height:1;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.own__pct small{margin-left:2px;font-size:20px;font-weight:500;color:var(--ink-45)}
+.own__spin{width:32px;height:32px;border-width:3px;margin:4px 0}
+.own__step{margin-top:10px;font-size:13.5px;font-weight:500;color:var(--ink-70)}
+.own__bar{align-self:stretch;margin-top:16px}
+.own__note{margin-top:10px;font-size:11.5px;font-weight:300;color:var(--ink-45)}
+.own__icon--done{color:var(--ready)}
+.own__icon--bad{color:var(--ink-45)}
 .empty2__text{max-width:280px;font-size:12.5px;font-weight:300;line-height:1.5;color:var(--ink-55);text-wrap:pretty}
 .mcard{display:flex;flex-direction:column;gap:12px}
 .mcard__label{font-size:13.5px;font-weight:600;letter-spacing:-.1px}
