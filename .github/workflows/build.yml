@@ -37,7 +37,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          submodules: true
           # The version's last part counts the commits (scripts/package.sh).
           fetch-depth: 0
 

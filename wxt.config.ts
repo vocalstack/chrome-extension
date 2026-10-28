@@ -41,10 +41,6 @@ export default defineConfig({
   vite: () => ({
     resolve: {
       alias: {
-        // The SDK straight from its source (the js-sdk submodule): one
-        // client for every call, typed from the generated contract.
-        '@vocalstack/js-sdk': at('./sdk/src/index.ts'),
-        '@vocalstack/contract': at('./sdk/contract/src/index.ts'),
         // The SDK imports 'ws' only under Node; a browser has WebSocket.
         ws: at('./src/lib/ws-shim.ts'),
       },

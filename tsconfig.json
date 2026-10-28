@@ -7,8 +7,6 @@
     "allowImportingTsExtensions": true,
     "types": ["chrome", "node"],
     "paths": {
-      "@vocalstack/js-sdk": ["./sdk/src/index.ts"],
-      "@vocalstack/contract": ["./sdk/contract/src/index.ts"],
       "ws": ["./src/lib/ws-shim.ts"]
     }
   },

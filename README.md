@@ -17,7 +17,6 @@ Also: right-click "Transcribe this link / video / page", `vs <words>` in the add
 ## Run it
 
 ```sh
-git submodule update --init      # sdk/ = github.com/vocalstack/js-sdk
 npm install
 npm run build                    # Chrome: output/chrome
 npm run build:edge               # Edge:   output/edge
@@ -40,7 +39,7 @@ Settings → Environment switches between production, e2e and this computer (`lo
 | Content script | `src/entrypoints/content.ts`, `src/content/*` | media scan, captions overlay, dub clock |
 | Permission page | `src/entrypoints/permission` | asks for the microphone once for the whole extension |
 
-All API calls go through the TypeScript SDK (`sdk/`, aliased as `@vocalstack/js-sdk`).
+All API calls go through the TypeScript SDK ([`@vocalstack/js-sdk`](https://www.npmjs.com/package/@vocalstack/js-sdk) on npm).
 
 ### Sign-in
 
