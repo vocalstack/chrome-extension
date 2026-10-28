@@ -4,6 +4,7 @@
 import { scanDocument } from '../lib/media';
 import { startOverlay } from '../content/overlay';
 import { startDubSync } from '../content/dub';
+import { startPlayerPrompt } from '../content/playerPrompt';
 
 export default defineContentScript({
   matches: ['<all_urls>'],
@@ -11,6 +12,11 @@ export default defineContentScript({
   runAt: 'document_idle',
   main() {
     chrome.runtime.onMessage.addListener((msg, _sender, send) => {
+      // The video opened on the VocalStack player in a new tab: this one stops.
+      if (msg?.pauseVideo === true) {
+        for (const v of document.querySelectorAll('video')) v.pause();
+        return false;
+      }
       if (msg?.scan === true) {
         send({ url: location.href, title: document.title, top: window.top === window, media: scanDocument() });
         return false;
@@ -19,6 +25,7 @@ export default defineContentScript({
     });
     startOverlay();
     startDubSync();
+    if (window.top === window && /(^|\.)youtube\.com$/.test(location.hostname)) startPlayerPrompt();
     // Settings → Captions on videos: tell the background when the person
     // starts a video playing with its sound on (once per page address).
     // Muted autoplay and hover previews do not count: no recent click or

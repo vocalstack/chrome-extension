@@ -542,6 +542,34 @@ label.item--click{cursor:pointer}
 .own__step{margin-top:10px;font-size:13.5px;font-weight:500;color:var(--ink-70)}
 .own__bar{align-self:stretch;margin-top:16px}
 .own__note{margin-top:10px;font-size:11.5px;font-weight:300;color:var(--ink-45)}
+.ready{display:block;width:100%;padding:0;overflow:hidden;border:0;color:inherit;font:inherit;text-align:left;cursor:pointer;transition:box-shadow .2s var(--ease),transform .2s var(--ease)}
+.ready:hover:not(:disabled){box-shadow:0 0 0 1px var(--brand-line),0 14px 34px rgba(0,0,0,.35);transform:translateY(-1px)}
+.ready:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.ready:disabled{cursor:progress}
+.ready__thumb{position:relative;display:block;aspect-ratio:16/9;overflow:hidden;background:#000}
+.ready__thumb>img{display:block;width:100%;height:100%;object-fit:cover;transition:transform .5s var(--ease)}
+.ready:hover .ready__thumb>img{transform:scale(1.04)}
+.ready__thumb::after{content:"";position:absolute;inset:0;background:radial-gradient(circle at 50% 50%,rgba(0,0,0,0) 30%,rgba(0,0,0,.25)),linear-gradient(180deg,rgba(0,0,0,0) 55%,rgba(10,11,24,.85))}
+.ready__badge{position:absolute;z-index:1;top:10px;left:10px;display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px 0 7px;border-radius:99px;background:rgba(10,11,24,.78);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:var(--ready);font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.12em}
+.ready__play{position:absolute;z-index:1;top:50%;left:50%;width:58px;height:58px;margin:-29px 0 0 -29px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 7px rgba(85,171,229,.22),0 10px 28px rgba(0,0,0,.45);transition:transform .2s var(--ease),box-shadow .2s var(--ease)}
+.ready__play svg{margin-left:3px}
+.ready__play .spin{width:20px;height:20px;border-color:rgba(255,255,255,.35);border-top-color:#fff}
+.ready:hover .ready__play{transform:scale(1.08);box-shadow:0 0 0 10px rgba(85,171,229,.26),0 12px 32px rgba(0,0,0,.5)}
+.ready__brand{position:absolute;z-index:1;left:12px;bottom:10px;display:inline-flex;align-items:center;gap:6px;color:rgba(255,255,255,.9);font:600 11px Inter,system-ui,sans-serif;letter-spacing:.01em}
+.ready__brand img{display:block;width:14px;height:auto}
+.ready__body{display:flex;align-items:center;gap:12px;padding:14px 14px 15px 16px}
+.ready__main{flex:1;min-width:0;display:flex;flex-direction:column}
+.ready__head{font-size:14px;font-weight:600}
+.ready__text{margin-top:2px;font-size:12px;font-weight:300;line-height:1.45;color:var(--ink-55)}
+.ready__go{flex:none;width:34px;height:34px;border-radius:50%;background:var(--brand-tint);color:var(--brand);display:flex;align-items:center;justify-content:center;transition:background .2s var(--ease),color .2s var(--ease),transform .2s var(--ease)}
+.ready:hover .ready__go{background:var(--brand);color:#fff;transform:translateX(2px)}
+@media (prefers-reduced-motion:reduce){.ready,.ready *{transition:none!important}.ready:hover{transform:none}.ready:hover .ready__thumb>img{transform:none}}
+.ytpick{display:flex;flex-direction:column;align-items:center;gap:8px;padding:28px 18px 18px;text-align:center}
+.ytpick__logo{display:flex;align-items:center;justify-content:center;width:72px;height:72px;margin-bottom:6px;border-radius:20px;background:rgba(255,0,0,.09)}
+.ytpick__list{align-self:stretch;display:flex;flex-direction:column;gap:2px;margin-top:14px;padding-top:12px;border-top:1px solid var(--hair);text-align:left}
+.ytpick__row{display:flex;align-items:center;gap:12px;padding:8px 4px;font-size:12.5px;font-weight:300;line-height:1.4;color:var(--ink-55)}
+.ytpick__row b{font-weight:600;color:var(--ink-96)}
+.ytpick__icon{flex:none;display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:10px;background:var(--fill-06);color:var(--brand)}
 .own__icon--done{color:var(--ready)}
 .own__icon--bad{color:var(--ink-45)}
 .empty2__text{max-width:280px;font-size:12.5px;font-weight:300;line-height:1.5;color:var(--ink-55);text-wrap:pretty}

@@ -17,10 +17,11 @@
  *  While the tab is recorded, its card and a button lead to Live. */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { LinkProbe, TranscriptionJob } from '@vocalstack/contract';
+import type { LinkProbe } from '@vocalstack/contract';
 import type { PanelIntent } from '../background/panel';
 import type { Account } from '../lib/auth';
-import { ENVS, currentEnv } from '../lib/env';
+import { isOwn, type PlayerState } from '../lib/shared';
+import { videoIdOf } from '../lib/ahead';
 import { can, whyNot } from '../lib/access';
 import { capturable, isRunning, meetingHost, tabHolder, type LiveStatus } from '../lib/live';
 import { AccessNote, ProblemNote } from '../ui/access';
@@ -29,12 +30,12 @@ import { rpc, type Answer } from '../lib/rpc';
 import { MEDIA_PAGE, type FoundMedia } from '../lib/media';
 import { Note, errorText, useAction } from '../ui/kit';
 import { Eyebrow, Switch, Toggle } from '../ui/ds';
-import { HiArrowRight, HiAudio, HiCaptions, HiCheck, HiChevronRight, HiDoc, HiGlobe, HiMic, HiNone, HiUpload, HiVideo, Mark, MeetingLogo, YouTubeLogo } from '../ui/icons';
+import { HiArrowRight, HiAudio, HiCaptions, HiCheck, HiChevronRight, HiDoc, HiExternal, HiPlay, HiGlobe, HiMic, HiNone, HiUpload, HiVideo, Mark, MeetingLogo, YouTubeLogo } from '../ui/icons';
 import { useLang, useReadLang, useSpeakerLabels, useSpokenLang } from '../ui/langs';
 import { useWarm } from '../ui/useWarm';
 import { InvokeNotice, MEETING_SHORT, mmss, useInvoked } from './Live';
 import { problemOf } from './page/errors';
-import { jobPct, jobText, patch, phaseOf, useTracked } from './page/tracker';
+import { patch, useTracked } from './page/tracker';
 import { transcribeLinks } from './FileDrop';
 import { queueLink } from './Upload';
 
@@ -71,10 +72,6 @@ async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
   const [t] = await chrome.tabs.query(w?.id !== undefined ? { active: true, windowId: w.id } : { active: true, lastFocusedWindow: true });
   return t;
 }
-
-/** VocalStack's own pages: the video player, shared transcripts, the dashboard. */
-const OWN_HOSTS = new Set(Object.values(ENVS).flatMap((e) => [e.app, e.live, e.video].map(host)));
-const isOwn = (u: string | undefined) => !!u && (/^https?:\/\/(?:[\w-]+\.)*vocalstack\.com(?:[:/]|$)/i.test(u) || OWN_HOSTS.has(host(u)));
 
 const isYouTube = (u: string | undefined) => /^https?:\/\/(?:[\w-]+\.)?(?:youtube\.com|youtu\.be)\//i.test(u ?? '');
 
@@ -160,9 +157,11 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   // server found on a page.
   const pageUrl = scan?.url ?? '';
   const own = isOwn(pageUrl);
+  /** YouTube, but not a video (home, search, a channel): pick one first. */
+  const ytBrowse = !own && isYouTube(pageUrl) && !MEDIA_PAGE.test(pageUrl);
   const base: Row[] = [];
-  if (own) { /* transcribed already: nothing listed */ } else if (pinned) base.push({ ...(scan?.media.find((m) => m.url === pinned.url) ?? pinned), from: 'click' });
-  if (!own) for (const m of scan?.media ?? []) if (m.url !== pinned?.url) base.push(m);
+  if (own || ytBrowse) { /* nothing listed */ } else if (pinned) base.push({ ...(scan?.media.find((m) => m.url === pinned.url) ?? pinned), from: 'click' });
+  if (!own && !ytBrowse) for (const m of scan?.media ?? []) if (m.url !== pinned?.url) base.push(m);
   const rows: Row[] = [];
   for (const r of base) {
     rows.push(r);
@@ -222,7 +221,7 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   const tabOk = capturable(scan?.url);
   const failed = tracked.filter((t) => t.phase === 'error' && !t.hidden).slice(-2);
   // A scan again (the panel focused) keeps what the last one showed.
-  const empty = !own && !videoPage && !rows.length && !scanError && (!scanning || !!scan);
+  const empty = !own && !ytBrowse && !videoPage && !rows.length && !scanError && (!scanning || !!scan);
   /** This tab's recording, while it runs: the card and a button lead to Live. */
   const holder = scan ? tabHolder(live, scan.tabId) : undefined;
   const recording = !!holder && isRunning(holder);
@@ -254,6 +253,7 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
       {scanError && <Note kind="warn">{scanError}</Note>}
 
       {own && !recording && <OwnPage url={pageUrl} />}
+      {ytBrowse && !recording && <PickVideo />}
 
       {videoPage && scan && (
         <VideoPick account={account} live={live} tabId={scan.tabId} url={scan.url} title={scan.title} durationS={rows.find((r) => r.playing)?.durationS ?? rows.find((r) => r.kind === 'video')?.durationS}
@@ -299,60 +299,95 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   );
 }
 
-/** A shared transcription's code in a VocalStack address: the video
- *  player's `/<code>`, or the app's `/t/<code>` and `/v/<code>`. */
-const shareCode = (u: string) => { try { return new URL(u).pathname.match(/^\/(?:[tv]\/)?([a-z0-9]{8,})\/?$/i)?.[1] ?? null; } catch { return null; } };
-
-/** The job of a shared transcription, read by its share code (no sign-in:
- *  the player's own call), from the API of the environment the page is on. */
-async function sharedJob(pageUrl: string, code: string): Promise<TranscriptionJob | null> {
-  const env = Object.values(ENVS).find((e) => [e.app, e.live, e.video].map(host).includes(host(pageUrl))) ?? ENVS.production;
-  const cur = await currentEnv();
-  const api = cur.name === env.name ? cur.api : env.api;
-  const r = await fetch(`${api}/app/shared/${encodeURIComponent(code)}`);
-  if (!r.ok) throw new Error(`shared ${r.status}`);
-  return ((await r.json()) as { job?: TranscriptionJob | null }).job ?? null;
-}
-
-/** VocalStack's own page: its transcription's progress while the job runs
- *  (read every few seconds), then that it is transcribed. */
-function OwnPage({ url }: { url: string }) {
-  const code = shareCode(url);
-  const [job, setJob] = useState<TranscriptionJob | null | undefined>(code ? undefined : null);
+/** A video's place on the player (undefined while first checked), read
+ *  again every few seconds while its job runs. */
+function usePlayer(url: string) {
+  const [state, setState] = useState<PlayerState | null | undefined>(undefined);
+  const [n, setN] = useState(0);
   useEffect(() => {
-    if (!code) { setJob(null); return; }
-    setJob(undefined);
     let stop = false;
     let timer = 0;
     const read = async () => {
-      const j = await sharedJob(url, code).catch(() => null);
+      const st = await rpc('video.known', { url }).catch(() => null);
       if (stop) return;
-      setJob(j);
-      if (j && phaseOf(j) === 'working') timer = window.setTimeout(() => void read(), 3000);
+      setState(st);
+      if (st?.phase === 'working') timer = window.setTimeout(() => void read(), 3000);
     };
     void read();
     return () => { stop = true; clearTimeout(timer); };
-  }, [url, code]);
+  }, [url, n]);
+  useEffect(() => { setState(undefined); }, [url]);
+  return { state, refresh: () => setN((x) => x + 1) };
+}
 
-  const working = job === undefined || (!!job && phaseOf(job) === 'working');
-  const failed = !!job && phaseOf(job) === 'failed';
-  if (working) {
-    const pct = job ? jobPct(job) : null;
-    const step = !job ? 'Checking this video…' : job.state === 'queued' ? jobText(job) : job.state === 'fetching' ? 'Fetching the video' : 'Transcribing';
+/** A transcription on the player: a big percentage, its step and a bar
+ *  while the job runs; then ready (or why not). */
+function PlayerCard({ state, note, ready }: { state: PlayerState | null | undefined; note: string; ready: { head: string; text: string } }) {
+  if (state === undefined || state?.phase === 'working') {
+    const pct = state?.pct ?? null;
     return (
       <div className="card2 own">
         {pct === null ? <span className="spin own__spin" /> : <div className="own__pct">{pct}<small>%</small></div>}
-        <div className="own__step">{step}</div>
-        {pct !== null && <div className="progress own__bar"><i style={{ width: `${pct ?? 0}%` }} /></div>}
-        {job && <div className="own__note">The transcript fills in on the page as it goes.</div>}
+        <div className="own__step">{state ? state.step : 'Checking this video…'}</div>
+        {pct !== null && <div className="progress own__bar"><i style={{ width: `${pct}%` }} /></div>}
+        {state && <div className="own__note">{note}</div>}
       </div>
     );
   }
+  const failed = state?.phase === 'failed';
   return (
     <div className="card2 empty2">
       <span className={`own__icon${failed ? ' own__icon--bad' : ' own__icon--done'}`}>{failed ? <HiNone /> : <HiCheck />}</span>
-      <div className="empty2__head">{failed ? 'This video wasn’t transcribed' : 'This video is transcribed'}</div>
-      <div className="empty2__text">{failed ? jobText(job!) : 'Its transcript plays along on this page.'}</div>
+      <div className="empty2__head">{failed ? 'This video wasn’t transcribed' : ready.head}</div>
+      <div className="empty2__text">{failed ? state!.error : ready.text}</div>
+    </div>
+  );
+}
+
+/** A YouTube video ready on the player, as one big button: its picture
+ *  (the sharpest YouTube has), READY, and where it opens. */
+function ReadyCard({ videoId, title, busy, onOpen }: { videoId: string | null; title: string; busy: boolean; onOpen: () => void }) {
+  const [res, setRes] = useState<'maxresdefault' | 'hqdefault'>('maxresdefault');
+  useEffect(() => { setRes('maxresdefault'); }, [videoId]);
+  return (
+    <button type="button" className="card2 ready" onClick={onOpen} disabled={busy} aria-busy={busy || undefined} aria-label={`Watch ${title || 'this video'} on VocalStack`}>
+      <span className="ready__thumb">
+        {/* A video without a large picture answers with a small grey one: that one is not taken. */}
+        {videoId && <img src={`https://i.ytimg.com/vi/${videoId}/${res}.jpg`} alt="" onError={() => setRes('hqdefault')}
+          onLoad={(e) => { if (res === 'maxresdefault' && e.currentTarget.naturalWidth < 400) setRes('hqdefault'); }} />}
+        <span className="ready__badge"><HiCheck width={12} height={12} />READY</span>
+        <span className="ready__play">{busy ? <span className="spin" /> : <HiPlay width={22} height={22} />}</span>
+        <span className="ready__brand"><Mark width={14} height={14} />VocalStack Player</span>
+      </span>
+      <span className="ready__body">
+        <span className="ready__main">
+          <span className="ready__head">Watch on VocalStack</span>
+          <span className="ready__text">The transcript beside the video, in any language.</span>
+        </span>
+        <span className="ready__go"><HiArrowRight width={16} height={16} /></span>
+      </span>
+    </button>
+  );
+}
+
+/** VocalStack's own page: its transcription's progress while the job
+ *  runs, then that it is transcribed. */
+function OwnPage({ url }: { url: string }) {
+  const { state } = usePlayer(url);
+  return <PlayerCard state={state} note="The transcript fills in on the page as it goes." ready={{ head: 'This video is transcribed', text: 'Its transcript plays along on this page.' }} />;
+}
+
+/** YouTube, but not on a video: what opening one offers. */
+function PickVideo() {
+  return (
+    <div className="card2 ytpick">
+      <div className="ytpick__logo"><YouTubeLogo size={44} /></div>
+      <div className="empty2__head">Open a video to get started</div>
+      <div className="empty2__text">Pick any video on YouTube, and VocalStack is ready for it here.</div>
+      <div className="ytpick__list">
+        <div className="ytpick__row"><span className="ytpick__icon"><HiCaptions width={16} height={16} /></span><span><b>Live captions</b> over the video as it plays, in your language</span></div>
+        <div className="ytpick__row"><span className="ytpick__icon"><HiVideo width={16} height={16} /></span><span><b>The VocalStack player</b>, with the full transcript beside the video</span></div>
+      </div>
     </div>
   );
 }
@@ -395,7 +430,15 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
   const start = useStartTab(tabId, onLive);
   const upload = !isYouTube(url);
   const player = useAction();
-  const openPlayer = () => void player.run(() => rpc('video.player', { tabId, url, title: (title || '').replace(/ - YouTube$/, '').slice(0, 120) || undefined }));
+  /** Given a player link from here before (YouTube): watched there, not transcribed again. */
+  const known = usePlayer(url);
+  const onPlayer = !upload && !!known.state && known.state.phase !== 'failed';
+  const openPlayer = () => void player.run(async () => {
+    // Watched there instead of here: Open in VocalStack takes this tab; the
+    // first open (Embedded Video Player) a new one beside it.
+    await rpc('video.player', { tabId, url, title: (title || '').replace(/ - YouTube$/, '').slice(0, 120) || undefined, here: onPlayer });
+    if (!onPlayer) known.refresh();
+  });
   // Instant start: while Live Transcription is on offer, an engine stays loaded.
   useWarm(spokenReady && mayRecord && !recording && mode !== 'upload' && !tabHolder(live, tabId), spoken);
   useEffect(() => { setMode(null); }, [url]);
@@ -404,6 +447,26 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
     queueLink({ url, name: (title || host(url) || 'From the web').slice(0, 120), host: isYouTube(url) ? 'YouTube' : host(url), durationS, live: stream });
     onUpload();
   };
+
+  // While the first check runs, nothing: no options that then vanish.
+  if (!upload && !recording && known.state === undefined) return null;
+
+  if (onPlayer && !recording) {
+    return (
+      <>
+        <Eyebrow>WATCH ON VOCALSTACK</Eyebrow>
+        {known.state!.phase === 'ready'
+          ? <ReadyCard videoId={videoIdOf(url)} title={title.replace(/ - YouTube$/, '')} busy={player.busy} onOpen={openPlayer} />
+          : <PlayerCard state={known.state} note="Open it now: the transcript fills in as it goes." ready={{ head: 'Ready on VocalStack', text: '' }} />}
+        {player.error && <ProblemNote error={player.error} onSettings={onSettings} />}
+        {known.state!.phase !== 'ready' && (
+          <button type="button" className="cta cta--end" aria-busy={player.busy || undefined} onClick={openPlayer}>
+            {player.busy ? <span className="spin" /> : <HiExternal width={15} height={15} />}Open in VocalStack
+          </button>
+        )}
+      </>
+    );
+  }
 
   if (!mode || recording) {
     return (

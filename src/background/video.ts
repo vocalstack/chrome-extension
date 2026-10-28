@@ -11,6 +11,8 @@ import { accessToken } from '../lib/auth';
 import { currentEnv } from '../lib/env';
 import { RpcError, type Handlers } from '../lib/rpc';
 import { MEDIA_PAGE } from '../lib/media';
+import { videoIdOf } from '../lib/ahead';
+import { envOfPage, isOwn, playerState, shareCode, sharedJob, type PlayerState } from '../lib/shared';
 import { scan } from './page';
 
 export interface VideoIds { transcriptionId: string; recordingId: string }
@@ -42,6 +44,27 @@ async function remember(key: string, ids: VideoIds) {
   await chrome.storage.local.set({ [`${KNOWN}:${key}`]: ids });
 }
 
+const ytId = (url: string) => (/^https?:\/\/(?:[\w-]+\.)?(?:youtube\.com|youtu\.be)\//i.test(url) ? (videoIdOf(url) ?? url.match(/youtu\.be\/([\w-]{6,})/)?.[1] ?? null) : null);
+
+/** A YouTube video's transcription in the account, found on the server
+ *  when this browser doesn't know it (made elsewhere, or the extension's
+ *  storage cleared): the newest active one of the video's address, among
+ *  the latest 200. A miss is remembered for a minute. */
+const misses = new Map<string, number>();
+async function onServer(vs: VocalStack, url: string): Promise<VideoIds | null> {
+  const id = ytId(url);
+  if (!id || (misses.get(id) ?? 0) > Date.now()) return null;
+  const page = await vs.transcriptions.listPage({ limit: 200 }).catch(() => null);
+  const t = page?.transcriptions.find((x) => x.lifecycle === 'active' && x.job?.source?.url && ytId(x.job.source.url) === id);
+  if (!t?.job) {
+    if (page) misses.set(id, Date.now() + 60_000);
+    return null;
+  }
+  const ids = { transcriptionId: t.id, recordingId: t.job.recordingId };
+  await remember(await keyOf(url), ids);
+  return ids;
+}
+
 /** The address's transcription, made or found: one promise per address
  *  while the worker runs, so two features started together share it. */
 const inflight = new Map<string, Promise<VideoIds>>();
@@ -50,7 +73,7 @@ function idsFor(vs: VocalStack, key: string, req: { url: string; title?: string 
   let p = inflight.get(key);
   if (p) return p;
   p = (async () => {
-    let ids = await known(key);
+    let ids = (await known(key)) ?? (await onServer(vs, req.url));
     if (ids) {
       const t = await vs.transcriptions.get(ids.transcriptionId).catch(() => null);
       if (!t || t.lifecycle !== 'active') {
@@ -100,22 +123,110 @@ export async function transcribeVideo(vs: VocalStack, req: { url: string; title?
 }
 
 const PLAYER_LABEL = 'Video player';
+/** A YouTube video's player link, by environment and video id (any
+ *  address of the video: a timestamp or a playlist doesn't matter). */
+const PLAYER = 'video.player';
+
+async function playerKey(url: string): Promise<string | null> {
+  const id = ytId(url);
+  return id ? `${PLAYER}:${(await currentEnv()).name}|yt:${id}` : null;
+}
+
+/** A video's transcription (the player's, the captions', the dub's): known
+ *  here by this address or the plain watch address, or else found on the server. */
+async function videoIds(url: string): Promise<VideoIds | null> {
+  const id = ytId(url);
+  const plain = id ? `https://www.youtube.com/watch?v=${id}` : url;
+  return (await known(await keyOf(url))) ?? (plain !== url ? await known(await keyOf(plain)) : null) ?? (await onServer(await vsClient(), url));
+}
+
+/** The video's player link code: remembered, or else found on the
+ *  server, on the transcription this extension made of the video (by
+ *  this address or the plain watch address), and remembered from then. */
+async function playerCode(url: string, key: string): Promise<string | null> {
+  const got = ((await chrome.storage.local.get(key))[key] as { code?: string } | undefined)?.code;
+  if (got) return got;
+  const ids = await videoIds(url);
+  if (!ids) return null;
+  const links = await (await vsClient()).transcriptions.listShareLinks(ids.transcriptionId).catch(() => []);
+  const code = links.find((l) => l.label === PLAYER_LABEL && !l.revokedAt)?.code ?? null;
+  if (code) await chrome.storage.local.set({ [key]: { code } });
+  return code;
+}
+
+/** A video's place on the player, or null: never given one here, or its
+ *  link revoked since (then forgotten). The job is read without sign-in. */
+async function playerOf(url: string): Promise<PlayerState | null> {
+  let api: string;
+  let code: string | null;
+  let base: string;
+  let key: string | null = null;
+  if (isOwn(url)) {
+    const env = envOfPage(url);
+    const cur = await currentEnv();
+    api = cur.name === env.name ? cur.api : env.api;
+    base = url;
+    code = shareCode(url);
+  } else {
+    key = await playerKey(url);
+    if (!key) return null;
+    code = await playerCode(url, key);
+    const env = await currentEnv();
+    api = env.api;
+    base = code ? `${env.video}/${code}` : '';
+    // Transcribed here (captions, the dub) but never opened on the player:
+    // on offer all the same, its link made when it is opened.
+    if (!code) {
+      const ids = await videoIds(url);
+      if (!ids) return null;
+      const vs = await vsClient();
+      const t = await vs.transcriptions.get(ids.transcriptionId).catch(() => null);
+      if (!t || t.lifecycle !== 'active') return null;
+      const job = t.job ?? await vs.jobs.get(ids.recordingId).catch(() => null);
+      return playerState('', job ?? null);
+    }
+  }
+  if (!code) return null;
+  const job = await sharedJob(api, code).catch(() => null);
+  if (job === 'gone') {
+    if (key) await chrome.storage.local.remove(key);
+    return null;
+  }
+  return playerState(base, job);
+}
 
 /** The video player for a page's video: its transcription (the one the
  *  dub and captions share, in the spoken language), and that
- *  transcription's share link, opened on the player while the job runs. */
+ *  transcription's share link, opened on the player while the job runs.
+ *  Remembered per video, so Now and the page offer it again. */
 export function registerVideo(): Handlers {
   return {
-    'video.player': async ({ tabId, url, title }) => {
-      const vs = await vsClient();
+    'video.player': async ({ tabId: asked, url, title, here }, sender) => {
+      const tabId = asked ?? sender.tab?.id;
       const env = await currentEnv();
-      const { transcriptionId } = await idsFor(vs, await keyOf(url), { url, title });
-      const links = await vs.transcriptions.listShareLinks(transcriptionId);
-      const link = links.find((l) => l.label === PLAYER_LABEL && !l.revokedAt)
-        ?? await vs.transcriptions.createShareLink(transcriptionId, { label: PLAYER_LABEL, allowDownload: false, allowExport: false });
-      const tab = await chrome.tabs.get(tabId).catch(() => null);
-      await chrome.tabs.create({ url: `${env.video}/${link.code}`, ...(tab ? { index: tab.index + 1, openerTabId: tabId, windowId: tab.windowId } : {}) });
+      const key = await playerKey(url);
+      let code = key ? await playerCode(url, key) : null;
+      if (!code) {
+        const vs = await vsClient();
+        const { transcriptionId } = await idsFor(vs, await keyOf(url), { url, title });
+        const links = await vs.transcriptions.listShareLinks(transcriptionId);
+        const link = links.find((l) => l.label === PLAYER_LABEL && !l.revokedAt)
+          ?? await vs.transcriptions.createShareLink(transcriptionId, { label: PLAYER_LABEL, allowDownload: false, allowExport: false });
+        code = link.code;
+        if (key) await chrome.storage.local.set({ [key]: { code } });
+        // The page's prompt shows from now on.
+        if (tabId !== undefined) void chrome.tabs.sendMessage(tabId, { playerKnown: true }).catch(() => {});
+      }
+      const tab = tabId !== undefined ? await chrome.tabs.get(tabId).catch(() => null) : null;
+      if (here && tab?.id !== undefined) {
+        await chrome.tabs.update(tab.id, { url: `${env.video}/${code}` });
+        return;
+      }
+      await chrome.tabs.create({ url: `${env.video}/${code}`, ...(tab ? { index: tab.index + 1, openerTabId: tab.id, windowId: tab.windowId } : {}) });
+      // Watched there now: the video here stops, so the two don't play over each other.
+      if (tab?.id !== undefined) void chrome.tabs.sendMessage(tab.id, { pauseVideo: true }).catch(() => {});
     },
+    'video.known': ({ url }) => playerOf(url),
   };
 }
 

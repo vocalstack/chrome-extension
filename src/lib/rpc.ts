@@ -10,6 +10,7 @@ import type { EnvName } from './env';
 import type { FoundMedia } from './media';
 import type { LiveStatus, LiveStart, DubStart, DubStatus, CaptionStyle, VcapStart, VcapStatus } from './live';
 import { failure, type Failure } from './errors';
+import type { PlayerState } from './shared';
 import { report } from './sentry';
 
 export interface Methods {
@@ -56,8 +57,11 @@ export interface Methods {
   'vcap.stop': [{ tabId: number }, void];
   'vcap.status': [{ tabId: number }, VcapStatus | null];
   /** A YouTube video transcribed on the server, opened on the video
-   *  player (its share link) in a new tab next to it. */
-  'video.player': [{ tabId: number; url: string; title?: string }, void];
+   *  player (its share link): in a new tab next to it, or `here`, in its tab. */
+  'video.player': [{ tabId?: number; url: string; title?: string; here?: boolean }, void];
+  /** A video's place on the player: a YouTube video given one from here,
+   *  or a VocalStack page's own share link. Null: none. */
+  'video.known': [{ url: string }, PlayerState | null];
   'dub.start': [DubStart, DubStatus];
   'dub.stop': [{ tabId: number }, void];
   'dub.status': [{ tabId: number }, DubStatus | null];

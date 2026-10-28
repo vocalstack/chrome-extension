@@ -77,13 +77,7 @@ export function jobText(job: TranscriptionJob | undefined): string {
   return job.state;
 }
 
-/** 0–100 for a progress bar, or null when it can't be told. */
-export function jobPct(job: TranscriptionJob | undefined): number | null {
-  if (!job) return null;
-  if (job.state === 'transcribing') return job.progress?.pct ?? 0;
-  if (job.state === 'fetching' && job.progress?.fetchTotalBytes) return Math.round(((job.progress.fetchedBytes ?? 0) / job.progress.fetchTotalBytes) * 100);
-  return null;
-}
+export { jobPct } from '../../lib/shared';
 
 const ordinal = (k: number) => `${k}${k % 10 === 1 && k % 100 !== 11 ? 'st' : k % 10 === 2 && k % 100 !== 12 ? 'nd' : k % 10 === 3 && k % 100 !== 13 ? 'rd' : 'th'}`;
 
