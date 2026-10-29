@@ -5,6 +5,13 @@ import { scanDocument } from '../lib/media';
 import { startOverlay } from '../content/overlay';
 import { startDubSync } from '../content/dub';
 import { startPlayerPrompt } from '../content/playerPrompt';
+import { startCaptionsPrompt } from '../content/captionsPrompt';
+import { mainVideo, visibleArea } from '../content/video';
+import type { PlayedMsg } from '../lib/sites';
+
+/** Containers ad players put their video in (Google IMA, video.js ads, and
+ *  the usual ad-slot names). */
+const AD_BOX = '.ima-ad-container,.vjs-ad-playing,.vjs-ad-loading,.ad-container,.adContainer,.ad-slot,.video-ad,[id^="google_ads"],[data-ad-slot],[aria-label="Advertisement"]';
 
 export default defineContentScript({
   matches: ['<all_urls>'],
@@ -26,21 +33,50 @@ export default defineContentScript({
     startOverlay();
     startDubSync();
     if (window.top === window && /(^|\.)youtube\.com$/.test(location.hostname)) startPlayerPrompt();
+    if (window.top === window) startCaptionsPrompt();
     // Settings → Captions on videos: tell the background when the person
-    // starts a video playing with its sound on (once per page address).
-    // Muted autoplay and hover previews do not count: no recent click or
-    // key, or no sound.
-    let told = '';
-    const audible = (v: HTMLVideoElement) => !v.paused && !v.muted && v.volume > 0 && !(Number.isFinite(v.duration) && v.duration < 20);
+    // starts a video playing with its sound on, measured for its choice
+    // (lib/sites.ts `captionPlan`): once per page address and video, so an
+    // ad played first does not use up the page's turn. Muted autoplay and
+    // hover previews do not count: no recent click or key, or no sound.
+    const told = new Set<string>();
+    /** Started by the person, its length not known yet: told once it is. */
+    const armed = new WeakSet<HTMLVideoElement>();
+    const ids = new WeakMap<HTMLVideoElement, number>();
+    let next = 0;
+    const audible = (v: HTMLVideoElement) => !v.paused && !v.muted && v.volume > 0;
+    const tell = (v: HTMLVideoElement) => {
+      armed.delete(v);
+      if (!ids.has(v)) ids.set(v, next++);
+      const key = `${location.href}|${ids.get(v)}|${v.currentSrc}`;
+      if (told.has(key) || told.size > 50) return;
+      told.add(key);
+      const src = v.currentSrc && /^https?:/.test(v.currentSrc) ? v.currentSrc : undefined;
+      const d = v.duration;
+      // Infinity (live) doesn't survive the message: `live` says it.
+      const played: PlayedMsg = {
+        frameUrl: location.href,
+        src,
+        durationS: Number.isFinite(d) ? d : undefined,
+        live: d === Infinity,
+        area: visibleArea(v) / (v.paused ? 1 : 4),
+        largest: mainVideo() === v,
+        adHint: !!v.closest(AD_BOX),
+      };
+      void chrome.runtime.sendMessage({ videoPlaying: played }).catch(() => {});
+    };
     const check = (e: Event) => {
       const v = e.target;
-      if (!(v instanceof HTMLVideoElement) || told === location.href || !audible(v)) return;
-      if (!navigator.userActivation?.isActive) return;
-      told = location.href;
-      void chrome.runtime.sendMessage({ videoPlaying: { url: location.href } }).catch(() => {});
+      if (!(v instanceof HTMLVideoElement)) return;
+      if (armed.has(v) && !Number.isNaN(v.duration) && audible(v)) { tell(v); return; }
+      if (!audible(v) || !navigator.userActivation?.isActive) return;
+      if (Number.isNaN(v.duration)) armed.add(v);
+      else tell(v);
     };
     document.addEventListener('play', check, true);
     document.addEventListener('playing', check, true);
+    document.addEventListener('loadedmetadata', check, true);
+    document.addEventListener('durationchange', check, true);
     // Unmuting a playing video (a click on its sound button) starts it too.
     document.addEventListener('volumechange', check, true);
   },

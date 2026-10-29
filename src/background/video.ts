@@ -18,6 +18,9 @@ import { scan } from './page';
 
 export interface VideoIds { transcriptionId: string; recordingId: string }
 
+/** The link check refused the address: nothing was made from it. */
+export const LINK_REFUSED = 'link_refused';
+
 const KNOWN = 'video.known';
 /** The map an earlier version kept every address in (read, not written). */
 const OLD_KNOWN = 'dub.known';
@@ -90,7 +93,7 @@ function idsFor(vs: VocalStack, key: string, req: { url: string; title?: string 
     if (!ids) {
       // Checked first, as any link (lib/linkCheck.ts): a page that isn't a recording is never sent.
       const c = await checkLink(vs, req.url);
-      if (!c.go) throw new RpcError(c.problem);
+      if (!c.go) throw new RpcError(c.problem, LINK_REFUSED);
       const t: Transcription = await vs.transcriptions.createFromUrl(req.url, { name: req.title || null });
       const rid = t.job?.recordingId ?? t.currentRecording?.recordingId ?? t.lastRecording?.recordingId;
       if (!rid) throw new RpcError('VocalStack did not start transcribing this video.');

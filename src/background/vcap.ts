@@ -5,17 +5,24 @@
  *  reading language translates the same transcription again.
  *
  *  With Settings → Captions on videos (on by default), this starts by
- *  itself when the person starts a video playing with its sound on, on a
- *  page whose video VocalStack can fetch (once per address while the
- *  browser runs). */
+ *  itself when the person starts a video playing with its sound on, for a
+ *  video VocalStack can fetch: a YouTube video, or a page's own media file
+ *  when it is the page's video (not an ad, not a small or short one), once
+ *  per address while the browser runs. Every other video (Vimeo, Twitch…,
+ *  live streams, players with no file) is captioned from the tab's sound
+ *  instead (background/tabCaptions.ts; lib/sites.ts decides). Started by
+ *  itself, its progress (but on YouTube, where content/playerPrompt.ts
+ *  shows it) and a failure show on the page (content/captionsPrompt.ts). */
 
 import { push, RpcError, type Handlers } from '../lib/rpc';
-import { userText } from '../lib/errors';
+import { GENERIC, userText } from '../lib/errors';
 import { report } from '../lib/sentry';
 import { account } from '../lib/auth';
-import { AUTO_CAPTIONS, type VcapStart, type VcapStatus } from '../lib/live';
-import { videoFrame } from './live';
-import { sleep, tabStore, transcribeVideo, videoSource, vsClient } from './video';
+import { AUTO_CAPTIONS, tabHolder, type VcapStart, type VcapStatus } from '../lib/live';
+import { captionPlan, playedOf, siteOf, type PlayedMsg } from '../lib/sites';
+import { listLive, videoFrame } from './live';
+import { LINK_REFUSED, sleep, tabStore, transcribeVideo, vsClient } from './video';
+import { autoTab, tellPage } from './tabCaptions';
 
 const AUTO_SEEN = 'vcap.autoSeen';
 interface TabCap { status: VcapStatus; frameId: number; run: number }
@@ -29,7 +36,14 @@ async function current(tabId: number, run: number): Promise<boolean> {
 }
 async function set(s: VcapStatus, run: number) {
   const ok = await store.update(s.tabId, (d) => (d && d.run === run ? [{ ...d, status: s }, true] : [d, false]));
-  if (ok) push({ push: 'vcap.status', status: s });
+  if (!ok) return;
+  push({ push: 'vcap.status', status: s });
+  // Started by itself: on the page, how far along it is (YouTube's own
+  // card says so there), then nothing once the captions show.
+  if (s.auto && s.state !== 'failed') {
+    if (s.state === 'on') tellPage(s.tabId, { ccPrompt: 'hide' });
+    else if (siteOf(s.url)?.name !== 'YouTube') tellPage(s.tabId, { ccPrompt: 'working', pct: s.progress !== undefined ? Math.round(s.progress * 100) : null });
+  }
 }
 
 /** A sentence on the video: shown `t` (`o`: as said, when `t` is its
@@ -80,7 +94,20 @@ async function start(req: VcapStart): Promise<VcapStatus> {
   const runId = Date.now();
   const first: VcapStatus = { tabId: req.tabId, lang: req.lang ?? null, url: req.url, title: req.title, state: 'transcribing', progress: 0, auto: req.auto };
   await put(req.tabId, { status: first, frameId: 0, run: runId });
-  run(req, runId).catch((e) => { report(e, 'video captions'); set({ ...first, state: 'failed', error: userText(e) }, runId); });
+  run(req, runId).catch(async (e) => {
+    // Started by itself, on an address the link check refused (nothing
+    // was made): the tab's sound instead.
+    if (req.auto && e instanceof RpcError && e.code === LINK_REFUSED && (await current(req.tabId, runId))) {
+      await put(req.tabId, null);
+      push({ push: 'vcap.gone', tabId: req.tabId });
+      const tab = await chrome.tabs.get(req.tabId).catch(() => null);
+      if (tab) await autoTab(tab, null);
+      return;
+    }
+    report(e, 'video captions');
+    await set({ ...first, state: 'failed', error: userText(e) }, runId);
+    if (req.auto && (await current(req.tabId, runId))) tellPage(req.tabId, { ccPrompt: 'failed', text: userText(e) || GENERIC });
+  });
   return first;
 }
 
@@ -92,17 +119,18 @@ async function stop(tabId: number) {
   const d = await get(tabId);
   await put(tabId, null);
   await hide(tabId, d);
+  if (d?.status.auto && d.status.state !== 'failed') tellPage(tabId, { ccPrompt: 'hide' });
   push({ push: 'vcap.gone', tabId });
 }
 
 export function registerVcap(): Handlers {
-  chrome.runtime.onMessage.addListener((m: { vcapOff?: boolean; videoPlaying?: { url: string } }, sender) => {
+  chrome.runtime.onMessage.addListener((m: { vcapOff?: boolean; videoPlaying?: PlayedMsg }, sender) => {
     const tabId = sender.tab?.id;
     if (tabId === undefined) return false;
     // × on the captions, or the tab's recording took the captions over.
     if (m?.vcapOff) void stop(tabId);
     // The person started a video with its sound on: Captions on videos.
-    if (m?.videoPlaying) void auto(sender.tab!);
+    if (m?.videoPlaying) void auto(sender.tab!, m.videoPlaying).catch((e) => report(e, 'auto captions'));
     return false;
   });
   chrome.tabs.onRemoved.addListener((tabId) => { void put(tabId, null); });
@@ -123,17 +151,19 @@ export function registerVcap(): Handlers {
   };
 }
 
-async function auto(tab: chrome.tabs.Tab) {
+async function auto(tab: chrome.tabs.Tab, played: PlayedMsg) {
   if (tab.id === undefined || !tab.url || !/^https?:/.test(tab.url)) return;
   const g = await chrome.storage.local.get([AUTO_CAPTIONS, 'readLang']);
   if (g[AUTO_CAPTIONS] === false || !(await account())) return;
+  // Captions already on this tab: from its video, or from its sound.
   if (await get(tab.id)) return;
-  // Once per address while the browser runs: turned off, it stays off.
+  const plan = captionPlan(playedOf(played, tab.url));
+  if (plan.path === 'none') return;
+  if (plan.path === 'tab') { await autoTab(tab, plan.site); return; }
+  if (tabHolder(await listLive().catch(() => []), tab.id)) return;
+  // Once per video address while the browser runs: turned off, it stays off.
   const seen = ((await chrome.storage.session.get(AUTO_SEEN))[AUTO_SEEN] as string[] | undefined) ?? [];
-  if (seen.includes(tab.url)) return;
-  // Only a video VocalStack can fetch: never the page's address instead.
-  const url = await videoSource(tab.id, tab.url, true);
-  if (!url) return;
-  await chrome.storage.session.set({ [AUTO_SEEN]: [...seen.slice(-200), tab.url] });
-  await start({ tabId: tab.id, url, title: tab.title, lang: (g.readLang as string) || null, auto: true });
+  if (seen.includes(plan.url)) return;
+  await chrome.storage.session.set({ [AUTO_SEEN]: [...seen.slice(-200), plan.url] });
+  await start({ tabId: tab.id, url: plan.url, title: tab.title, lang: (g.readLang as string) || null, auto: true });
 }

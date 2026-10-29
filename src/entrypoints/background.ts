@@ -9,6 +9,7 @@ import { registerPage } from '../background/page';
 import { anyRunning, markInvoked, registerLive } from '../background/live';
 import { registerDub } from '../background/dub';
 import { registerVcap } from '../background/vcap';
+import { registerTabCaptions, takeOffer } from '../background/tabCaptions';
 import { registerVideo } from '../background/video';
 import { registerMeetings } from '../background/meetings';
 import { showInPanel } from '../background/panel';
@@ -22,8 +23,11 @@ export default defineBackground(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
   chrome.action.onClicked.addListener((tab) => {
     if (tab.windowId !== undefined) chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => {});
-    void markInvoked(tab);
+    // Captions offered on this tab's video (Captions on videos): that's
+    // the click they asked for.
+    void markInvoked(tab).then(() => takeOffer(tab));
   });
+  registerTabCaptions();
 
   const signedIn = async (a: auth.Account | null) => {
     push({ push: 'auth.changed', account: a });
