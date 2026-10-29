@@ -100,7 +100,7 @@ The listing lives in [Partner Center](https://partner.microsoft.com/dashboard/mi
 
 The Edge item has its own extension id, `gdcnchohpgbnnakmhlcbcdkpnoadhjpa`: Edge Add-ons doesn't take the private key. The API trusts it as an Origin and a sign-in redirect alongside Chrome's (transcribe: `src/domain/auth.rs`, `EXTENSION_ORIGINS`). The unpacked Edge build keeps Chrome's id, from the manifest's `key`.
 
-API access: Partner Center → Microsoft Edge → **Publish API** → Create API credentials (v1.1, "the new experience"). It shows a client id and an API key; the key expires, and the page says when. Set the repository secrets:
+API access: Partner Center → Microsoft Edge → **Publish API** → Create API credentials (v1.1, "the new experience"). It shows a client id and an API key; the key expires, and the page says when (Key_1, set 2026-10-29: expires 2027-01-09). A new key there, then `gh secret set EDGE_API_KEY`. Set the repository secrets:
 
 ```sh
 gh secret set EDGE_PRODUCT_ID -R vocalstack/chrome-extension --body 02f54177-1434-456d-b506-4e7d79ae3bcd
