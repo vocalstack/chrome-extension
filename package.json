@@ -14,7 +14,8 @@
     "test": "node --test --experimental-strip-types src/lib/*.test.ts",
     "postinstall": "wxt prepare",
     "package": "scripts/package.sh",
-    "publish:webstore": "VS_WEBSTORE=1 scripts/package.sh && node scripts/publish-webstore.mjs"
+    "publish:webstore": "VS_WEBSTORE=1 scripts/package.sh && node scripts/publish-webstore.mjs",
+    "publish:edge": "VS_WEBSTORE=1 scripts/package.sh && node scripts/publish-edge.mjs"
   },
   "dependencies": {
     "@fontsource/inter": "^5.3.0",

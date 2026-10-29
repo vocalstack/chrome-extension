@@ -4,10 +4,12 @@
 #   output/chrome, output/edge              load unpacked from these folders
 #   output/vocalstack-chrome.zip, -edge.zip the same, zipped (folder inside)
 #
-#   VS_WEBSTORE=1 scripts/package.sh        the Chrome Web Store build instead:
+#   VS_WEBSTORE=1 scripts/package.sh        the store builds instead (no `key`
+#                                           in the manifest): Chrome Web Store,
 #                                           output/store/chrome and
-#                                           output/vocalstack-webstore.zip
-#                                           (no `key` in the manifest)
+#                                           output/vocalstack-webstore.zip;
+#                                           Edge Add-ons, output/store/edge and
+#                                           output/vocalstack-edge-store.zip
 #
 # VS_VERSION sets the manifest version; unset, CI's scheme is used when
 # the history is there: <package.json major.minor>.<commits on HEAD>.
@@ -31,10 +33,12 @@ zipdir() { # zipdir <dir> <zip> <name inside>
 
 if [ "${VS_WEBSTORE:-}" = 1 ]; then
   npx wxt build
-  # The store wants manifest.json at the zip's root.
-  rm -f output/vocalstack-webstore.zip
+  npx wxt build -b edge
+  # The stores want manifest.json at the zip's root.
+  rm -f output/vocalstack-webstore.zip output/vocalstack-edge-store.zip
   (cd output/store/chrome && zip -qr -X ../../vocalstack-webstore.zip .)
-  echo "[package] output/vocalstack-webstore.zip"
+  (cd output/store/edge && zip -qr -X ../../vocalstack-edge-store.zip .)
+  echo "[package] output/vocalstack-webstore.zip output/vocalstack-edge-store.zip"
   exit 0
 fi
 

@@ -1,0 +1,68 @@
+# Publishes the extension to Edge Add-ons. Every release does it: build.yml
+# calls this once a version tag's build and release succeed, and submits it
+# for Microsoft's review. It can also run by hand (Actions → publish-edge →
+# Run workflow), for a draft. Setup: PUBLISHING.md.
+#
+# The PUBLISH_EXTENSION repo variable set to "false"
+# (`gh variable set PUBLISH_EXTENSION --body false`) pauses publishing with
+# no code change.
+name: publish-edge
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Submit for review after the upload (off uploads a draft only)
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      publish:
+        type: boolean
+        default: true
+    secrets:
+      EDGE_PRODUCT_ID:
+      EDGE_CLIENT_ID:
+      EDGE_API_KEY:
+
+# Never two uploads to the same store item at once.
+concurrency:
+  group: publish-edge
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run check
+
+      - name: build, upload, submit
+        env:
+          EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+          EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+          EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
+          EDGE_PUBLISH: ${{ inputs.publish }}
+          PUBLISH_EXTENSION: ${{ vars.PUBLISH_EXTENSION }}
+          # A release expects the store to get it: missing credentials fail.
+          EDGE_REQUIRED: ${{ github.event_name != 'workflow_dispatch' }}
+        run: npm run publish:edge
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: vocalstack-edge-store
+          path: output/vocalstack-edge-store.zip
+          if-no-files-found: error

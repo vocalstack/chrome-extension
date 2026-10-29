@@ -1,12 +1,13 @@
 # Publishing
 
-Three ways out of this repo:
+Four ways out of this repo:
 
 | What | How | Status |
 |---|---|---|
 | Unpacked builds (Chrome, Edge) | `.github/workflows/build.yml` on every push to main: run artifacts, and the `unpacked` pre-release (every main build) | live |
 | Releases | a version tag: `.github/workflows/build.yml` makes that version's release (GitHub's Latest) and moves the `latest` release to it; vocalstack.com serves `latest` | live |
-| Chrome Web Store | every release: `build.yml`'s webstore job runs `.github/workflows/publish-webstore.yml` (`scripts/publish-webstore.mjs`); also by hand | live once the API secrets are set |
+| Chrome Web Store | every release: `build.yml`'s webstore job runs `.github/workflows/publish-webstore.yml` (`scripts/publish-webstore.mjs`); also by hand | live |
+| Edge Add-ons | every release: `build.yml`'s edge job runs `.github/workflows/publish-edge.yml` (`scripts/publish-edge.mjs`); also by hand | live once the API secrets are set |
 
 ## Releasing a version
 
@@ -24,7 +25,7 @@ The tag's build checks the tag matches the build's version, then publishes the r
 
 vocalstack.com/downloads/vocalstack-chrome.zip and -edge.zip redirect to these links (vocalstack/transcribe `scripts/website_vercel.sh`), so the website offers a new version as soon as its release is out, with no deploy.
 
-Once the release is out, the same run uploads the version to the Chrome Web Store and submits it for everyone (the `webstore` job). Google reviews it before users get it.
+Once the release is out, the same run uploads the version to the Chrome Web Store and to Edge Add-ons and submits it for everyone (the `webstore` and `edge` jobs). Google and Microsoft each review it before users get it.
 
 ## Unpacked
 
@@ -93,6 +94,26 @@ A run by hand without credentials is skipped, and stays green. If the same versi
 
 To pause publishing with no code change, run `gh variable set PUBLISH_EXTENSION --body false`; delete the variable to resume.
 
-## Edge Add-ons
+## Edge Add-ons: one-time setup
 
-Not wired yet. Until it is, the Edge build loads unpacked as above. The Microsoft Partner Center has its own publish API, for when that store is wanted.
+The listing lives in [Partner Center](https://partner.microsoft.com/dashboard/microsoftedge/) (product id `02f54177-1434-456d-b506-4e7d79ae3bcd`, store page https://microsoftedge.microsoft.com/addons/detail/gdcnchohpgbnnakmhlcbcdkpnoadhjpa). Its first version, 0.1.33, went up by hand.
+
+The Edge item has its own extension id, `gdcnchohpgbnnakmhlcbcdkpnoadhjpa`: Edge Add-ons doesn't take the private key. The API trusts it as an Origin and a sign-in redirect alongside Chrome's (transcribe: `src/domain/auth.rs`, `EXTENSION_ORIGINS`). The unpacked Edge build keeps Chrome's id, from the manifest's `key`.
+
+API access: Partner Center → Microsoft Edge → **Publish API** → Create API credentials (v1.1, "the new experience"). It shows a client id and an API key; the key expires, and the page says when. Set the repository secrets:
+
+```sh
+gh secret set EDGE_PRODUCT_ID -R vocalstack/chrome-extension --body 02f54177-1434-456d-b506-4e7d79ae3bcd
+gh secret set EDGE_CLIENT_ID  -R vocalstack/chrome-extension
+gh secret set EDGE_API_KEY    -R vocalstack/chrome-extension
+```
+
+For local runs (`npm run publish:edge`), the same names can go in `.env.local`.
+
+## Edge Add-ons: publishing
+
+Every release publishes: after a version tag's build and release succeed, `build.yml` runs `publish-edge.yml`, which uploads `output/vocalstack-edge-store.zip` (`VS_WEBSTORE=1 scripts/package.sh`: the Edge build without `key`) as the draft and submits it. Microsoft's review takes up to a few days. Missing credentials, or an expired API key, fail that job (the release itself is already out). If the previous version is still in review, the job stays green and its summary says so.
+
+By hand: Actions → **publish-edge** → Run workflow. With Submit off (the default) it uploads a draft only, to submit from Partner Center.
+
+`PUBLISH_EXTENSION=false` pauses this one too.
