@@ -54,7 +54,7 @@ export function Settings({ account }: { account: Account; env: Env | null; onBac
   const initials = account.name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('') || 'VS';
   const isKey = account.via === 'key';
   const prefs: { label: string; sub: string; on: boolean; set: (v: boolean) => void }[] = [
-    { label: 'Captions on videos', sub: 'Turn captions on by themselves on every video you play. Each one is transcribed and uses credit.', on: autoCaptions, set: (v) => { setAutoCaptions(v); void chrome.storage.local.set({ [AUTO_CAPTIONS]: v }); } },
+    { label: 'Captions on videos', sub: 'Turn captions on by themselves on every video you play with sound. Where Chrome asks first (Vimeo, Twitch and others), one click on the VocalStack icon turns them on. Uses credit.', on: autoCaptions, set: (v) => { setAutoCaptions(v); void chrome.storage.local.set({ [AUTO_CAPTIONS]: v }); } },
     { label: 'Read-ahead debug', sub: 'On YouTube, show over the video how far ahead of it the buffer, the audio sent and the transcript are, and how early each line came back.', on: aheadDebug, set: (v) => { setAheadDebug(v); void chrome.storage.local.set({ [AHEAD_DEBUG]: v }); } },
     { label: 'Offer to record meetings', sub: 'Offer to record when you join a call in a supported meeting app. Click the notification to open this panel.', on: offerMeetings, set: (v) => { setOfferMeetings(v); void chrome.storage.local.set({ [OFFER_KEY]: v }); } },
   ];

@@ -10,14 +10,14 @@ import type { Transcription } from '@vocalstack/contract';
 import { accessToken } from '../lib/auth';
 import { currentEnv } from '../lib/env';
 import { RpcError, type Handlers } from '../lib/rpc';
-import { MEDIA_PAGE } from '../lib/media';
 import { videoIdOf } from '../lib/ahead';
 import { checkLink } from '../lib/linkCheck';
-import { playerFile } from '../lib/embedFiles';
 import { envOfPage, isOwn, playerState, shareCode, sharedJob, type PlayerState } from '../lib/shared';
-import { scan } from './page';
 
 export interface VideoIds { transcriptionId: string; recordingId: string }
+
+/** The link check refused the address: nothing was made from it. */
+export const LINK_REFUSED = 'link_refused';
 
 const KNOWN = 'video.known';
 /** The map an earlier version kept every address in (read, not written). */
@@ -91,9 +91,10 @@ function idsFor(vs: VocalStack, key: string, req: { url: string; title?: string 
     if (!ids) {
       // Checked first, as any link (lib/linkCheck.ts): a page that isn't a recording is never sent.
       const c = await checkLink(vs, req.url);
-      if (!c.go) throw new RpcError(c.problem);
-      // A live stream has no whole file to fetch: never a job that can only fail.
-      if (c.live) throw new RpcError('This is a live stream. Use Live Transcription to transcribe it as it plays.');
+      if (!c.go) throw new RpcError(c.problem, LINK_REFUSED);
+      // A live stream has no whole file to fetch: never a job that can only
+      // fail (captions take the tab's sound instead, as for any refusal).
+      if (c.live) throw new RpcError('This is a live stream. Use Live Transcription to transcribe it as it plays.', LINK_REFUSED);
       const t: Transcription = await vs.transcriptions.createFromUrl(req.url, { name: req.title || null });
       const rid = t.job?.recordingId ?? t.currentRecording?.recordingId ?? t.lastRecording?.recordingId;
       if (!rid) throw new RpcError('VocalStack did not start transcribing this video.');
@@ -235,22 +236,6 @@ export function registerVideo(): Handlers {
     },
     'video.known': ({ url }) => playerOf(url),
   };
-}
-
-/** What VocalStack transcribes for a tab's video: the main video's own
- *  file, an embedded player's (a known video page's address, or the file
- *  the browser finds in the player: lib/embedFiles.ts), or the page when
- *  it is a known media page (YouTube, Vimeo…). `strict`: nothing else
- *  (auto-captions: never an address the server would have to search);
- *  else the page address as a last try (the server says if it can't). */
-export async function videoSource(tabId: number, pageUrl: string, strict: boolean): Promise<string | null> {
-  const found = await scan(tabId).catch(() => null);
-  const media = found?.media ?? [];
-  const by = (k: string) => media.filter((m) => m.kind === k && !m.streamOnly).sort((a, b) => Number(!!b.playing) - Number(!!a.playing) || (b.durationS ?? 0) - (a.durationS ?? 0));
-  const page = MEDIA_PAGE.test(pageUrl) ? pageUrl : null;
-  const embed = by('embed')[0];
-  const fromEmbed = !embed ? null : MEDIA_PAGE.test(embed.url) ? embed.url : ((await playerFile(embed.url))?.url ?? (strict ? null : embed.url));
-  return by('video')[0]?.url ?? fromEmbed ?? page ?? (strict ? null : pageUrl);
 }
 
 /** Per-tab state in session storage (it outlives the sleeping worker):
