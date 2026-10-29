@@ -212,6 +212,27 @@ export const KIND_LABEL: Record<MediaKind, string> = {
   page: 'This page',
 };
 
+/** Twitch and Kick pages that aren't a channel: the site's own sections. */
+const NOT_CHANNEL = '(?:directory|browse|search|settings|subscriptions|inventory|wallet|drops|downloads|jobs|p|store|turbo|prime|friends|messages|following|videos|categories|category|login|signup|dashboard|u|team|moderator|popout|embed|help|privacy|terms|community-guidelines|dmca)';
+
 /** Pages that are one recording: probing them is a plain check, not a
- *  search of the page (which the server counts by the hour). */
-export const MEDIA_PAGE = /^https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch|live|shorts)|youtu\.be\/|vimeo\.com\/\d|soundcloud\.com\/[^/]+\/[^/]+|open\.spotify\.com\/(?:episode|show)\/|dailymotion\.com\/video\/|twitch\.tv\/|kick\.com\/|loom\.com\/share\/)/i;
+ *  search of the page (which the server counts by the hour). A channel,
+ *  playlist, listing or a site's home page is not one. */
+export const MEDIA_PAGE = new RegExp([
+  // YouTube, YouTube Music: a video, a live, a Short.
+  String.raw`^https?:\/\/(?:www\.|m\.|music\.)?youtube\.com\/(?:watch\?|live\/[\w-]|shorts\/[\w-])`,
+  String.raw`^https?:\/\/youtu\.be\/[\w-]`,
+  // Vimeo: a video, also in a channel, showcase or group, and its player.
+  String.raw`^https?:\/\/(?:www\.)?vimeo\.com\/(?:\d+|channels\/[^/]+\/\d+|showcase\/\d+\/video\/\d+|groups\/[^/]+\/videos\/\d+)(?:[/?#]|$)`,
+  String.raw`^https?:\/\/player\.vimeo\.com\/video\/\d+`,
+  // SoundCloud: a track or a set, not a person's lists or the site's pages.
+  String.raw`^https?:\/\/(?:www\.|m\.)?soundcloud\.com\/(?!(?:discover|search|stream|you|charts|upload|settings|messages|notifications|pages|terms-of-use|feed)(?:[/?#]|$))[^/?#]+\/(?!(?:likes|followers|following|reposts|albums|tracks|popular-tracks|comments|spotlight)(?:[/?#]|$))[^/?#]+`,
+  String.raw`^https?:\/\/open\.spotify\.com\/(?:episode|show)\/`,
+  String.raw`^https?:\/\/(?:www\.)?dailymotion\.com\/video\/`,
+  // Twitch: a channel (live), a past broadcast, a clip.
+  String.raw`^https?:\/\/(?:www\.|m\.)?twitch\.tv\/(?:videos\/\d+|(?!${NOT_CHANNEL}(?:[/?#]|$))\w+(?:\/(?:clip\/[\w-]+|video\/\d+))?(?:[?#]|\/?$))`,
+  String.raw`^https?:\/\/clips\.twitch\.tv\/[\w-]+`,
+  // Kick: a channel (live), its past broadcasts and clips.
+  String.raw`^https?:\/\/(?:www\.)?kick\.com\/(?!${NOT_CHANNEL}(?:[/?#]|$))[\w-]+(?:\/(?:videos|clips)\/[\w-]+)?(?:[?#]|\/?$)`,
+  String.raw`^https?:\/\/(?:www\.)?loom\.com\/share\/`,
+].join('|'), 'i');

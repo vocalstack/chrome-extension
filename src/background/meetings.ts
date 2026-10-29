@@ -5,7 +5,7 @@
  *  the extension on the tab. Settings → "Offer to record meetings". */
 
 import type { Handlers } from '../lib/rpc';
-import { meetingOf, OFFER_KEY } from '../lib/live';
+import { inMeeting, meetingOf, OFFER_KEY } from '../lib/live';
 import { showInPanel } from './panel';
 
 const OFFERED = 'meetings.offered';
@@ -22,9 +22,11 @@ async function onTab(tabId: number, url: string | undefined, title: string | und
     return;
   }
   await chrome.action.setTitle({ tabId, title: `VocalStack: record this ${name} meeting` }).catch(() => {});
-  if (!(await offering())) return;
-  // Once per meeting, across service-worker restarts.
-  const key = `${tabId}:${new URL(url!).pathname}`;
+  // Offered only once a meeting is on: not the app's chat or calendar.
+  if (!inMeeting(url, title) || !(await offering())) return;
+  // Once per meeting, across service-worker restarts (Teams: one address
+  // for every call, so the meeting's name tells them apart).
+  const key = `${tabId}:${new URL(url!).pathname}:${title ?? ''}`;
   const g = await chrome.storage.session.get(OFFERED);
   const offered = (g[OFFERED] as string[] | undefined) ?? [];
   if (offered.includes(key)) return;
@@ -41,7 +43,8 @@ async function onTab(tabId: number, url: string | undefined, title: string | und
 
 export function registerMeetings(): Handlers {
   chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
-    if (info.status === 'complete' || info.url) void onTab(tabId, tab.url, tab.title);
+    // A call starting in Teams changes the tab's title, not its address.
+    if (info.status === 'complete' || info.url || info.title) void onTab(tabId, tab.url, tab.title);
   });
   const open = async (id: string) => {
     if (!id.startsWith('meeting:')) return;

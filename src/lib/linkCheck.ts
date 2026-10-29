@@ -27,14 +27,17 @@ export function verdictOf(p: LinkProbe): Checked {
   return { go: false, problem: said ? said[0]!.toUpperCase() + said.slice(1) : CANT_FETCH, media: [] };
 }
 
-/** Checked once per address while the page (panel or worker) lives; a
- *  failed check is asked again next time. */
+/** Checked once per address while the page (panel or worker) lives, as
+ *  the dashboard keeps them: only answers that worked (a file, a live
+ *  stream, a page's recordings). A refusal may pass (a link that didn't
+ *  answer in time) and is asked again next time; meanwhile the one
+ *  question is shared. */
 const checks = new Map<string, Promise<LinkProbe>>();
 export function probeOnce(vs: { transcriptions: { probe(url: string): Promise<LinkProbe> } }, url: string): Promise<LinkProbe> {
   let p = checks.get(url);
   if (!p) {
     p = vs.transcriptions.probe(url);
-    p.catch(() => checks.delete(url));
+    p.then((r) => { if (!(r.ok || r.kind === 'live' || r.media?.length)) checks.delete(url); }, () => checks.delete(url));
     checks.set(url, p);
   }
   return p;

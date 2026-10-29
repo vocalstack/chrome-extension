@@ -143,10 +143,12 @@ export interface VcapStatus {
 /** Meetings the extension offers to record: the tab's address says so.
  *  `key` names the service's logo (styles/meetings/<key>.svg). */
 export type MeetingKey = 'meet' | 'teams' | 'zoom' | 'webex' | 'whereby' | 'gather' | 'discord';
-export const MEETING_HOSTS: { re: RegExp; name: string; key: MeetingKey }[] = [
+export const MEETING_HOSTS: { re: RegExp; name: string; key: MeetingKey; app?: true }[] = [
   { re: /^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}/i, name: 'Google Meet', key: 'meet' },
-  { re: /^https:\/\/teams\.(microsoft|live)\.com\//i, name: 'Microsoft Teams', key: 'teams' },
-  { re: /^https:\/\/([\w-]+\.)?zoom\.us\/(wc|j)\//i, name: 'Zoom', key: 'zoom' },
+  // The whole Teams app: chat, calendar and calls share one address (/v2/).
+  { re: /^https:\/\/teams\.(?:(?:microsoft|live)\.com|cloud\.microsoft)\//i, name: 'Microsoft Teams', key: 'teams', app: true },
+  // The web client (/wc/); /j/ only hands the meeting to the Zoom app.
+  { re: /^https:\/\/([\w-]+\.)?zoom\.us\/wc\//i, name: 'Zoom', key: 'zoom' },
   { re: /^https:\/\/app\.zoom\.us\/wc\//i, name: 'Zoom', key: 'zoom' },
   { re: /^https:\/\/([\w-]+\.)?webex\.com\/(meet|wbxmjs|webappng)/i, name: 'Webex', key: 'webex' },
   { re: /^https:\/\/whereby\.com\/[\w-]+/i, name: 'Whereby', key: 'whereby' },
@@ -183,7 +185,22 @@ export function meetingOf(url: string | undefined): string | null {
   return meetingHost(url)?.name ?? null;
 }
 
-export function meetingHost(url: string | undefined): { name: string; key: MeetingKey } | null {
+/** A meeting app's own pages that are a meeting: its join links, and the
+ *  call itself, whose tab is named after the meeting rather than one of
+ *  the app's sections (Teams: "Chat | Ana | Microsoft Teams"). */
+const MEETING_PATH = /\/(?:l\/meetup-join|meet|light-meetings|_#\/pre-join-calling|dl\/launcher)\/|[?&#](?:meetingjoin|meetingId)=/i;
+const APP_SECTION = /^(?:\(\d+\)\s*)?(?:Chat|Activity|Calendar|Teams|Files|Apps|Calls|OneDrive|Assignments|Search|Settings|Communities|Copilot|Planner|Approvals|Shifts|Microsoft Teams)\b/i;
+
+/** Is a meeting going on in this tab? Not the meeting app's other pages
+ *  (Teams' chat), which are still offered for recording on Now. */
+export function inMeeting(url: string | undefined, title: string | undefined): boolean {
+  const m = meetingHost(url);
+  if (!m) return false;
+  if (!m.app) return true;
+  return MEETING_PATH.test(url!) || (!!title?.trim() && !APP_SECTION.test(title.trim()));
+}
+
+export function meetingHost(url: string | undefined): { name: string; key: MeetingKey; app?: true } | null {
   if (!url) return null;
   return MEETING_HOSTS.find((m) => m.re.test(url)) ?? null;
 }

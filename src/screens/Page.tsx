@@ -23,7 +23,7 @@ import type { Account } from '../lib/auth';
 import { isOwn, type PlayerState } from '../lib/shared';
 import { videoIdOf } from '../lib/ahead';
 import { can, whyNot } from '../lib/access';
-import { capturable, isRunning, meetingHost, tabHolder, type LiveStatus } from '../lib/live';
+import { capturable, inMeeting, isRunning, meetingHost, tabHolder, type LiveStatus } from '../lib/live';
 import { AccessNote, ProblemNote } from '../ui/access';
 import { client } from '../lib/client';
 import { checkLink, probeOnce } from '../lib/linkCheck';
@@ -131,14 +131,22 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
     let windowId: number | undefined;
     chrome.windows.getCurrent().then((w) => { windowId = w.id; }, () => {});
     const activated = (a: { tabId: number; windowId: number }) => { if (windowId === undefined || a.windowId === windowId) void rescan(); };
-    const updated = (tabId: number, info: { status?: string }) => { if (tabId === tabRef.current && info.status === 'complete') void rescan(); };
+    // A site that changes page without loading one (YouTube, TikTok,
+    // Coursera) changes the tab's address or title: read it again then too,
+    // once it settles, so the title (the transcription's name) is the new one.
+    let soon = 0;
+    const updated = (tabId: number, info: { status?: string; url?: string; title?: string }) => {
+      if (tabId !== tabRef.current || !(info.status === 'complete' || info.url || info.title)) return;
+      clearTimeout(soon);
+      soon = window.setTimeout(() => void rescan(), info.status === 'complete' ? 0 : 600);
+    };
     // The design has no Scan again button: media a page adds after it
     // loaded is found when the person comes back to the panel.
     const focused = () => void rescan();
     chrome.tabs.onActivated.addListener(activated);
     chrome.tabs.onUpdated.addListener(updated);
     window.addEventListener('focus', focused);
-    return () => { chrome.tabs.onActivated.removeListener(activated); chrome.tabs.onUpdated.removeListener(updated); window.removeEventListener('focus', focused); };
+    return () => { clearTimeout(soon); chrome.tabs.onActivated.removeListener(activated); chrome.tabs.onUpdated.removeListener(updated); window.removeEventListener('focus', focused); };
   }, [rescan]);
 
   // A context-menu click: that address on top, ready to go.
@@ -149,7 +157,8 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   }, [intent?.at]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const runProbe = useCallback((url: string) => {
-    setProbed((p) => (p[url]?.state === 'done' ? p : { ...p, [url]: { state: 'loading' } }));
+    // An answer that worked stays shown; a refusal asked again shows it is.
+    setProbed((p) => { const x = p[url]; return x?.state === 'done' && (x.probe.ok || x.probe.media?.length) ? p : { ...p, [url]: { state: 'loading' } }; });
     probe(url).then(
       (r) => setProbed((p) => ({ ...p, [url]: { state: 'done', probe: r } })),
       (e) => setProbed((p) => ({ ...p, [url]: { state: 'error', text: problemOf(e).text } })),
@@ -263,7 +272,7 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
               <i className={`site__dot${recording ? ' site__dot--rec' : ''}`} style={recording ? undefined : { background: videoPage ? 'var(--live)' : 'var(--ink-45)' }} />
               <span className="site__app">{recording ? 'Recording' : meeting ? meeting.name : isYouTube(scan.url) ? 'YouTube' : own ? 'VocalStack' : 'Web page'}</span>
               <span className="site__sep">·</span>
-              <span className="site__host">{recording ? 'Go to Live' : meeting ? 'Meeting in progress' : host(scan.url)}</span>
+              <span className="site__host">{recording ? 'Go to Live' : meeting ? (inMeeting(scan.url, scan.title) ? 'Meeting in progress' : host(scan.url)) : host(scan.url)}</span>
             </div>
           )}
         </div>
@@ -628,7 +637,7 @@ function FoundRow({ r, page, probe: p, player, selectable, ticked, started, onTo
   if (p?.state === 'loading') foot = <><span className="spin" />Checking…</>;
   else if (p?.state === 'error') foot = <span className="pg-bad">{p.text}</span>;
   else if (v && !v.ok && v.media?.length) foot = <span>{v.media.length === 1 ? 'One recording found on it, listed below.' : `${v.media.length} recordings found on it, listed below.`}</span>;
-  else if (v && !v.ok && !r.streamOnly) foot = <span className="pg-bad">{v.problem || 'VocalStack can’t fetch this.'}</span>;
+  else if (v && !v.ok && !r.streamOnly) foot = <><span className="pg-bad">{v.problem || 'VocalStack can’t fetch this.'}</span><button type="button" className="pg-link" onClick={onProbe}>Check again</button></>;
   else if (!p && player === 'loading') foot = <><span className="spin" />Looking in the player…</>;
   else if (!p && player) foot = <span>Its recording is listed below.</span>;
   else if (!p && player === null) foot = <><span>VocalStack can search this player for its recording.</span><button type="button" className="pg-link" onClick={onProbe}>Find recordings</button></>;

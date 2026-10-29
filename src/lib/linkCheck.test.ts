@@ -31,16 +31,28 @@ test('an answer without ok (an older API) takes the address', () => {
   assert.deepEqual(verdictOf({ kind: 'unknown', source: 'web' } as unknown as Parameters<typeof verdictOf>[0]), { go: true, live: false });
 });
 
-test('checked once per address; a failed check is asked again', async () => {
+test('an answer that worked is kept; a refusal or a failure is asked again', async () => {
   let n = 0;
   const vs = { transcriptions: { probe: async (u: string) => { n++; if (u.endsWith('x')) throw new Error('offline'); return probe({ problem: 'Not a recording.' }); } } };
+  // A refusal is asked again (it may have been a moment's failure)…
   assert.equal((await checkLink(vs, LOOM)).go, false);
   assert.equal((await checkLink(vs, LOOM)).go, false);
+  assert.equal(n, 2);
+  // …an answer that worked is not.
+  const ok = { transcriptions: { probe: async () => { n++; return probe({ kind: 'file', ok: true }); } } };
+  n = 0;
+  await checkLink(ok, 'https://cdn.example.com/a.mp3');
+  await checkLink(ok, 'https://cdn.example.com/a.mp3');
+  assert.equal(n, 1);
+  // Asked together: one question.
+  n = 0;
+  await Promise.all([checkLink(vs, `${LOOM}?2`), checkLink(vs, `${LOOM}?2`)]);
   assert.equal(n, 1);
   // No answer: taken as it is (as the dashboard does).
+  n = 0;
   assert.deepEqual(await checkLink(vs, `${LOOM}x`), { go: true, live: false });
   await checkLink(vs, `${LOOM}x`);
-  assert.equal(n, 3);
+  assert.equal(n, 2);
 });
 
 test('an address the server refuses to check is refused, its error passed on', async () => {

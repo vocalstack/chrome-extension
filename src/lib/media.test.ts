@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { isRecordingUrl, loadedMedia, mediaInPage } from './media.ts';
+import { MEDIA_PAGE, isRecordingUrl, loadedMedia, mediaInPage } from './media.ts';
 
 test('a recording by its address: media, not a segment, not an ad', () => {
   assert.equal(isRecordingUrl('https://cdn.example.com/talk.mp4'), true);
@@ -54,4 +54,27 @@ test('a real Wistia embed page, when saved beside the tests', { skip: !process.e
   const got = mediaInPage(fs.readFileSync(process.env.WISTIA_HTML!, 'utf8'), 'https://fast.wistia.net/embed/iframe/e4a27b971d');
   assert.ok(got.length > 0);
   assert.match(got[0]!.url, /^https:\/\/embed-ssl\.wistia\.com\/deliveries\/\w+\.bin$/);
+});
+
+test('a page that is one recording, and the site pages that are not', () => {
+  const yes = [
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'https://m.youtube.com/watch?v=dQw4w9WgXcQ', 'https://music.youtube.com/watch?v=dQw4w9WgXcQ&list=RD',
+    'https://www.youtube.com/shorts/abcDEF12345', 'https://www.youtube.com/live/abcDEF12345', 'https://youtu.be/dQw4w9WgXcQ',
+    'https://vimeo.com/76979871', 'https://vimeo.com/channels/staffpicks/76979871', 'https://vimeo.com/showcase/123/video/456', 'https://vimeo.com/groups/x/videos/456', 'https://player.vimeo.com/video/76979871',
+    'https://soundcloud.com/artist/track-name', 'https://soundcloud.com/artist/sets/an-album',
+    'https://open.spotify.com/episode/abc', 'https://www.dailymotion.com/video/x8abc',
+    'https://www.twitch.tv/shroud', 'https://www.twitch.tv/shroud/', 'https://www.twitch.tv/videos/123456', 'https://www.twitch.tv/shroud/clip/Funny-Clip-abc', 'https://clips.twitch.tv/Funny-Clip-abc',
+    'https://kick.com/xqc', 'https://kick.com/xqc/videos/1a2b-3c', 'https://kick.com/xqc/clips/clip_01',
+    'https://www.loom.com/share/ce8ee1c8901649e1a79c421e9c3fcfc5',
+  ];
+  const no = [
+    'https://www.youtube.com/', 'https://music.youtube.com/', 'https://www.youtube.com/@channel', 'https://www.youtube.com/results?search_query=x', 'https://www.youtube.com/playlist?list=PL1',
+    'https://vimeo.com/', 'https://vimeo.com/channels/staffpicks', 'https://vimeo.com/showcase/123',
+    'https://soundcloud.com/', 'https://soundcloud.com/discover/sets/charts-top', 'https://soundcloud.com/artist', 'https://soundcloud.com/artist/likes', 'https://soundcloud.com/artist/tracks',
+    'https://www.twitch.tv/', 'https://www.twitch.tv/directory', 'https://www.twitch.tv/directory/category/just-chatting', 'https://www.twitch.tv/shroud/videos', 'https://www.twitch.tv/search?term=x', 'https://www.twitch.tv/settings/profile',
+    'https://kick.com/', 'https://kick.com/browse', 'https://kick.com/categories/irl', 'https://kick.com/category/irl', 'https://kick.com/search?q=x', 'https://kick.com/following',
+    'https://www.loom.com/', 'https://example.com/watch?v=1',
+  ];
+  for (const u of yes) assert.equal(MEDIA_PAGE.test(u), true, u);
+  for (const u of no) assert.equal(MEDIA_PAGE.test(u), false, u);
 });
