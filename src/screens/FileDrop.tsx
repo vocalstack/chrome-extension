@@ -13,7 +13,7 @@ import { can, whyNot } from '../lib/access';
 import { rpc, RpcError } from '../lib/rpc';
 import { IconBtn, openApp } from '../ui/kit';
 import { IconAlert, IconCheck, IconClose, IconExternal, IconUpload } from '../ui/icons';
-import { checkLink } from '../lib/linkCheck';
+import { advised, checkLink } from '../lib/linkCheck';
 import { problemOf } from './page/errors';
 import { created, jobPct, jobText, patch, track, useTracked, type Tracked } from './page/tracker';
 import { txPath } from '../background/page/paths';
@@ -107,7 +107,7 @@ export async function transcribeLinks(links: Link[], opts: UploadOptions = {}, o
     try {
       const c = await checkLink(vs, l.url);
       if (!c.go) {
-        patch(key, { phase: 'error', problem: { text: c.media.length ? `${c.problem} Pick one from Now on that page.` : c.problem } });
+        patch(key, { phase: 'error', problem: { text: c.media.length ? `${c.problem} Pick one from Now on that page.` : advised(c) } });
         return;
       }
       if (l.live || c.live) {

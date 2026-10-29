@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CANT_FETCH, checkLink, verdictOf } from './linkCheck.ts';
+import { CANT_FETCH, advised, checkLink, verdictOf } from './linkCheck.ts';
 
 const LOOM = 'https://www.loom.com/share/ce8ee1c8901649e1a79c421e9c3fcfc5';
 const probe = (p: object) => ({ kind: 'unknown', source: 'web', ok: false, ...p }) as Parameters<typeof verdictOf>[0];
@@ -67,3 +67,14 @@ test('the server’s sentence starts with a capital', () => {
   assert.match(v.go ? '' : v.problem, /^The link is a web page/);
 });
 
+
+test('the server says what is wrong; the extension what to do, by its reason', () => {
+  const r = (problem: string, reason?: string) => verdictOf(probe({ problem, ...(reason ? { reason } : {}) })) as Parameters<typeof advised>[0];
+  assert.equal(advised(r('VocalStack can’t fetch from Vimeo.', 'site_not_fetched')), 'VocalStack can’t fetch from Vimeo. Live Transcription can record it as it plays.');
+  assert.equal(advised(r('That’s a Google Meet meeting, not a recording.', 'meeting')), 'That’s a Google Meet meeting, not a recording. Record it with Record This Meeting on Now.');
+  assert.equal(advised(r('That link is a PDF, not a recording.', 'not_media')), 'That link is a PDF, not a recording.');
+  assert.equal(advised(r('That link didn’t answer. Try again later.', 'unreachable')), 'That link didn’t answer. Try again later.');
+  // An older server, no reason: the Live hint unless the sentence has one.
+  assert.equal(advised(r('The link could not be read.')), 'The link could not be read. Live Transcription can still record it as it plays.');
+  assert.equal(advised(r('Record it with Live Transcription as it plays instead.')), 'Record it with Live Transcription as it plays instead.');
+});

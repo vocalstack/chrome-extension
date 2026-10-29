@@ -26,7 +26,7 @@ import { can, whyNot } from '../lib/access';
 import { capturable, inMeeting, isRunning, meetingHost, tabHolder, type LiveStatus } from '../lib/live';
 import { AccessNote, ProblemNote } from '../ui/access';
 import { client } from '../lib/client';
-import { checkLink, probeOnce } from '../lib/linkCheck';
+import { advised, checkLink, probeOnce } from '../lib/linkCheck';
 import { playerFile } from '../lib/embedFiles';
 import { rpc, type Answer } from '../lib/rpc';
 import { MEDIA_PAGE, type FoundMedia } from '../lib/media';
@@ -373,7 +373,7 @@ function useFetchable(url: string | null): Fetchable {
     let stop = false;
     setF({ state: 'checking' });
     client().then((vs) => checkLink(vs, url)).then(
-      (c) => { if (!stop) setF(c.go ? { state: 'yes' } : c.media.length ? { state: 'media' } : { state: 'no', why: withLive(c.problem) }); },
+      (c) => { if (!stop) setF(c.go ? { state: 'yes' } : c.media.length ? { state: 'media' } : { state: 'no', why: advised(c) }); },
       // Refused for now (too many checks): File Upload stays, and its own check says why.
       () => { if (!stop) setF({ state: 'yes' }); },
     );
@@ -382,9 +382,6 @@ function useFetchable(url: string | null): Fetchable {
   return f;
 }
 
-/** The server's reason, and the way that still works when it doesn't say
- *  so itself ("…Record it with Live Transcription as it plays instead."). */
-const withLive = (problem: string) => (/record/i.test(problem) ? problem : `${problem} Live Transcription can still record it as it plays.`);
 
 /** A transcription on the player: a big percentage, its step and a bar
  *  while the job runs; then ready (or why not). */
@@ -522,7 +519,7 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
     const name = (title || host(url) || 'From the web').slice(0, 120);
     if (c.go) queueLink({ url, name, host: isYouTube(url) ? 'YouTube' : host(url), durationS, live: stream || c.live });
     else if (c.media.length) for (const m of [...c.media].reverse()) queueLink({ url: m.url, name: (m.title?.trim() || name).slice(0, 120), host: host(m.url) });
-    else { check.setError(withLive(c.problem)); return; }
+    else { check.setError(advised(c)); return; }
     onUpload();
   });
 

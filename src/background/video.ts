@@ -11,7 +11,7 @@ import { accessToken } from '../lib/auth';
 import { currentEnv } from '../lib/env';
 import { RpcError, type Handlers } from '../lib/rpc';
 import { videoIdOf } from '../lib/ahead';
-import { checkLink } from '../lib/linkCheck';
+import { advised, checkLink } from '../lib/linkCheck';
 import { envOfPage, isOwn, playerState, shareCode, sharedJob, type PlayerState } from '../lib/shared';
 
 export interface VideoIds { transcriptionId: string; recordingId: string }
@@ -91,7 +91,7 @@ function idsFor(vs: VocalStack, key: string, req: { url: string; title?: string 
     if (!ids) {
       // Checked first, as any link (lib/linkCheck.ts): a page that isn't a recording is never sent.
       const c = await checkLink(vs, req.url);
-      if (!c.go) throw new RpcError(c.problem, LINK_REFUSED);
+      if (!c.go) throw new RpcError(advised(c), LINK_REFUSED);
       // A live stream has no whole file to fetch: never a job that can only
       // fail (captions take the tab's sound instead, as for any refusal).
       if (c.live) throw new RpcError('This is a live stream. Use Live Transcription to transcribe it as it plays.', LINK_REFUSED);
