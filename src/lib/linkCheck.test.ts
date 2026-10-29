@@ -54,3 +54,9 @@ test('the server’s sentence starts with a capital', () => {
   const v = verdictOf(probe({ problem: 'the link is a web page, not a media file — link to the audio or video file itself' }));
   assert.match(v.go ? '' : v.problem, /^The link is a web page/);
 });
+
+test('a site the server never fetches from is named, when the probe says so', () => {
+  const v = verdictOf(probe({ problem: 'VocalStack can’t fetch from Vimeo.', site: { name: 'Vimeo', meeting: false } }));
+  assert.deepEqual(v.go ? null : v.site, { name: 'Vimeo', meeting: false });
+  assert.equal('site' in verdictOf(probe({ problem: 'x' })), false);
+});

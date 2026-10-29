@@ -11,8 +11,13 @@ import type { LinkProbe } from '@vocalstack/contract';
 export type Checked =
   /** Transcribe it: a file the server fetches, or a live stream it records. */
   | { go: true; live: boolean }
-  /** Not this address: why, in plain words, and the recordings found on it (a web page's). */
-  | { go: false; problem: string; media: { url: string; title?: string | null }[] };
+  /** Not this address: why, in plain words, the recordings found on it
+   *  (a web page's), and the site when the server never fetches from it. */
+  | { go: false; problem: string; media: { url: string; title?: string | null }[]; site?: Site };
+
+/** A site the server never fetches from (a video site's page, a meeting):
+ *  the probe's `site`, read as optional until the contract has it. */
+export interface Site { name: string; meeting?: boolean }
 
 export const CANT_FETCH = 'That link didn’t work. VocalStack can’t fetch a recording from it.';
 
@@ -24,7 +29,8 @@ export function verdictOf(p: LinkProbe): Checked {
   const media = p.media ?? [];
   if (media.length) return { go: false, problem: media.length === 1 ? 'This is a web page. One recording was found on it.' : `This is a web page. ${media.length} recordings were found on it.`, media };
   const said = p.problem?.trim();
-  return { go: false, problem: said ? said[0]!.toUpperCase() + said.slice(1) : CANT_FETCH, media: [] };
+  const site = (p as { site?: Site | null }).site ?? undefined;
+  return { go: false, problem: said ? said[0]!.toUpperCase() + said.slice(1) : CANT_FETCH, media: [], ...(site ? { site } : {}) };
 }
 
 /** Checked once per address while the page (panel or worker) lives; a

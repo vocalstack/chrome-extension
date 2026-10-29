@@ -216,7 +216,13 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   const tabOk = capturable(scan?.url);
   const failed = tracked.filter((t) => t.phase === 'error' && !t.hidden).slice(-2);
   // A scan again (the panel focused) keeps what the last one showed.
-  const empty = !own && !ytBrowse && !videoPage && !rows.length && !scanError && (!scanning || !!scan);
+  /** What the page has besides itself: the page's own row (always listed,
+   *  background/page.ts mergeMedia) alone is nothing found. */
+  const found = rows.filter((r) => !(r.url === pageUrl && r.kind === 'page'));
+  const empty = !own && !ytBrowse && !videoPage && !found.length && !scanError && (!scanning || !!scan);
+  /** Listed, but nothing in it can be sent: recording the tab is the way. */
+  const noneSendable = found.length > 0 && !rows.some(selectable);
+  const pageProbe = probed[pageUrl];
   /** This tab's recording, while it runs: the card and a button lead to Live. */
   const holder = scan ? tabHolder(live, scan.tabId) : undefined;
   const recording = !!holder && isRunning(holder);
@@ -255,7 +261,7 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
           stream={rows.some(isLive)} recording={recording} onLive={onLive} onUpload={onUpload} onSettings={onSettings} />
       )}
 
-      {!videoPage && rows.length > 0 && (
+      {!videoPage && found.length > 0 && (
         <>
           <div className="card2" style={{ padding: '14px 14px 6px' }}>
             <Eyebrow side={`${rows.length} ${rows.length === 1 ? 'ITEM' : 'ITEMS'}`}>FOUND ON THIS PAGE</Eyebrow>
@@ -266,9 +272,11 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
               ))}
             </div>
           </div>
-          <button type="button" className="cta" disabled={!chosen.length || !mayRecord || checking} aria-busy={starting || checking || undefined} title={!mayRecord ? whyNot(account, 'record') : undefined} onClick={() => void transcribe()}>
+          {noneSendable && !checking
+            ? (recording ? <GoLive onLive={onLive} /> : <button type="button" className="cta" onClick={onLive}><HiMic />Record This Tab</button>)
+            : <button type="button" className="cta" disabled={!chosen.length || !mayRecord || checking} aria-busy={starting || checking || undefined} title={!mayRecord ? whyNot(account, 'record') : undefined} onClick={() => void transcribe()}>
             {(starting || checking) && <span className="spin" />}{checking ? 'Checking…' : chosen.length > 1 ? `Transcribe ${chosen.length} Items` : chosen.length ? 'Transcribe' : 'Select Something to Transcribe'}
-          </button>
+          </button>}
         </>
       )}
       {failed.map((t) => <ProblemNote key={t.key} error={t.problem?.text ?? 'That could not be started.'} onSettings={onSettings}><div style={{ marginTop: 6 }}><button type="button" className="pg-link" onClick={() => patch(t.key, { hidden: true })}>Dismiss</button></div></ProblemNote>)}
@@ -280,6 +288,12 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
               <span className="round round--lg"><HiNone /></span>
               <div className="empty2__head">Nothing to transcribe here</div>
               <div className="empty2__text">No audio or video was found on this page. Record the tab from Live, or upload a file.</div>
+              {/* The server may still find recordings in the page's code. */}
+              {pageUrl && tabOk && (pageProbe?.state === 'loading'
+                ? <div className="empty2__text"><span className="spin" /> Looking for recordings…</div>
+                : pageProbe?.state === 'done' ? <div className="empty2__text">{pageProbe.probe.problem && !pageProbe.probe.media?.length ? 'VocalStack found no recordings on it either.' : null}</div>
+                : pageProbe?.state === 'error' ? <div className="empty2__text">{pageProbe.text}</div>
+                : <button type="button" className="pg-link" onClick={() => runProbe(pageUrl)}>Look for recordings on this page</button>)}
             </div>
           )}
           {startMeeting.error && <ProblemNote error={startMeeting.error} onSettings={onSettings} />}
@@ -314,6 +328,30 @@ function usePlayer(url: string) {
   useEffect(() => { setState(undefined); }, [url]);
   return { state, refresh: () => setN((x) => x + 1) };
 }
+
+type Fetchable = { state: 'checking' | 'yes' | 'media' } | { state: 'no'; why: string };
+
+/** Whether the server can fetch the video on `url` (null: not asked):
+ *  its check of the address, shared with the one before sending. */
+function useFetchable(url: string | null): Fetchable {
+  const [f, setF] = useState<Fetchable>({ state: 'checking' });
+  useEffect(() => {
+    if (!url) return;
+    let stop = false;
+    setF({ state: 'checking' });
+    client().then((vs) => checkLink(vs, url)).then(
+      (c) => { if (!stop) setF(c.go ? { state: 'yes' } : c.media.length ? { state: 'media' } : { state: 'no', why: cantFetchWhy(c.site, host(url)) }); },
+      // Refused for now (too many checks): File Upload stays, and its own check says why.
+      () => { if (!stop) setF({ state: 'yes' }); },
+    );
+    return () => { stop = true; };
+  }, [url]);
+  return f;
+}
+
+/** Why there's no File Upload, in the panel's words. */
+const cantFetchWhy = (site: { name: string } | undefined, h: string) =>
+  `VocalStack can’t fetch videos from ${site?.name ?? h}. Live Transcription records this one as it plays.`;
 
 /** A transcription on the player: a big percentage, its step and a bar
  *  while the job runs; then ready (or why not). */
@@ -423,11 +461,15 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
   const [spoken, , spokenReady] = useSpokenLang();
   const mayRecord = can(account, 'record');
   const start = useStartTab(tabId, onLive);
-  const upload = !isYouTube(url);
+  /* File Upload, but on YouTube (the player instead), where the server
+     can fetch it: its check of the page says so (lib/linkCheck.ts), not a
+     list of sites here. Offered while it is asked. */
+  const fetchable = useFetchable(isYouTube(url) ? null : url);
+  const upload = !isYouTube(url) && fetchable.state !== 'no';
   const player = useAction();
   /** Given a player link from here before (YouTube): watched there, not transcribed again. */
   const known = usePlayer(url);
-  const onPlayer = !upload && !!known.state && known.state.phase !== 'failed';
+  const onPlayer = isYouTube(url) && !!known.state && known.state.phase !== 'failed';
   const openPlayer = () => void player.run(async () => {
     // Watched there instead of here: Open in VocalStack takes this tab; the
     // first open (Embedded Video Player) a new one beside it.
@@ -452,7 +494,7 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
   });
 
   // While the first check runs, nothing: no options that then vanish.
-  if (!upload && !recording && known.state === undefined) return null;
+  if (isYouTube(url) && !recording && known.state === undefined) return null;
 
   if (onPlayer && !recording) {
     return (
@@ -479,8 +521,10 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
           {recording
             ? <PickCard icon={<HiMic />} live head="Live Transcription" badge text="Go to the live transcript." onClick={onLive} />
             : <PickCard icon={<HiMic />} head="Live Transcription" text="Transcribe the audio as it plays, with floating captions over the video." onClick={() => setMode('live')} />}
-          {upload && <PickCard icon={<HiUpload />} head="File Upload" text="The whole video is fetched and transcribed at once, with a full transcript in your Library." busy={check.busy} onClick={toUpload} />}
-          {!upload && (
+          {upload && <PickCard icon={<HiUpload />} head="File Upload" text={fetchable.state === 'media' ? 'The recordings VocalStack found on this page are fetched and transcribed at once, with full transcripts in your Library.' : 'The whole video is fetched and transcribed at once, with a full transcript in your Library.'}
+            busy={check.busy || fetchable.state === 'checking'} onClick={toUpload} />}
+          {fetchable.state === 'no' && <p className="pick__why">{fetchable.why}</p>}
+          {isYouTube(url) && !stream && (
             <PickCard icon={<HiVideo />} head="Embedded Video Player" text="Open the video on VocalStack, with its transcript beside it, in a new tab."
               busy={player.busy} disabled={!mayRecord} title={!mayRecord ? whyNot(account, 'record') : undefined} onClick={openPlayer} />
           )}
@@ -554,7 +598,7 @@ function FoundRow({ r, page, probe: p, selectable, ticked, started, onToggle, on
     r.from === 'click' ? 'YOU PICKED THIS' : r.from === 'server' ? 'FOUND ON THE PAGE' : r.playing ? 'MAIN PLAYER' : r.frameUrl ? 'EMBEDDED' : '',
     started ? 'STARTED' : '',
   ].filter(Boolean).join(' · ');
-  const cantFetch = (r.streamOnly && (!v || !v.ok)) || (v && !v.ok && /fetch|download|reach|open/i.test(v.problem ?? ''));
+  const cantFetch = (r.streamOnly && (!v || !v.ok)) || (v && !v.ok && !v.media?.length && v.kind !== 'live');
 
   let foot: React.ReactNode = null;
   if (p?.state === 'loading') foot = <><span className="spin" />Checking…</>;

@@ -91,6 +91,8 @@ function idsFor(vs: VocalStack, key: string, req: { url: string; title?: string 
       // Checked first, as any link (lib/linkCheck.ts): a page that isn't a recording is never sent.
       const c = await checkLink(vs, req.url);
       if (!c.go) throw new RpcError(c.problem);
+      // A live stream has no whole file to fetch: never a job that can only fail.
+      if (c.live) throw new RpcError('This is a live stream. Use Live Transcription to transcribe it as it plays.');
       const t: Transcription = await vs.transcriptions.createFromUrl(req.url, { name: req.title || null });
       const rid = t.job?.recordingId ?? t.currentRecording?.recordingId ?? t.lastRecording?.recordingId;
       if (!rid) throw new RpcError('VocalStack did not start transcribing this video.');
