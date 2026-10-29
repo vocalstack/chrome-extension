@@ -27,6 +27,7 @@ import { capturable, isRunning, meetingHost, tabHolder, type LiveStatus } from '
 import { AccessNote, ProblemNote } from '../ui/access';
 import { client } from '../lib/client';
 import { checkLink, probeOnce } from '../lib/linkCheck';
+import { playerFile } from '../lib/embedFiles';
 import { rpc, type Answer } from '../lib/rpc';
 import { MEDIA_PAGE, type FoundMedia } from '../lib/media';
 import { Note, errorText, useAction } from '../ui/kit';
@@ -44,8 +45,9 @@ type Scan = Answer<'page.scan'>;
 
 /** A row: something found, clicked, or listed by the server on a page. */
 interface Row extends FoundMedia {
-  /** 'click' = from the context menu; 'server' = found on the page by VocalStack. */
-  from?: 'click' | 'server';
+  /** 'click' = from the context menu; 'server' = found on the page by
+   *  VocalStack; 'player' = found in an embedded player by the browser. */
+  from?: 'click' | 'server' | 'player';
   /** The page the server found it on. */
   parent?: string;
 }
@@ -56,6 +58,12 @@ const probe = (url: string): Promise<LinkProbe> => client().then((vs) => probeOn
 type ProbeState = { state: 'loading' } | { state: 'done'; probe: LinkProbe } | { state: 'error'; text: string };
 
 const AUTO_PROBES = 10;
+
+/** An embedded player the server would have to search (not one of the
+ *  known video pages): read by the browser first. */
+const isPlayer = (r: FoundMedia) => r.kind === 'embed' && !MEDIA_PAGE.test(r.url);
+/** What reading a player found: its recording, nothing (null), or not yet. */
+type InPlayer = FoundMedia | null | 'loading';
 
 const host = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
 const KIND_META: Record<FoundMedia['kind'], string> = { video: 'VIDEO', audio: 'AUDIO', embed: 'EMBEDDED PLAYER', link: 'LINK', page: 'PAGE' };
@@ -84,6 +92,8 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   const [scanning, setScanning] = useState(true);
   const [pinned, setPinned] = useState<Row | null>(null);
   const [probed, setProbed] = useState<Record<string, ProbeState>>({});
+  /** Embedded players read by the browser for their recording (lib/embedFiles.ts). */
+  const [inPlayer, setInPlayer] = useState<Record<string, InPlayer>>({});
   /** The ticked rows; null until the person ticks one (the main item is). */
   const [sel, setSel] = useState<Set<string> | null>(null);
   const [starting, setStarting] = useState(false);
@@ -158,6 +168,8 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   const rows: Row[] = [];
   for (const r of base) {
     rows.push(r);
+    const f = inPlayer[r.url];
+    if (f && f !== 'loading' && !base.some((b) => b.url === f.url) && !rows.some((x) => x.url === f.url)) rows.push({ ...f, from: 'player', parent: r.url });
     const p = probed[r.url];
     if (p?.state === 'done') {
       for (const m of p.probe.media ?? []) {
@@ -166,8 +178,20 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
     }
   }
 
-  const isPage = (r: Row) => r.url === pageUrl || r.kind === 'page' || (!!r.streamOnly && !MEDIA_PAGE.test(r.url));
+  const isPage = (r: Row) => r.url === pageUrl || r.kind === 'page' || isPlayer(r) || (!!r.streamOnly && !MEDIA_PAGE.test(r.url));
   const autoProbe = (r: Row) => r.from === 'click' || !isPage(r) || MEDIA_PAGE.test(r.url);
+
+  // An embedded player is read by the browser, at once and for free; the
+  // server searches it only when asked (Find recordings).
+  const playersKey = base.filter(isPlayer).slice(0, AUTO_PROBES).map((r) => `${r.url}\t${r.title ?? ''}`).join('\n');
+  useEffect(() => {
+    for (const line of playersKey.split('\n')) {
+      const [url, title] = line.split('\t');
+      if (!url || inPlayer[url] !== undefined) continue;
+      setInPlayer((x) => ({ ...x, [url]: 'loading' }));
+      void playerFile(url, title || undefined).then((f) => setInPlayer((x) => ({ ...x, [url]: f })));
+    }
+  }, [playersKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Check each address once; a page is searched only when asked.
   const autoKey = rows.filter(autoProbe).slice(0, AUTO_PROBES).map((r) => r.url).join('\n');
@@ -267,7 +291,7 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
             <Eyebrow side={`${rows.length} ${rows.length === 1 ? 'ITEM' : 'ITEMS'}`}>FOUND ON THIS PAGE</Eyebrow>
             <div className="found">
               {rows.map((r) => (
-                <FoundRow key={r.url} r={r} page={isPage(r)} probe={probed[r.url]} selectable={selectable(r)} ticked={ticked(r)} started={started.has(r.url)}
+                <FoundRow key={r.url} r={r} page={isPage(r)} probe={probed[r.url]} player={isPlayer(r) ? inPlayer[r.url] : undefined} selectable={selectable(r)} ticked={ticked(r)} started={started.has(r.url)}
                   onToggle={() => toggle(r)} onProbe={() => runProbe(r.url)} />
               ))}
             </div>
@@ -586,8 +610,8 @@ function PickCard({ icon, head, text, live, badge, busy, disabled, title, onClic
   );
 }
 
-function FoundRow({ r, page, probe: p, selectable, ticked, started, onToggle, onProbe }: {
-  r: Row; page: boolean; probe?: ProbeState; selectable: boolean; ticked: boolean; started: boolean;
+function FoundRow({ r, page, probe: p, player, selectable, ticked, started, onToggle, onProbe }: {
+  r: Row; page: boolean; probe?: ProbeState; player?: InPlayer; selectable: boolean; ticked: boolean; started: boolean;
   onToggle: () => void; onProbe: () => void;
 }) {
   const v = p?.state === 'done' ? p.probe : null;
@@ -595,7 +619,7 @@ function FoundRow({ r, page, probe: p, selectable, ticked, started, onToggle, on
   const meta = [
     live ? 'LIVE STREAM' : KIND_META[r.kind],
     r.durationS && !live ? mmss(r.durationS) : '',
-    r.from === 'click' ? 'YOU PICKED THIS' : r.from === 'server' ? 'FOUND ON THE PAGE' : r.playing ? 'MAIN PLAYER' : r.frameUrl ? 'EMBEDDED' : '',
+    r.from === 'click' ? 'YOU PICKED THIS' : r.from === 'server' ? 'FOUND ON THE PAGE' : r.from === 'player' ? 'FOUND IN THE PLAYER' : r.playing ? 'MAIN PLAYER' : r.frameUrl ? 'EMBEDDED' : '',
     started ? 'STARTED' : '',
   ].filter(Boolean).join(' · ');
   const cantFetch = (r.streamOnly && (!v || !v.ok)) || (v && !v.ok && !v.media?.length && v.kind !== 'live');
@@ -605,6 +629,9 @@ function FoundRow({ r, page, probe: p, selectable, ticked, started, onToggle, on
   else if (p?.state === 'error') foot = <span className="pg-bad">{p.text}</span>;
   else if (v && !v.ok && v.media?.length) foot = <span>{v.media.length === 1 ? 'One recording found on it, listed below.' : `${v.media.length} recordings found on it, listed below.`}</span>;
   else if (v && !v.ok && !r.streamOnly) foot = <span className="pg-bad">{v.problem || 'VocalStack can’t fetch this.'}</span>;
+  else if (!p && player === 'loading') foot = <><span className="spin" />Looking in the player…</>;
+  else if (!p && player) foot = <span>Its recording is listed below.</span>;
+  else if (!p && player === null) foot = <><span>VocalStack can search this player for its recording.</span><button type="button" className="pg-link" onClick={onProbe}>Find recordings</button></>;
   else if (!p && page && !r.streamOnly) foot = <><span>VocalStack can look for recordings on this page.</span><button type="button" className="pg-link" onClick={onProbe}>Find recordings</button></>;
 
   const Icon = r.kind === 'audio' ? HiAudio : r.kind === 'video' || r.kind === 'embed' ? HiVideo : r.kind === 'page' ? HiGlobe : HiDoc;

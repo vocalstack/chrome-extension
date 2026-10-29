@@ -13,6 +13,7 @@ import { RpcError, type Handlers } from '../lib/rpc';
 import { MEDIA_PAGE } from '../lib/media';
 import { videoIdOf } from '../lib/ahead';
 import { checkLink } from '../lib/linkCheck';
+import { playerFile } from '../lib/embedFiles';
 import { envOfPage, isOwn, playerState, shareCode, sharedJob, type PlayerState } from '../lib/shared';
 import { scan } from './page';
 
@@ -237,15 +238,19 @@ export function registerVideo(): Handlers {
 }
 
 /** What VocalStack transcribes for a tab's video: the main video's own
- *  file, an embedded player's page, or the page when it is a known media
- *  page (YouTube, Vimeo…). `strict`: nothing else (auto-captions); else
- *  the page address as a last try (the server says if it can't). */
+ *  file, an embedded player's (a known video page's address, or the file
+ *  the browser finds in the player: lib/embedFiles.ts), or the page when
+ *  it is a known media page (YouTube, Vimeo…). `strict`: nothing else
+ *  (auto-captions: never an address the server would have to search);
+ *  else the page address as a last try (the server says if it can't). */
 export async function videoSource(tabId: number, pageUrl: string, strict: boolean): Promise<string | null> {
   const found = await scan(tabId).catch(() => null);
   const media = found?.media ?? [];
   const by = (k: string) => media.filter((m) => m.kind === k && !m.streamOnly).sort((a, b) => Number(!!b.playing) - Number(!!a.playing) || (b.durationS ?? 0) - (a.durationS ?? 0));
   const page = MEDIA_PAGE.test(pageUrl) ? pageUrl : null;
-  return by('video')[0]?.url ?? by('embed')[0]?.url ?? page ?? (strict ? null : pageUrl);
+  const embed = by('embed')[0];
+  const fromEmbed = !embed ? null : MEDIA_PAGE.test(embed.url) ? embed.url : ((await playerFile(embed.url))?.url ?? (strict ? null : embed.url));
+  return by('video')[0]?.url ?? fromEmbed ?? page ?? (strict ? null : pageUrl);
 }
 
 /** Per-tab state in session storage (it outlives the sleeping worker):
