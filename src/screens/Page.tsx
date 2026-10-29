@@ -340,7 +340,7 @@ function useFetchable(url: string | null): Fetchable {
     let stop = false;
     setF({ state: 'checking' });
     client().then((vs) => checkLink(vs, url)).then(
-      (c) => { if (!stop) setF(c.go ? { state: 'yes' } : c.media.length ? { state: 'media' } : { state: 'no', why: cantFetchWhy(c.site, host(url)) }); },
+      (c) => { if (!stop) setF(c.go ? { state: 'yes' } : c.media.length ? { state: 'media' } : { state: 'no', why: withLive(c.problem) }); },
       // Refused for now (too many checks): File Upload stays, and its own check says why.
       () => { if (!stop) setF({ state: 'yes' }); },
     );
@@ -349,9 +349,9 @@ function useFetchable(url: string | null): Fetchable {
   return f;
 }
 
-/** Why there's no File Upload, in the panel's words. */
-const cantFetchWhy = (site: { name: string } | undefined, h: string) =>
-  `VocalStack can’t fetch videos from ${site?.name ?? h}. Live Transcription records this one as it plays.`;
+/** The server's reason, and the way that still works when it doesn't say
+ *  so itself ("…Record it with Live Transcription as it plays instead."). */
+const withLive = (problem: string) => (/record/i.test(problem) ? problem : `${problem} Live Transcription can still record it as it plays.`);
 
 /** A transcription on the player: a big percentage, its step and a bar
  *  while the job runs; then ready (or why not). */
@@ -489,7 +489,7 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
     const name = (title || host(url) || 'From the web').slice(0, 120);
     if (c.go) queueLink({ url, name, host: isYouTube(url) ? 'YouTube' : host(url), durationS, live: stream || c.live });
     else if (c.media.length) for (const m of [...c.media].reverse()) queueLink({ url: m.url, name: (m.title?.trim() || name).slice(0, 120), host: host(m.url) });
-    else { check.setError(`${c.problem} Live Transcription can still record it as it plays.`); return; }
+    else { check.setError(withLive(c.problem)); return; }
     onUpload();
   });
 
