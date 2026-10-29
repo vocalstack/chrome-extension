@@ -29,8 +29,11 @@ interface Kept extends WebmCluster { vid: string | null }
 interface Track { type: string; src: string; reader: WebmReader; stream: Stream | null }
 type HookMsg = { sb: number; type?: string; src?: string; offset?: number; data?: ArrayBuffer; abort?: boolean };
 
-/** YouTube's player (its video), else the frame's main video. */
+/** YouTube's player (its video), else the frame's main video. A Short
+ *  plays in a player of its own: the watch player stays in the page then,
+ *  hidden, and the Short is the reel on screen. */
 function playerVideo(): HTMLVideoElement | null {
+  if (location.pathname.startsWith('/shorts/')) return document.querySelector<HTMLVideoElement>('ytd-reel-video-renderer[is-active] video, #shorts-player video') ?? mainVideo();
   return document.querySelector<HTMLVideoElement>('#movie_player video') ?? mainVideo();
 }
 const adShowing = () => !!document.querySelector('#movie_player.ad-showing');
@@ -77,7 +80,9 @@ export function startAhead() {
     }
     const s = tr.stream;
     if (!s || !got.clusters.length || adShowing()) return;
-    const vid = videoIdOf(location.href);
+    // The address names the video playing, not one YouTube buffers ahead
+    // for later (the next Short): that one's audio is named when it plays.
+    const vid = tr.src && tr.src === playerVideo()?.src ? videoIdOf(location.href) : null;
     for (const c of got.clusters) {
       const k: Kept = { ...c, vid };
       s.clusters.push(k);
@@ -97,12 +102,24 @@ export function startAhead() {
     for (let i = streams.length - 1; i >= 0; i--) if (!streams[i]!.clusters.length && !live.has(streams[i]!)) streams.splice(i, 1);
   }
 
-  /** The latest stream of the main player. */
+  /** The latest stream of the main player. Audio buffered before it
+   *  played (the next Short, swiped to) is named now: it is this video's. */
   function current(): Stream | null {
     const src = playerVideo()?.src;
-    for (let i = streams.length - 1; i >= 0; i--) if (streams[i]!.src === src) return streams[i]!;
+    for (let i = streams.length - 1; i >= 0; i--) {
+      const s = streams[i]!;
+      if (s.src !== src) continue;
+      if (s.clusters.some((c) => c.vid === null)) {
+        const vid = videoIdOf(location.href);
+        for (const c of s.clusters) c.vid ??= vid;
+        adopted = true;
+      }
+      return s;
+    }
     return null;
   }
+  /** Audio was named for the video now playing: it is sent on the next tick. */
+  let adopted = false;
 
   /** Whether this frame can feed a session: the main player's audio, as
    *  WebM a decoder can read (no DRM), with some of this video kept. */
@@ -177,6 +194,7 @@ export function startAhead() {
   }
 
   function clock(): AheadClock {
+    if (current() && adopted) { adopted = false; sendFrom(); }
     const v = playerVideo();
     const ad = adShowing();
     if (v && !ad) lastNow = v.currentTime;

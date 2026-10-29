@@ -14,7 +14,8 @@
  *
  *  Said no to, they stay off: × on the offer, for that site for the rest
  *  of the browser session; × on the captions, for that tab on that site.
- *  A failure shows on the page in plain words. */
+ *  A failure shows on the page in plain words. While the video stays
+ *  paused they pause too (nothing is sent), and go on when it plays. */
 
 import { RpcError, type Push } from '../lib/rpc';
 import { GENERIC, userText } from '../lib/errors';
@@ -22,11 +23,15 @@ import { report } from '../lib/sentry';
 import { capturable, tabHolder } from '../lib/live';
 import { tabStep } from '../lib/sites';
 import type { PromptMsg } from '../content/captionsPrompt';
-import { invokeBadge, listLive, livePrefs, startLive, wasInvoked } from './live';
+import { invokeBadge, listLive, livePrefs, off, startLive, wasInvoked } from './live';
 
 const OFFERS = 'tcap.offers';
 const DECLINED = 'tcap.declined';
 const AUTO = 'tcap.auto';
+/** Sessions paused here because their video was: resumed when it plays. */
+const PAUSED = 'tcap.paused';
+/** A video paused this long pauses its captions (a short pause doesn't). */
+const PAUSE_AFTER_MS = 15_000;
 
 interface Offer { tabId: number; origin: string; site: string | null }
 /** `tabId` absent: the whole site. */
@@ -100,13 +105,42 @@ async function startFor(tab: chrome.tabs.Tab, site: string | null) {
   }
 }
 
+const waits = new Map<number, ReturnType<typeof setTimeout>>();
+
+/** The tab's video paused or played: its captions from the tab's sound
+ *  follow, once paused a while. Never ones the person paused in Live. */
+async function videoState(tabId: number, playing: boolean) {
+  clearTimeout(waits.get(tabId));
+  waits.delete(tabId);
+  const mine = (await list<Started>(AUTO)).find((x) => x.tabId === tabId);
+  if (!mine) return;
+  const ours = await list<string>(PAUSED);
+  if (playing) {
+    if (!ours.includes(mine.id)) return;
+    await save(PAUSED, ours.filter((x) => x !== mine.id));
+    await off({ off: 'live.pause', id: mine.id, paused: false }).catch((e) => report(e, 'tab captions resume'));
+    return;
+  }
+  waits.set(tabId, setTimeout(() => {
+    waits.delete(tabId);
+    void (async () => {
+      const s = (await listLive().catch(() => [])).find((x) => x.id === mine.id);
+      if (s?.state !== 'live') return;
+      await save(PAUSED, [...(await list<string>(PAUSED)), mine.id]);
+      await off({ off: 'live.pause', id: mine.id, paused: true }).catch((e) => report(e, 'tab captions pause'));
+    })();
+  }, PAUSE_AFTER_MS));
+}
+
 async function decline(d: Declined) {
   const all = (await list<Declined>(DECLINED)).filter((x) => !(x.origin === d.origin && x.tabId === d.tabId));
   await save(DECLINED, [...all, d]);
 }
 
 export function registerTabCaptions() {
-  chrome.runtime.onMessage.addListener((msg: Push | { ccDecline?: boolean }, sender) => {
+  chrome.runtime.onMessage.addListener((msg: Push | { ccDecline?: boolean; videoState?: { playing: boolean } }, sender) => {
+    const vs = (msg as { videoState?: { playing: boolean } })?.videoState;
+    if (vs && sender.tab?.id !== undefined) { void videoState(sender.tab.id, vs.playing); return false; }
     // × on the offer: not on this site, this browser session.
     if ((msg as { ccDecline?: boolean })?.ccDecline && sender.tab?.id !== undefined) {
       const tabId = sender.tab.id;
@@ -127,6 +161,7 @@ export function registerTabCaptions() {
         const mine = all.find((x) => x.id === st.id);
         if (!mine) return;
         await save(AUTO, all.filter((x) => x.id !== st.id));
+        await save(PAUSED, (await list<string>(PAUSED)).filter((x) => x !== st.id));
         // Stopped by the person (× on the captions): off on this tab, on this site.
         if (st.state === 'done') await decline({ origin: mine.origin, tabId });
         else tellPage(tabId, { ccPrompt: 'failed', text: st.error || GENERIC });

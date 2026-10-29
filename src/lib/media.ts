@@ -123,6 +123,15 @@ const EMBEDS: { re: RegExp; page: (m: RegExpMatchArray) => string; name: string 
   { re: /(?:www\.)?loom\.com\/embed\/(\w+)/i, page: (m) => `https://www.loom.com/share/${m[1]}`, name: 'Loom' },
 ];
 
+/** A known player's page for an embed's address (null: not a known one). */
+export function embedOf(src: string): { url: string; name: string } | null {
+  for (const e of EMBEDS) {
+    const m = src.match(e.re);
+    if (m) return { url: e.page(m), name: e.name };
+  }
+  return null;
+}
+
 function abs(u: string | null | undefined, base: string): string | null {
   if (!u) return null;
   try {
@@ -155,7 +164,14 @@ export function scanDocument(doc: Document = document): FoundMedia[] {
     out.push(m);
   };
 
+  // Inside a known player's frame (a YouTube embed): the player is the
+  // embed's own page, one row with the page's iframe row, not a second,
+  // stream-only one for its <video>.
+  const self = top ? null : embedOf(location.href);
+  if (self) add({ url: self.url, kind: 'embed', title: doc.title || `${self.name} player`, evidence: 'embed' });
+
   doc.querySelectorAll<HTMLMediaElement>('video, audio').forEach((el) => {
+    if (self) return;
     const kind = el.tagName === 'VIDEO' ? 'video' : 'audio';
     const sources = [el.currentSrc, el.src, ...Array.from(el.querySelectorAll('source')).map((s) => s.src)].map((u) => abs(u, base)).filter(Boolean) as string[];
     const direct = sources.find((u) => !u.startsWith('blob:'));
@@ -169,16 +185,20 @@ export function scanDocument(doc: Document = document): FoundMedia[] {
     }
   });
 
-  doc.querySelectorAll<HTMLIFrameElement>('iframe[src]').forEach((f) => {
-    const src = abs(f.getAttribute('src'), base);
-    if (!src) return;
-    for (const e of EMBEDS) {
-      const m = src.match(e.re);
-      if (m) {
-        add({ url: e.page(m), kind: 'embed', title: f.title || `${e.name} player`, evidence: 'embed' });
-        break;
-      }
-    }
+  // Players, also lazy ones not loaded yet: an iframe's address waiting in
+  // data-src, and the facades that stand in for a YouTube or Vimeo player
+  // until clicked (lite-youtube, data-youtube-id…).
+  doc.querySelectorAll<HTMLIFrameElement>('iframe[src], iframe[data-src], iframe[data-lazy-src]').forEach((f) => {
+    const src = abs(f.getAttribute('src'), base) ?? abs(f.dataset.src, base) ?? abs(f.dataset.lazySrc, base);
+    const e = src ? embedOf(src) : null;
+    if (e) add({ url: e.url, kind: 'embed', title: f.title || `${e.name} player`, evidence: 'embed' });
+  });
+  doc.querySelectorAll<HTMLElement>('lite-youtube[videoid], lite-vimeo[videoid], [data-youtube-id], [data-ytid], [data-vimeo-id]').forEach((el) => {
+    const yt = el.getAttribute('data-youtube-id') ?? el.getAttribute('data-ytid') ?? (el.tagName === 'LITE-YOUTUBE' ? el.getAttribute('videoid') : null);
+    const vm = el.getAttribute('data-vimeo-id') ?? (el.tagName === 'LITE-VIMEO' ? el.getAttribute('videoid') : null);
+    const title = el.getAttribute('title') ?? el.getAttribute('playlabel') ?? el.getAttribute('aria-label') ?? undefined;
+    if (yt && /^[\w-]{11}$/.test(yt)) add({ url: `https://www.youtube.com/watch?v=${yt}`, kind: 'embed', title: title ?? 'YouTube player', evidence: 'embed' });
+    else if (vm && /^\d+$/.test(vm)) add({ url: `https://vimeo.com/${vm}`, kind: 'embed', title: title ?? 'Vimeo player', evidence: 'embed' });
   });
 
   doc.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((a) => {

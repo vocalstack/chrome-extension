@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { MEDIA_PAGE, isRecordingUrl, loadedMedia, mediaInPage } from './media.ts';
+import { MEDIA_PAGE, embedOf, isRecordingUrl, loadedMedia, mediaInPage } from './media.ts';
 
 test('a recording by its address: media, not a segment, not an ad', () => {
   assert.equal(isRecordingUrl('https://cdn.example.com/talk.mp4'), true);
@@ -77,4 +77,10 @@ test('a page that is one recording, and the site pages that are not', () => {
   ];
   for (const u of yes) assert.equal(MEDIA_PAGE.test(u), true, u);
   for (const u of no) assert.equal(MEDIA_PAGE.test(u), false, u);
+});
+
+test('a known player’s page for an embed’s address', () => {
+  assert.deepEqual(embedOf('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0'), { url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', name: 'YouTube' });
+  assert.deepEqual(embedOf('https://player.vimeo.com/video/76979871?h=1'), { url: 'https://vimeo.com/76979871', name: 'Vimeo' });
+  assert.equal(embedOf('https://example.com/player'), null);
 });

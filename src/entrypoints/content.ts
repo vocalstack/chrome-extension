@@ -79,5 +79,15 @@ export default defineContentScript({
     document.addEventListener('durationchange', check, true);
     // Unmuting a playing video (a click on its sound button) starts it too.
     document.addEventListener('volumechange', check, true);
+    // A video told about, paused or ended and playing again: captions from
+    // the tab's sound wait while it does (background/tabCaptions.ts).
+    const state = (e: Event) => {
+      const v = e.target;
+      if (!(v instanceof HTMLVideoElement) || !ids.has(v)) return;
+      void chrome.runtime.sendMessage({ videoState: { playing: !v.paused && !v.ended } }).catch(() => {});
+    };
+    document.addEventListener('pause', state, true);
+    document.addEventListener('ended', state, true);
+    document.addEventListener('playing', state, true);
   },
 });
