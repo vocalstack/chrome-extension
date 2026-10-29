@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import type { Account } from '../lib/auth';
 import { can, whyNot, type Need } from '../lib/access';
-import { rpc } from '../lib/rpc';
+import { rpc, RpcError } from '../lib/rpc';
 import { problemOf } from '../screens/page/errors';
 import { Btn, Note, openApp, useAction } from './kit';
 import { IconMic } from './icons';
@@ -32,7 +32,8 @@ function AccessWarning({ text, onSettings }: { text: string; onSettings?: () => 
 /** An error from the API or the background, in plain words, with the
  *  button that fixes it (Settings for permissions, Billing for credit). */
 export function ProblemNote({ error, code, onSettings, children }: { error: string; code?: string; onSettings?: () => void; children?: React.ReactNode }) {
-  const p = problemOf({ message: error, code });
+  // `error` is worded already (errorText): kept as it is, its code still mapped (billing, access).
+  const p = problemOf(new RpcError(error, code));
   if (p.access) return <AccessWarning text={p.text} onSettings={onSettings} />;
   return (
     <Note kind="bad">

@@ -13,6 +13,7 @@ import { can, whyNot } from '../lib/access';
 import { rpc, RpcError } from '../lib/rpc';
 import { IconBtn, openApp } from '../ui/kit';
 import { IconAlert, IconCheck, IconClose, IconExternal, IconUpload } from '../ui/icons';
+import { checkLink } from '../lib/linkCheck';
 import { problemOf } from './page/errors';
 import { created, jobPct, jobText, patch, track, useTracked, type Tracked } from './page/tracker';
 import { txPath } from '../background/page/paths';
@@ -95,14 +96,21 @@ export async function uploadFiles(files: Iterable<File>, opts: UploadOptions = {
  *  or a live stream it records as it plays. */
 export interface Link { url: string; name: string; live?: boolean; meta?: string }
 
-/** Send links to transcribe, each tracked like an upload. */
+/** Send links to transcribe, each tracked like an upload. Each is checked
+ *  first (lib/linkCheck.ts): one that isn't a recording is refused in
+ *  plain words, and nothing is made from it. */
 export async function transcribeLinks(links: Link[], opts: UploadOptions = {}, origin: 'page' | 'file' = 'page'): Promise<void> {
   if (!links.length) return;
   const vs = await client();
   await Promise.all(links.map(async (l) => {
     const key = track({ origin, name: l.name, url: l.url, meta: l.meta, phase: 'sending' });
     try {
-      if (l.live) {
+      const c = await checkLink(vs, l.url);
+      if (!c.go) {
+        patch(key, { phase: 'error', problem: { text: c.media.length ? `${c.problem} Pick one from Now on that page.` : c.problem } });
+        return;
+      }
+      if (l.live || c.live) {
         // A live stream: a live transcription the server pulls, started at
         // once (the dashboard's New live transcription does the same).
         const t = await vs.transcriptions.createLive({ name: l.name, source: { kind: 'stream', url: l.url } });

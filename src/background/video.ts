@@ -12,6 +12,7 @@ import { currentEnv } from '../lib/env';
 import { RpcError, type Handlers } from '../lib/rpc';
 import { MEDIA_PAGE } from '../lib/media';
 import { videoIdOf } from '../lib/ahead';
+import { checkLink } from '../lib/linkCheck';
 import { envOfPage, isOwn, playerState, shareCode, sharedJob, type PlayerState } from '../lib/shared';
 import { scan } from './page';
 
@@ -87,6 +88,9 @@ function idsFor(vs: VocalStack, key: string, req: { url: string; title?: string 
       }
     }
     if (!ids) {
+      // Checked first, as any link (lib/linkCheck.ts): a page that isn't a recording is never sent.
+      const c = await checkLink(vs, req.url);
+      if (!c.go) throw new RpcError(c.problem);
       const t: Transcription = await vs.transcriptions.createFromUrl(req.url, { name: req.title || null });
       const rid = t.job?.recordingId ?? t.currentRecording?.recordingId ?? t.lastRecording?.recordingId;
       if (!rid) throw new RpcError('VocalStack did not start transcribing this video.');

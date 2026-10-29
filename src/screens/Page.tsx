@@ -26,6 +26,7 @@ import { can, whyNot } from '../lib/access';
 import { capturable, isRunning, meetingHost, tabHolder, type LiveStatus } from '../lib/live';
 import { AccessNote, ProblemNote } from '../ui/access';
 import { client } from '../lib/client';
+import { checkLink, probeOnce } from '../lib/linkCheck';
 import { rpc, type Answer } from '../lib/rpc';
 import { MEDIA_PAGE, type FoundMedia } from '../lib/media';
 import { Note, errorText, useAction } from '../ui/kit';
@@ -49,17 +50,9 @@ interface Row extends FoundMedia {
   parent?: string;
 }
 
-/* Probes, once per address for as long as the panel is open. */
-const probes = new Map<string, Promise<LinkProbe>>();
-function probe(url: string): Promise<LinkProbe> {
-  let p = probes.get(url);
-  if (!p) {
-    p = client().then((vs) => vs.transcriptions.probe(url));
-    p.catch(() => probes.delete(url));
-    probes.set(url, p);
-  }
-  return p;
-}
+/* Probes, once per address for as long as the panel is open (shared
+   with the check before each one is transcribed). */
+const probe = (url: string): Promise<LinkProbe> => client().then((vs) => probeOnce(vs, url));
 type ProbeState = { state: 'loading' } | { state: 'done'; probe: LinkProbe } | { state: 'error'; text: string };
 
 const AUTO_PROBES = 10;
@@ -196,6 +189,8 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   const main = rows.find((r) => selectable(r) && !started.has(r.url) && (r.from === 'click' || r.playing)) ?? rows.find((r) => selectable(r) && !started.has(r.url));
   const ticked = (r: Row) => selectable(r) && (sel ? sel.has(r.url) : r === main);
   const chosen = rows.filter(ticked);
+  /** A ticked row still being checked: Transcribe waits for its answer. */
+  const checking = chosen.some((r) => probed[r.url]?.state === 'loading');
   const toggle = (r: Row) => {
     if (!selectable(r)) return;
     const n = new Set(chosen.map((x) => x.url));
@@ -271,8 +266,8 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
               ))}
             </div>
           </div>
-          <button type="button" className="cta" disabled={!chosen.length || !mayRecord} aria-busy={starting || undefined} title={!mayRecord ? whyNot(account, 'record') : undefined} onClick={() => void transcribe()}>
-            {starting && <span className="spin" />}{chosen.length > 1 ? `Transcribe ${chosen.length} Items` : chosen.length ? 'Transcribe' : 'Select Something to Transcribe'}
+          <button type="button" className="cta" disabled={!chosen.length || !mayRecord || checking} aria-busy={starting || checking || undefined} title={!mayRecord ? whyNot(account, 'record') : undefined} onClick={() => void transcribe()}>
+            {(starting || checking) && <span className="spin" />}{checking ? 'Checking…' : chosen.length > 1 ? `Transcribe ${chosen.length} Items` : chosen.length ? 'Transcribe' : 'Select Something to Transcribe'}
           </button>
         </>
       )}
@@ -441,12 +436,20 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
   });
   // Instant start: while Live Transcription is on offer, an engine stays loaded.
   useWarm(spokenReady && mayRecord && !recording && mode !== 'upload' && !tabHolder(live, tabId), spoken);
-  useEffect(() => { setMode(null); }, [url]);
+  useEffect(() => { setMode(null); check.setError(''); }, [url]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const toUpload = () => {
-    queueLink({ url, name: (title || host(url) || 'From the web').slice(0, 120), host: isYouTube(url) ? 'YouTube' : host(url), durationS, live: stream });
+  /* File Upload: the page is checked first, as the dashboard's From URL
+     form does. Not a recording: why, and nothing is queued; a web page
+     with recordings on it: those go to Upload's list instead. */
+  const check = useAction();
+  const toUpload = () => void check.run(async () => {
+    const c = await checkLink(await client(), url);
+    const name = (title || host(url) || 'From the web').slice(0, 120);
+    if (c.go) queueLink({ url, name, host: isYouTube(url) ? 'YouTube' : host(url), durationS, live: stream || c.live });
+    else if (c.media.length) for (const m of [...c.media].reverse()) queueLink({ url: m.url, name: (m.title?.trim() || name).slice(0, 120), host: host(m.url) });
+    else { check.setError(`${c.problem} Live Transcription can still record it as it plays.`); return; }
     onUpload();
-  };
+  });
 
   // While the first check runs, nothing: no options that then vanish.
   if (!upload && !recording && known.state === undefined) return null;
@@ -476,13 +479,14 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
           {recording
             ? <PickCard icon={<HiMic />} live head="Live Transcription" badge text="Go to the live transcript." onClick={onLive} />
             : <PickCard icon={<HiMic />} head="Live Transcription" text="Transcribe the audio as it plays, with floating captions over the video." onClick={() => setMode('live')} />}
-          {upload && <PickCard icon={<HiUpload />} head="File Upload" text="The whole video is fetched and transcribed at once, with a full transcript in your Library." onClick={toUpload} />}
+          {upload && <PickCard icon={<HiUpload />} head="File Upload" text="The whole video is fetched and transcribed at once, with a full transcript in your Library." busy={check.busy} onClick={toUpload} />}
           {!upload && (
             <PickCard icon={<HiVideo />} head="Embedded Video Player" text="Open the video on VocalStack, with its transcript beside it, in a new tab."
               busy={player.busy} disabled={!mayRecord} title={!mayRecord ? whyNot(account, 'record') : undefined} onClick={openPlayer} />
           )}
         </div>
         {player.error && <ProblemNote error={player.error} onSettings={onSettings} />}
+        {check.error && <ProblemNote error={check.error} onSettings={onSettings} />}
       </>
     );
   }
@@ -514,9 +518,10 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
         </div>
       )}
       {start.error && <ProblemNote error={start.error} onSettings={onSettings} />}
-      <button type="button" className="cta cta--end" disabled={!mayRecord} aria-busy={start.busy || undefined} title={!mayRecord ? whyNot(account, 'record') : undefined}
+      {!isLiveMode && check.error && <ProblemNote error={check.error} onSettings={onSettings} />}
+      <button type="button" className="cta cta--end" disabled={!mayRecord || check.busy} aria-busy={start.busy || check.busy || undefined} title={!mayRecord ? whyNot(account, 'record') : undefined}
         onClick={isLiveMode ? () => void start.run('video', floating) : toUpload}>
-        {start.busy ? <span className="spin" /> : isLiveMode ? <HiMic /> : <HiUpload />}{isLiveMode ? 'Start Live Transcription' : 'Transcribe Video'}
+        {start.busy || check.busy ? <span className="spin" /> : isLiveMode ? <HiMic /> : <HiUpload />}{isLiveMode ? 'Start Live Transcription' : 'Transcribe Video'}
       </button>
     </>
   );
