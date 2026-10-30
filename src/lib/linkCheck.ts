@@ -14,7 +14,27 @@ export type Checked =
   /** Not this address: why, in plain words, the recordings found on it (a
    *  web page's), and the server's reason, for the advice this extension
    *  gives (`advised`). */
-  | { go: false; problem: string; media: { url: string; title?: string | null }[]; reason?: Reason };
+  | { go: false; problem: string; media: Found[]; streams: Found[]; reason?: Reason };
+
+/** A web page's find: `media` its recordings (files), `streams` the live
+ *  streams it plays, which never go in as files: transcribed, one would
+ *  record until stopped. */
+type Found = { url: string; title?: string | null };
+
+/** A probe's page media, split by its kind (an older server has none: a file). */
+export function pageMedia(p: Pick<LinkProbe, 'media'>): { files: Found[]; streams: Found[] } {
+  const all = (p.media ?? []) as (Found & { kind?: string | null })[];
+  const strip = ({ url, title }: Found) => (title === undefined ? { url } : { url, title });
+  return { files: all.filter((m) => m.kind !== 'live').map(strip), streams: all.filter((m) => m.kind === 'live').map(strip) };
+}
+
+/** "One recording", "2 recordings and one live stream": what a page has. */
+export function foundText({ files, streams }: { files: unknown[]; streams: unknown[] }): string {
+  const n = (k: number, one: string, many: string) => (k === 1 ? `one ${one}` : `${k} ${many}`);
+  const parts = [files.length ? n(files.length, 'recording', 'recordings') : '', streams.length ? n(streams.length, 'live stream', 'live streams') : ''].filter(Boolean);
+  const t = parts.join(' and ');
+  return t[0]!.toUpperCase() + t.slice(1);
+}
 
 /** Why the server refused a link (the probe's `reason`, read as optional
  *  until @vocalstack/contract has it). Its sentence says what is wrong;
@@ -48,12 +68,15 @@ export const CANT_FETCH = 'That link didn’t work. VocalStack can’t fetch a r
 export function verdictOf(p: LinkProbe): Checked {
   if (p.kind === 'live') return { go: true, live: true };
   if (p.ok ?? true) return { go: true, live: false };
-  const media = p.media ?? [];
+  const { files, streams } = pageMedia(p);
   const reason = (p as { reason?: Reason | null }).reason ?? undefined;
   const why = reason ? { reason } : {};
-  if (media.length) return { go: false, problem: media.length === 1 ? 'This is a web page. One recording was found on it.' : `This is a web page. ${media.length} recordings were found on it.`, media, ...why };
+  if (files.length || streams.length) {
+    const found = foundText({ files, streams });
+    return { go: false, problem: `This is a web page. ${found} ${files.length + streams.length === 1 ? 'was' : 'were'} found on it.`, media: files, streams, ...why };
+  }
   const said = p.problem?.trim();
-  return { go: false, problem: said ? said[0]!.toUpperCase() + said.slice(1) : CANT_FETCH, media: [], ...why };
+  return { go: false, problem: said ? said[0]!.toUpperCase() + said.slice(1) : CANT_FETCH, media: [], streams: [], ...why };
 }
 
 /** Checked once per address while the page (panel or worker) lives, as

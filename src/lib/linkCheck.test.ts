@@ -15,7 +15,7 @@ test('a live link is transcribed live', () => {
 
 test('a web page with nothing on it is refused in the server’s words, never sent', () => {
   const v = verdictOf(probe({ problem: 'That’s a web page, not a recording.' }));
-  assert.deepEqual(v, { go: false, problem: 'That’s a web page, not a recording.', media: [] });
+  assert.deepEqual(v, { go: false, problem: 'That’s a web page, not a recording.', media: [], streams: [] });
   assert.equal((verdictOf(probe({})) as { problem: string }).problem, CANT_FETCH);
 });
 
@@ -77,4 +77,23 @@ test('the server says what is wrong; the extension what to do, by its reason', (
   // An older server, no reason: the Live hint unless the sentence has one.
   assert.equal(advised(r('The link could not be read.')), 'The link could not be read. Live Transcription can still record it as it plays.');
   assert.equal(advised(r('Record it with Live Transcription as it plays instead.')), 'Record it with Live Transcription as it plays instead.');
+});
+
+test('a page\'s live streams are kept apart from its recordings', () => {
+  const v = verdictOf(probe({ reason: 'web_page', media: [
+    { url: 'https://cdn.example.com/ep1.mp3', title: 'Episode 1', kind: 'file' },
+    { url: 'https://radio.example.com:8443/live_aac', kind: 'live' },
+    { url: 'https://cdn.example.com/ep2.mp3' },
+  ] }));
+  assert.equal(v.go, false);
+  if (v.go) return;
+  assert.deepEqual(v.media.map((m) => m.url), ['https://cdn.example.com/ep1.mp3', 'https://cdn.example.com/ep2.mp3']);
+  assert.deepEqual(v.streams, [{ url: 'https://radio.example.com:8443/live_aac' }]);
+  assert.equal(v.problem, 'This is a web page. 2 recordings and one live stream were found on it.');
+});
+
+test('a page with only a live stream lists no recordings', () => {
+  const v = verdictOf(probe({ media: [{ url: 'https://radio.example.com/live', kind: 'live' }] }));
+  assert.ok(!v.go && v.media.length === 0 && v.streams.length === 1);
+  assert.equal((v as { problem: string }).problem, 'This is a web page. One live stream was found on it.');
 });

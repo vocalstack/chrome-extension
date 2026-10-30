@@ -107,7 +107,7 @@ export async function transcribeLinks(links: Link[], opts: UploadOptions = {}, o
     try {
       const c = await checkLink(vs, l.url);
       if (!c.go) {
-        patch(key, { phase: 'error', problem: { text: c.media.length ? `${c.problem} Pick one from Now on that page.` : advised(c) } });
+        patch(key, { phase: 'error', problem: { text: c.media.length || c.streams.length ? `${c.problem} Pick one from Now on that page.` : advised(c) } });
         return;
       }
       if (l.live || c.live) {

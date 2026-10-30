@@ -26,13 +26,13 @@ import { can, whyNot } from '../lib/access';
 import { capturable, inMeeting, isRunning, meetingHost, tabHolder, type LiveStatus } from '../lib/live';
 import { AccessNote, ProblemNote } from '../ui/access';
 import { client } from '../lib/client';
-import { advised, checkLink, probeOnce } from '../lib/linkCheck';
+import { advised, checkLink, foundText, pageMedia, probeOnce } from '../lib/linkCheck';
 import { playerFile } from '../lib/embedFiles';
 import { rpc, type Answer } from '../lib/rpc';
 import { MEDIA_PAGE, type FoundMedia } from '../lib/media';
 import { Note, errorText, useAction } from '../ui/kit';
 import { Eyebrow, Switch, Toggle } from '../ui/ds';
-import { HiArrowRight, HiAudio, HiCaptions, HiCheck, HiChevronRight, HiDoc, HiExternal, HiPlay, HiGlobe, HiMic, HiNone, HiUpload, HiVideo, Mark, MeetingLogo, YouTubeLogo } from '../ui/icons';
+import { HiArrowRight, HiAudio, HiCaptions, HiCheck, HiChevronRight, HiDoc, HiExternal, HiPlay, HiGlobe, HiMic, HiNone, HiUpload, HiVideo, Mark, MeetingLogo, YouTubeLogo, HiBroadcast } from '../ui/icons';
 import { useLang, useReadLang, useSpeakerLabels, useSpokenLang } from '../ui/langs';
 import { useWarm } from '../ui/useWarm';
 import { InvokeNotice, MEETING_SHORT, mmss, useInvoked } from './Live';
@@ -50,6 +50,9 @@ interface Row extends FoundMedia {
   from?: 'click' | 'server' | 'player';
   /** The page the server found it on. */
   parent?: string;
+  /** A live stream the server found on the page: never ticked by itself,
+   *  since transcribing one records until it's stopped. */
+  live?: boolean;
 }
 
 /* Probes, once per address for as long as the panel is open (shared
@@ -181,8 +184,9 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
     if (f && f !== 'loading' && !base.some((b) => b.url === f.url) && !rows.some((x) => x.url === f.url)) rows.push({ ...f, from: 'player', parent: r.url });
     const p = probed[r.url];
     if (p?.state === 'done') {
-      for (const m of p.probe.media ?? []) {
-        if (!base.some((b) => b.url === m.url) && !rows.some((x) => x.url === m.url)) rows.push({ url: m.url, kind: 'link', title: m.title ?? host(m.url), from: 'server', parent: r.url });
+      const { files, streams } = pageMedia(p.probe);
+      for (const [list, live] of [[files, false], [streams, true]] as const) for (const m of list) {
+        if (!base.some((b) => b.url === m.url) && !rows.some((x) => x.url === m.url)) rows.push({ url: m.url, kind: 'link', title: m.title ?? host(m.url), from: 'server', parent: r.url, ...(live ? { live } : {}) });
       }
     }
   }
@@ -212,14 +216,16 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
     const p = probed[r.url];
     return p?.state === 'done' ? p.probe : null;
   };
-  const isLive = (r: Row) => verdict(r)?.kind === 'live';
+  const isLive = (r: Row) => !!r.live || verdict(r)?.kind === 'live';
   const selectable = (r: Row) => {
     const v = verdict(r);
     if (v) return v.ok || v.kind === 'live';
     return !isPage(r) && !r.streamOnly && probed[r.url]?.state !== 'error';
   };
   const started = new Set(tracked.filter((t) => t.phase !== 'error').map((t) => t.url));
-  const main = rows.find((r) => selectable(r) && !started.has(r.url) && (r.from === 'click' || r.playing)) ?? rows.find((r) => selectable(r) && !started.has(r.url));
+  // Ticked by itself: never a stream found on the page (it would record until stopped).
+  const mainable = (r: Row) => selectable(r) && !started.has(r.url) && !r.live;
+  const main = rows.find((r) => mainable(r) && (r.from === 'click' || r.playing)) ?? rows.find(mainable);
   const ticked = (r: Row) => selectable(r) && (sel ? sel.has(r.url) : r === main);
   const chosen = rows.filter(ticked);
   /** A ticked row still being checked: Transcribe waits for its answer. */
@@ -518,6 +524,7 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
     const c = await checkLink(await client(), url);
     const name = (title || host(url) || 'From the web').slice(0, 120);
     if (c.go) queueLink({ url, name, host: isYouTube(url) ? 'YouTube' : host(url), durationS, live: stream || c.live });
+    // A page's recordings, never its live streams (those are picked on Now).
     else if (c.media.length) for (const m of [...c.media].reverse()) queueLink({ url: m.url, name: (m.title?.trim() || name).slice(0, 120), host: host(m.url) });
     else { check.setError(advised(c)); return; }
     onUpload();
@@ -621,7 +628,7 @@ function FoundRow({ r, page, probe: p, player, selectable, ticked, started, onTo
   onToggle: () => void; onProbe: () => void;
 }) {
   const v = p?.state === 'done' ? p.probe : null;
-  const live = v?.kind === 'live';
+  const live = !!r.live || v?.kind === 'live';
   const meta = [
     live ? 'LIVE STREAM' : KIND_META[r.kind],
     r.durationS && !live ? mmss(r.durationS) : '',
@@ -633,14 +640,14 @@ function FoundRow({ r, page, probe: p, player, selectable, ticked, started, onTo
   let foot: React.ReactNode = null;
   if (p?.state === 'loading') foot = <><span className="spin" />Checking…</>;
   else if (p?.state === 'error') foot = <span className="pg-bad">{p.text}</span>;
-  else if (v && !v.ok && v.media?.length) foot = <span>{v.media.length === 1 ? 'One recording found on it, listed below.' : `${v.media.length} recordings found on it, listed below.`}</span>;
+  else if (v && !v.ok && v.media?.length) foot = <span>{foundText(pageMedia(v))} found on it, listed below.</span>;
   else if (v && !v.ok && !r.streamOnly) foot = <><span className="pg-bad">{v.problem || 'VocalStack can’t fetch this.'}</span><button type="button" className="pg-link" onClick={onProbe}>Check again</button></>;
   else if (!p && player === 'loading') foot = <><span className="spin" />Looking in the player…</>;
   else if (!p && player) foot = <span>Its recording is listed below.</span>;
   else if (!p && player === null) foot = <><span>VocalStack can search this player for its recording.</span><button type="button" className="pg-link" onClick={onProbe}>Find recordings</button></>;
   else if (!p && page && !r.streamOnly) foot = <><span>VocalStack can look for recordings on this page.</span><button type="button" className="pg-link" onClick={onProbe}>Find recordings</button></>;
 
-  const Icon = r.kind === 'audio' ? HiAudio : r.kind === 'video' || r.kind === 'embed' ? HiVideo : r.kind === 'page' ? HiGlobe : HiDoc;
+  const Icon = live ? HiBroadcast : r.kind === 'audio' ? HiAudio : r.kind === 'video' || r.kind === 'embed' ? HiVideo : r.kind === 'page' ? HiGlobe : HiDoc;
   return (
     <div className="found__item">
       <div className={`lrow${selectable ? ' lrow--click' : ''}`} onClick={onToggle} role="checkbox" aria-checked={ticked} aria-disabled={!selectable} tabIndex={selectable ? 0 : -1}

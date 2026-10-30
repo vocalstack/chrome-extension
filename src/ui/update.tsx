@@ -37,7 +37,6 @@ function label(s: UpdateState, long = false): string {
   if (s.step === 'checking') return 'Checking…';
   if (s.step === 'downloading') return 'Downloading…';
   if (s.step === 'ready') return 'Reload to Update';
-  if (!s.store) return long ? `Download ${s.latest}` : 'Download';
   return long ? 'Update VocalStack' : s.state === 'deprecated' ? 'Update Now' : 'Update';
 }
 
@@ -138,7 +137,7 @@ export function UpdatesCard({ s }: { s: UpdateState }) {
           <div className={`pref__sub${tone ? ` pref__sub--${tone}` : ''}`}>{error || sub}</div>
         </div>
         <button type="button" className={`upd__btn${main ? '' : ' upd__btn--plain'}`} disabled={busy(s)} onClick={cur ? check : go}>
-          {s.step === 'checking' ? 'Checking…' : cur ? 'Check for Updates' : s.state === 'deprecated' && s.step === 'idle' && s.store ? 'Update' : label(s)}
+          {s.step === 'checking' ? 'Checking…' : cur ? 'Check for Updates' : s.state === 'deprecated' && s.step === 'idle' ? 'Update' : label(s)}
         </button>
       </div>
       {s.store && (
