@@ -16,6 +16,8 @@ const KEY = 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA6JfceS4w36TjFU6pBfwh8Vy
 // gives its own (gdcnchohpgbnnakmhlcbcdkpnoadhjpa, which the API trusts too). VS_VERSION (CI: <package major.minor>.<commits
 // on main>) is the manifest version, which the store needs to grow.
 const STORE = process.env.VS_WEBSTORE === '1';
+// VS_AHEAD_DEBUG=1 builds Settings → Read-ahead debug in; releases leave it out.
+const AHEAD_DEBUG = process.env.VS_AHEAD_DEBUG === '1';
 
 export default defineConfig({
   srcDir: 'src',
@@ -40,6 +42,7 @@ export default defineConfig({
     },
   },
   vite: () => ({
+    define: { 'import.meta.env.VS_AHEAD_DEBUG': JSON.stringify(AHEAD_DEBUG) },
     resolve: {
       alias: {
         // The SDK imports 'ws' only under Node; a browser has WebSocket.

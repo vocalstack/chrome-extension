@@ -5,7 +5,8 @@
  *  and while a live session reads ahead on this tab, sends each Cluster
  *  of the main player once, with its time on the video, and the video's
  *  clock, to the offscreen document (offscreen/ahead.ts). Ads are
- *  neither kept nor sent. With Settings → Read-ahead debug, a panel on
+ *  neither kept nor sent. With Settings → Read-ahead debug (a build with
+ *  VS_AHEAD_DEBUG=1), a panel on
  *  the page says how far ahead each stage is (content/aheadHud.ts), and
  *  the console logs how early each line came back. */
 
@@ -177,8 +178,10 @@ export function startAhead() {
     if (on) { hudTimer ??= window.setInterval(drawHud, 500); drawHud(); }
     else { if (hudTimer) clearInterval(hudTimer); hudTimer = undefined; hud.hide(); }
   }
-  chrome.storage.local.get(AHEAD_DEBUG).then((g) => setDebug(g[AHEAD_DEBUG] === true), () => {});
-  chrome.storage.onChanged.addListener((c, area) => { if (area === 'local' && AHEAD_DEBUG in c) setDebug(c[AHEAD_DEBUG]!.newValue === true); });
+  if (import.meta.env.VS_AHEAD_DEBUG) {
+    chrome.storage.local.get(AHEAD_DEBUG).then((g) => setDebug(g[AHEAD_DEBUG] === true), () => {});
+    chrome.storage.onChanged.addListener((c, area) => { if (area === 'local' && AHEAD_DEBUG in c) setDebug(c[AHEAD_DEBUG]!.newValue === true); });
+  }
 
   /** The offscreen document's answer: how the session is doing. */
   function took(st: AheadStats) {

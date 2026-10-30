@@ -4,7 +4,7 @@
  *  sentences in time with the video, in the reading language. A new
  *  reading language translates the same transcription again.
  *
- *  With Settings → Captions on videos (on by default), this starts by
+ *  With Settings → Captions on videos (off until turned on), this starts by
  *  itself when the person starts a video playing with its sound on, for a
  *  video VocalStack can fetch: a YouTube video, or a page's own media file
  *  when it is the page's video (not an ad, not a small or short one), once
@@ -154,7 +154,7 @@ export function registerVcap(): Handlers {
 async function auto(tab: chrome.tabs.Tab, played: PlayedMsg) {
   if (tab.id === undefined || !tab.url || !/^https?:/.test(tab.url)) return;
   const g = await chrome.storage.local.get([AUTO_CAPTIONS, 'readLang']);
-  if (g[AUTO_CAPTIONS] === false || !(await account())) return;
+  if (g[AUTO_CAPTIONS] !== true || !(await account())) return;
   // Captions already on this tab: from its video, or from its sound.
   if (await get(tab.id)) return;
   const plan = captionPlan(playedOf(played, tab.url));

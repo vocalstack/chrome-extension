@@ -1,4 +1,4 @@
-/** Captions on videos (Settings, on by default): which way a video that
+/** Captions on videos (Settings, off by default): which way a video that
  *  just started playing with its sound on gets its captions.
  *
  *  - `server`: VocalStack fetches the video from its address and
@@ -147,7 +147,7 @@ export function playedOf(m: PlayedMsg, pageUrl: string): Played {
 export type CaptionPlan =
   | { path: 'server'; url: string; site: string | null }
   | { path: 'tab'; site: string | null }
-  | { path: 'none'; why: 'ad' | 'small' | 'short' };
+  | { path: 'none'; why: 'ad' | 'small' | 'short' | 'preview' };
 
 /** Which way the played video gets its captions. */
 export function captionPlan(p: Played): CaptionPlan {
@@ -161,6 +161,9 @@ export function captionPlan(p: Played): CaptionPlan {
   const site = siteOf(p.frameUrl) ?? siteOf(p.pageUrl);
   if (site?.name === 'YouTube') {
     const watch = youtubeWatch(p.frameUrl) ?? youtubeWatch(p.pageUrl);
+    // Off a video's own page (home, search, a channel), what plays is a
+    // preview under the pointer, not a video the person chose.
+    if (!watch) return { path: 'none', why: 'preview' };
     // A live broadcast has no end to transcribe: its sound, as it plays.
     if (watch && !live) return { path: 'server', url: watch, site: site.name };
     return { path: 'tab', site: site.name };

@@ -37,7 +37,7 @@ export function EnvPicker({ env, compact }: { env: Env; compact?: boolean }) {
 export function Settings({ account, update }: { account: Account; env: Env | null; update: UpdateState | null; onBack: () => void }) {
   const out = useAction();
   const [offerMeetings, setOfferMeetings] = useState(true);
-  const [autoCaptions, setAutoCaptions] = useState(true);
+  const [autoCaptions, setAutoCaptions] = useState(false);
   const [aheadDebug, setAheadDebug] = useState(false);
   const [plan, setPlan] = useState<string | null>(null);
 
@@ -46,7 +46,7 @@ export function Settings({ account, update }: { account: Account; env: Env | nul
     void rpc('auth.refresh').catch(() => {});
     chrome.storage.local.get([OFFER_KEY, AUTO_CAPTIONS, AHEAD_DEBUG]).then((g) => {
       setOfferMeetings(g[OFFER_KEY] !== false);
-      setAutoCaptions(g[AUTO_CAPTIONS] !== false);
+      setAutoCaptions(g[AUTO_CAPTIONS] === true);
       setAheadDebug(g[AHEAD_DEBUG] === true);
     });
     // The plan, when this sign-in may read billing (a key may not).
@@ -56,9 +56,9 @@ export function Settings({ account, update }: { account: Account; env: Env | nul
   const initials = account.name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('') || 'VS';
   const isKey = account.via === 'key';
   const foot = versionFoot(update);
-  const prefs: { label: string; sub: string; on: boolean; set: (v: boolean) => void }[] = [
+  const prefs: ({ label: string; sub: string; on: boolean; set: (v: boolean) => void } | false)[] = [
     { label: 'Captions on videos', sub: 'Turn captions on by themselves on every video you play with sound. Where Chrome asks first (Vimeo, Twitch and others), one click on the VocalStack icon turns them on. Uses credit.', on: autoCaptions, set: (v) => { setAutoCaptions(v); void chrome.storage.local.set({ [AUTO_CAPTIONS]: v }); } },
-    { label: 'Read-ahead debug', sub: 'On YouTube, show over the video how far ahead of it the buffer, the audio sent and the transcript are, and how early each line came back.', on: aheadDebug, set: (v) => { setAheadDebug(v); void chrome.storage.local.set({ [AHEAD_DEBUG]: v }); } },
+    import.meta.env.VS_AHEAD_DEBUG && { label: 'Read-ahead debug', sub: 'On YouTube, show over the video how far ahead of it the buffer, the audio sent and the transcript are, and how early each line came back.', on: aheadDebug, set: (v) => { setAheadDebug(v); void chrome.storage.local.set({ [AHEAD_DEBUG]: v }); } },
     { label: 'Offer to record meetings', sub: 'Offer to record when you join a call in a supported meeting app. Click the notification to open this panel.', on: offerMeetings, set: (v) => { setOfferMeetings(v); void chrome.storage.local.set({ [OFFER_KEY]: v }); } },
   ];
 
@@ -75,7 +75,7 @@ export function Settings({ account, update }: { account: Account; env: Env | nul
       </div>
 
       <div className="card2 card2--list">
-        {prefs.map((p) => (
+        {prefs.filter((p) => p !== false).map((p) => (
           <div key={p.label} className="pref">
             <div className="lrow__main"><div className="pref__label">{p.label}</div><div className="pref__sub">{p.sub}</div></div>
             <Toggle label={p.label} checked={p.on} onChange={p.set} />

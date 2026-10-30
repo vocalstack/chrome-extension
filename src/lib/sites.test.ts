@@ -58,6 +58,11 @@ test('YouTube: transcribed from its watch address, also when embedded', () => {
   assert.deepEqual(captionPlan(played({ pageUrl: 'https://news.com/story', frameUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ', durationS: 212 })), { path: 'server', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', site: 'YouTube' });
 });
 
+test('YouTube: a preview off a video page is not captioned', () => {
+  assert.deepEqual(captionPlan(played({ pageUrl: 'https://www.youtube.com/', durationS: 45 })), { path: 'none', why: 'preview' });
+  assert.deepEqual(captionPlan(played({ pageUrl: 'https://www.youtube.com/results?search_query=jazz', durationS: Infinity })), { path: 'none', why: 'preview' });
+});
+
 test('YouTube live: from the tab, as it plays', () => {
   assert.deepEqual(captionPlan(played({ pageUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', durationS: Infinity })), { path: 'tab', site: 'YouTube' });
 });

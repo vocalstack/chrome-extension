@@ -27,7 +27,8 @@ export const BEHIND_S = 1;
  *  (null: nothing yet, or no session reading ahead). */
 export const AHEAD_LEAD = 'vocalstack-ahead-lead';
 
-/** Settings → Read-ahead debug: the numbers on the video (content/ahead.ts). */
+/** Settings → Read-ahead debug: the numbers on the video (content/ahead.ts).
+ *  Only in a build with VS_AHEAD_DEBUG=1 (wxt.config.ts). */
 export const AHEAD_DEBUG = 'aheadDebug';
 
 /** How a session reading ahead is doing, for Read-ahead debug. Times are
