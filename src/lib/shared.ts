@@ -17,7 +17,15 @@ export const envOfPage = (u: string): Env => Object.values(ENVS).find((e) => [e.
 
 /** A shared transcription's code in a VocalStack address: the video
  *  player's `/<code>`, or the app's `/t/<code>` and `/v/<code>`. */
-export const shareCode = (u: string) => { try { return new URL(u).pathname.match(/^\/(?:[tv]\/)?([a-z0-9]{8,})\/?$/i)?.[1] ?? null; } catch { return null; } };
+export const shareCode = (u: string) => {
+  try {
+    const url = new URL(u);
+    // The player's own host takes `/<code>`; the app only `/t/` and `/v/`
+    // (its other pages, like /transcriptions, are not share links).
+    const player = Object.values(ENVS).some((e) => host(e.video) === url.hostname.replace(/^www\./, '') && !new URL(e.video).pathname.replace(/\/$/, ''));
+    return url.pathname.match(player ? /^\/(?:[tv]\/)?([a-z0-9]{8,})\/?$/i : /^\/[tv]\/([a-z0-9]{8,})\/?$/i)?.[1] ?? null;
+  } catch { return null; }
+};
 
 /** The shared transcription's job (null: none, or no longer running a
  *  job), or 'gone' once the link is revoked or the transcription removed. */

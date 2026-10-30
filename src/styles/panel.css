@@ -497,6 +497,7 @@ label.item--click{cursor:pointer}
 .site--go{cursor:pointer}
 .site--go:hover{background:var(--fill-08)}
 .site__sub{margin-top:4px;display:flex;align-items:center;gap:6px;min-width:0;font-size:12px;line-height:16px;color:var(--ink-45)}
+.site__sub--hold{visibility:hidden}
 .site__dot{flex:none;width:6px;height:6px;border-radius:50%}
 .site__dot--rec{background:var(--live);animation:vsx-dot 1.4s ease-in-out infinite}
 .site__app{flex:none;font-weight:500;color:var(--ink-62)}

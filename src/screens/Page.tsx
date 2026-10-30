@@ -20,7 +20,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { LinkProbe } from '@vocalstack/contract';
 import type { PanelIntent } from '../background/panel';
 import type { Account } from '../lib/auth';
-import { isOwn, type PlayerState } from '../lib/shared';
+import { isOwn, shareCode, type PlayerState } from '../lib/shared';
 import { videoIdOf } from '../lib/ahead';
 import { can, whyNot } from '../lib/access';
 import { capturable, inMeeting, isRunning, meetingHost, tabHolder, type LiveStatus } from '../lib/live';
@@ -126,7 +126,8 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
       if (n !== seq.current) return;
       setScan(null);
       const shut = e instanceof RpcError && (e.code === 'restricted' || e.code === 'no_tab');
-      setClosed(shut ? { why: e.message, title: tabRef.current !== null ? (await chrome.tabs.get(tabRef.current).catch(() => null))?.title : undefined } : null);
+      const t = shut && tabRef.current !== null ? await chrome.tabs.get(tabRef.current).catch(() => null) : null;
+      setClosed(shut ? { why: e.message, title: t?.title, url: t?.url ?? t?.pendingUrl } : null);
       setScanError(shut ? '' : errorText(e));
     } finally {
       if (n === seq.current) setScanning(false);
@@ -177,12 +178,16 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   // The rows: the click first, then what the tab has, then what the
   // server found on a page.
   const pageUrl = scan?.url ?? '';
-  const own = isOwn(pageUrl);
+  /** VocalStack's video player or a shared transcript: its transcription's
+   *  progress. Any other VocalStack page (the dashboard, admin, the site)
+   *  has nothing to transcribe. */
+  const own = isOwn(pageUrl) && !!shareCode(pageUrl);
+  const ownOther = isOwn(pageUrl) && !own;
   /** YouTube, but not a video (home, search, a channel): pick one first. */
   const ytBrowse = !own && isYouTube(pageUrl) && !MEDIA_PAGE.test(pageUrl);
   const base: Row[] = [];
-  if (own || ytBrowse) { /* nothing listed */ } else if (pinned) base.push({ ...(scan?.media.find((m) => m.url === pinned.url) ?? pinned), from: 'click' });
-  if (!own && !ytBrowse) for (const m of scan?.media ?? []) if (m.url !== pinned?.url) base.push(m);
+  if (own || ownOther || ytBrowse) { /* nothing listed */ } else if (pinned) base.push({ ...(scan?.media.find((m) => m.url === pinned.url) ?? pinned), from: 'click' });
+  if (!own && !ownOther && !ytBrowse) for (const m of scan?.media ?? []) if (m.url !== pinned?.url) base.push(m);
   const rows: Row[] = [];
   for (const r of base) {
     rows.push(r);
@@ -257,14 +262,14 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   };
 
   const meeting = meetingHost(scan?.url);
-  const videoPage = !meeting && !own && !!scan && MEDIA_PAGE.test(scan.url);
+  const videoPage = !meeting && !own && !ownOther && !!scan && MEDIA_PAGE.test(scan.url);
   const tabOk = capturable(scan?.url);
   const failed = tracked.filter((t) => t.phase === 'error' && !t.hidden).slice(-2);
   // A scan again (the panel focused) keeps what the last one showed.
   /** What the page has besides itself: the page's own row (always listed,
    *  background/page.ts mergeMedia) alone is nothing found. */
   const found = rows.filter((r) => !(r.url === pageUrl && r.kind === 'page'));
-  const empty = !own && !ytBrowse && !videoPage && !found.length && !scanError && !closed && (!scanning || !!scan);
+  const empty = !own && !ownOther && !ytBrowse && !videoPage && !found.length && !scanError && !closed && (!scanning || !!scan);
   /** Listed, but nothing in it can be sent: recording the tab is the way. */
   const noneSendable = found.length > 0 && !rows.some(selectable);
   const pageProbe = probed[pageUrl];
@@ -276,15 +281,22 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   return (
     <div className="screen screen--fill" data-screen-label="Now">
       <div className={`card2 site${recording ? ' site--go' : ''}`} {...(recording ? { role: 'button', tabIndex: 0, title: 'Go to Live', onClick: onLive, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onLive(); } } } : {})}>
-        <span className="round">{meeting ? <MeetingLogo k={meeting.key} size={20} /> : isYouTube(scan?.url) ? <YouTubeLogo size={20} /> : own ? <Mark width={18} height={18} alt="" /> : <HiGlobe width={18} height={18} style={{ color: 'var(--ink-62)' }} />}</span>
+        <span className="round">{meeting ? <MeetingLogo k={meeting.key} size={20} /> : isYouTube(scan?.url) ? <YouTubeLogo size={20} /> : own || ownOther ? <Mark width={18} height={18} alt="" /> : <HiGlobe width={18} height={18} style={{ color: 'var(--ink-62)' }} />}</span>
         <div className="lrow__main">
           <div className="lrow__title" title={scan?.title}>{scan?.title || closed?.title || (scanning ? 'Reading this tab…' : 'This tab')}</div>
-          {scan && (
+          {scan ? (
             <div className="site__sub">
               <i className={`site__dot${recording ? ' site__dot--rec' : ''}`} style={recording ? undefined : { background: videoPage ? 'var(--live)' : 'var(--ink-45)' }} />
-              <span className="site__app">{recording ? 'Recording' : meeting ? meeting.name : isYouTube(scan.url) ? 'YouTube' : own ? 'VocalStack' : 'Web page'}</span>
+              <span className="site__app">{recording ? 'Recording' : meeting ? meeting.name : isYouTube(scan.url) ? 'YouTube' : own || ownOther ? 'VocalStack' : 'Web page'}</span>
               <span className="site__sep">·</span>
               <span className="site__host">{recording ? 'Go to Live' : meeting ? (inMeeting(scan.url, scan.title) ? 'Meeting in progress' : host(scan.url)) : host(scan.url)}</span>
+            </div>
+          ) : (
+            // Always two lines, so the card keeps its height from tab to tab.
+            <div className={`site__sub${closed ? '' : ' site__sub--hold'}`}>
+              <i className="site__dot" style={{ background: 'var(--ink-45)' }} />
+              <span className="site__app">{closed ? closedKind(closed.url) : 'Reading'}</span>
+              {closed && /^https?:/.test(closed.url ?? '') && <><span className="site__sep">·</span><span className="site__host">{host(closed.url!)}</span></>}
             </div>
           )}
         </div>
@@ -298,32 +310,7 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
       <AccessNote account={account} need="record" onSettings={onSettings} />
       {scanError && <Note kind="warn">{scanError}</Note>}
 
-      {closed && (
-        <>
-          <div className="card2 empty2">
-            <span className="round round--lg"><HiNone /></span>
-            <div className="empty2__head">Nothing to transcribe here</div>
-            <div className="empty2__text">{closed.why} Open a page with audio or video and it shows up here.</div>
-          </div>
-          <div className="card2 card2--list">
-            <button type="button" className="lrow lrow--click lrow--btn" onClick={onUpload}>
-              <span className="round round--brand"><HiUpload /></span>
-              <div className="lrow__main"><div className="lrow__title">Upload a File</div><div className="lrow__meta">Audio or video from this computer</div></div>
-              <HiChevronRight width={14} height={14} style={{ flex: 'none', color: 'var(--ink-45)' }} />
-            </button>
-            <button type="button" className="lrow lrow--click lrow--btn" onClick={onLive}>
-              <span className="round round--brand"><HiMic /></span>
-              <div className="lrow__main"><div className="lrow__title">Live Transcription</div><div className="lrow__meta">From your microphone, or another tab</div></div>
-              <HiChevronRight width={14} height={14} style={{ flex: 'none', color: 'var(--ink-45)' }} />
-            </button>
-            <button type="button" className="lrow lrow--click lrow--btn" onClick={onLibrary}>
-              <span className="round round--brand"><HiDoc /></span>
-              <div className="lrow__main"><div className="lrow__title">Library</div><div className="lrow__meta">Every transcript, synced to your account</div></div>
-              <HiChevronRight width={14} height={14} style={{ flex: 'none', color: 'var(--ink-45)' }} />
-            </button>
-          </div>
-        </>
-      )}
+      {(closed || (ownOther && !recording)) && <NothingHere why={closed?.why ?? 'This is a VocalStack page.'} onUpload={onUpload} onLive={onLive} onLibrary={onLibrary} />}
 
       {own && !recording && <OwnPage url={pageUrl} />}
       {ytBrowse && !recording && <PickVideo />}
@@ -469,6 +456,45 @@ function ReadyCard({ videoId, title, busy, onOpen }: { videoId: string | null; t
         <span className="ready__go"><HiArrowRight width={16} height={16} /></span>
       </span>
     </button>
+  );
+}
+
+/** What a tab no extension may read is, for the card's second line. */
+function closedKind(url?: string): string {
+  if (!url) return 'Browser page';
+  if (/^https:\/\/(chromewebstore\.google\.com|chrome\.google\.com\/webstore)/.test(url)) return 'Chrome Web Store';
+  if (/^https:\/\/microsoftedge\.microsoft\.com/.test(url)) return 'Edge Add-ons';
+  if (url.startsWith('file:')) return 'File on this computer';
+  return 'Browser page';
+}
+
+/** A tab with nothing to transcribe, and nothing wrong: why, and where to go instead. */
+function NothingHere({ why, onUpload, onLive, onLibrary }: { why: string; onUpload: () => void; onLive: () => void; onLibrary: () => void }) {
+  return (
+    <>
+      <div className="card2 empty2">
+        <span className="round round--lg"><HiNone /></span>
+        <div className="empty2__head">Nothing to transcribe here</div>
+        <div className="empty2__text">{why} Open a page with audio or video and it shows up here.</div>
+      </div>
+      <div className="card2 card2--list">
+        <button type="button" className="lrow lrow--click lrow--btn" onClick={onUpload}>
+          <span className="round round--brand"><HiUpload /></span>
+          <div className="lrow__main"><div className="lrow__title">Upload a File</div><div className="lrow__meta">Audio or video from this computer</div></div>
+          <HiChevronRight width={14} height={14} style={{ flex: 'none', color: 'var(--ink-45)' }} />
+        </button>
+        <button type="button" className="lrow lrow--click lrow--btn" onClick={onLive}>
+          <span className="round round--brand"><HiMic /></span>
+          <div className="lrow__main"><div className="lrow__title">Live Transcription</div><div className="lrow__meta">From your microphone, or another tab</div></div>
+          <HiChevronRight width={14} height={14} style={{ flex: 'none', color: 'var(--ink-45)' }} />
+        </button>
+        <button type="button" className="lrow lrow--click lrow--btn" onClick={onLibrary}>
+          <span className="round round--brand"><HiDoc /></span>
+          <div className="lrow__main"><div className="lrow__title">Library</div><div className="lrow__meta">Every transcript, synced to your account</div></div>
+          <HiChevronRight width={14} height={14} style={{ flex: 'none', color: 'var(--ink-45)' }} />
+        </button>
+      </div>
+    </>
   );
 }
 
