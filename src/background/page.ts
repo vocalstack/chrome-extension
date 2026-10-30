@@ -2,7 +2,7 @@
  *  menus, and the `vs` omnibox keyword over the person's transcripts. */
 
 import { VocalStack, type SearchHit } from '@vocalstack/js-sdk';
-import type { Handlers } from '../lib/rpc';
+import { RpcError, type Handlers } from '../lib/rpc';
 import type { FoundMedia } from '../lib/media';
 import { accessToken } from '../lib/auth';
 import { currentEnv } from '../lib/env';
@@ -14,8 +14,9 @@ import { hitPath } from './page/paths';
 
 interface FrameAnswer { url: string; title: string; top: boolean; media: FoundMedia[] }
 
-class ScanError extends Error {
-  constructor(message: string, readonly code = 'restricted') { super(message); }
+/** Worded already: an RpcError, so its sentence reaches the panel as it is. */
+class ScanError extends RpcError {
+  constructor(message: string, code = 'restricted') { super(message, code); }
 }
 
 /** Pages no extension may read, or nothing VocalStack could fetch. */

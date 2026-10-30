@@ -25,3 +25,9 @@ test('the extension’s own errors keep their words, and carry the code across a
   const f = failure(Object.assign(api('insufficient_credit', 'Not enough credit.'), { status: 402, requestId: 'req_1' }));
   assert.deepEqual(f, { ok: false, error: 'Not enough credit.', code: 'insufficient_credit', status: 402, requestId: 'req_1' });
 });
+
+test('an error not named as the extension\'s own is worded generically, so worded ones must be', () => {
+  const store = 'The browser’s extension store can’t be read. Open a web page with audio or video.';
+  assert.equal(userText(new Error(store)), GENERIC);
+  assert.equal(failure(own(store)).error, store);
+});
