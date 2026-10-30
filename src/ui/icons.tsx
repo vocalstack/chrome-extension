@@ -91,6 +91,8 @@ export const HiArrowRight = H('M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3', 1.8);
 export const HiWarn = H('M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z');
 export const HiCheck = H('m4.5 12.75 6 6 9-13.5', 3);
 export const HiPause = H('M15.75 5.25v13.5m-7.5-13.5v13.5', 2);
+export const HiClose = H('M6 18 18 6M6 6l12 12');
+export const HiDownload = H('m9 12.75 3 3m0 0 3-3m-3 3v-7.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z');
 export const HiPlayStroke = H('M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z', 2);
 export const HiCloud = H('M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z', 1.5);
 /** Floating Captions: a window with lines of text. */

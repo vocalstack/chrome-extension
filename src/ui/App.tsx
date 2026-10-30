@@ -5,6 +5,7 @@
 
 import { useEffect, useState } from 'react';
 import type { Account } from '../lib/auth';
+import type { UpdateState } from '../lib/version';
 import { onPush, rpc } from '../lib/rpc';
 import { currentEnv, type Env } from '../lib/env';
 import { capturable, isRunning, type LiveStatus } from '../lib/live';
@@ -24,6 +25,8 @@ import { BroadcastsScreen } from '../screens/Broadcasts';
 import { VoicesScreen } from '../screens/Voices';
 import { LibraryScreen } from '../screens/Library';
 import { FileDrop } from '../screens/FileDrop';
+import { UpdateBanner, UpdateBlock, useUpdate } from './update';
+import { ENVS } from '../lib/env';
 
 type Area = Exclude<View, 'settings'>;
 const TABS: { view: Area; label: string; tip: string; Icon: typeof HiCursor }[] = [
@@ -46,6 +49,7 @@ export function App() {
   const setView = (v: View) => { if (v !== 'settings') setLastArea(v); setViewState(v); };
   const [live, setLive] = useState<LiveStatus[]>([]);
   const [intent, clearIntent] = usePanelIntent();
+  const update = useUpdate();
 
   useEffect(() => {
     rpc('auth.account').then(setAccount, () => setAccount(null));
@@ -65,11 +69,13 @@ export function App() {
   }, [intent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (account === undefined) return null;
-  if (!account) return <div className="shell"><SignIn env={env} /></div>;
+  // An unsupported version: nothing works until it's updated (lib/version.ts).
+  const block = update && <UpdateBlock s={update} app={(env ?? ENVS.production).app} />;
+  if (!account) return <div className="shell"><SignIn env={env} />{block}</div>;
 
   /** A session running: the Live tab shows it. */
   const rec = live.some((s) => on(s) && isRunning(s));
-  return <Panel account={account} env={env} view={view} setView={setView} lastArea={lastArea} live={live} rec={rec} intent={intent} clearIntent={clearIntent} />;
+  return <Panel account={account} env={env} view={view} setView={setView} lastArea={lastArea} live={live} rec={rec} intent={intent} clearIntent={clearIntent} update={update} block={block} />;
 }
 
 /** The toolbar icon's "!" on the active tab while the extension still
@@ -84,13 +90,14 @@ function useInvokeBadge(live: LiveStatus[]) {
   }, [tab?.id, need]);
 }
 
-function Panel({ account, env, view, setView, lastArea, live, rec, intent, clearIntent }: {
+function Panel({ account, env, view, setView, lastArea, live, rec, intent, clearIntent, update, block }: {
   account: Account; env: Env | null; view: View; setView: (v: View) => void; lastArea: Area; live: LiveStatus[]; rec: boolean;
-  intent: ReturnType<typeof usePanelIntent>[0]; clearIntent: () => void;
+  intent: ReturnType<typeof usePanelIntent>[0]; clearIntent: () => void; update: UpdateState | null; block: React.ReactNode;
 }) {
   useInvokeBadge(live);
   return (
     <div className="shell">
+      {update && <UpdateBanner s={update} />}
       <TipRow>
         <Header view={view} env={env} rec={rec} onView={setView} onBack={() => setView(lastArea)} />
       </TipRow>
@@ -101,9 +108,10 @@ function Panel({ account, env, view, setView, lastArea, live, rec, intent, clear
         {view === 'broadcasts' && <BroadcastsScreen account={account} onSettings={() => setView('settings')} />}
         {view === 'voices' && <VoicesScreen />}
         {view === 'library' && <LibraryScreen account={account} intent={intent?.view === 'library' ? intent : null} onIntentDone={clearIntent} />}
-        {view === 'settings' && <Settings account={account} env={env} onBack={() => setView(lastArea)} />}
+        {view === 'settings' && <Settings account={account} env={env} update={update} onBack={() => setView(lastArea)} />}
       </main>
       <FileDrop account={account} onSettings={() => setView('settings')} onDropped={() => setView('upload')} quiet={view === 'upload'} />
+      {block}
     </div>
   );
 }

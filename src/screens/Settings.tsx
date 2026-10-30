@@ -13,6 +13,8 @@ import { HiKey } from '../ui/icons';
 import { Toggle } from '../ui/ds';
 import { SpeakerLabelsCard } from '../ui/langs';
 import { client } from '../lib/client';
+import type { UpdateState } from '../lib/version';
+import { UpdatesCard, versionFoot } from '../ui/update';
 
 export function EnvPicker({ env, compact }: { env: Env; compact?: boolean }) {
   const [busy, setBusy] = useState(false);
@@ -32,7 +34,7 @@ export function EnvPicker({ env, compact }: { env: Env; compact?: boolean }) {
   return <div className="stack"><Field label="Environment" hint="Each environment has its own sign-in.">{select}</Field>{note}</div>;
 }
 
-export function Settings({ account }: { account: Account; env: Env | null; onBack: () => void }) {
+export function Settings({ account, update }: { account: Account; env: Env | null; update: UpdateState | null; onBack: () => void }) {
   const out = useAction();
   const [offerMeetings, setOfferMeetings] = useState(true);
   const [autoCaptions, setAutoCaptions] = useState(true);
@@ -53,6 +55,7 @@ export function Settings({ account }: { account: Account; env: Env | null; onBac
 
   const initials = account.name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('') || 'VS';
   const isKey = account.via === 'key';
+  const foot = versionFoot(update);
   const prefs: { label: string; sub: string; on: boolean; set: (v: boolean) => void }[] = [
     { label: 'Captions on videos', sub: 'Turn captions on by themselves on every video you play with sound. Where Chrome asks first (Vimeo, Twitch and others), one click on the VocalStack icon turns them on. Uses credit.', on: autoCaptions, set: (v) => { setAutoCaptions(v); void chrome.storage.local.set({ [AUTO_CAPTIONS]: v }); } },
     { label: 'Read-ahead debug', sub: 'On YouTube, show over the video how far ahead of it the buffer, the audio sent and the transcript are, and how early each line came back.', on: aheadDebug, set: (v) => { setAheadDebug(v); void chrome.storage.local.set({ [AHEAD_DEBUG]: v }); } },
@@ -82,9 +85,11 @@ export function Settings({ account }: { account: Account; env: Env | null; onBac
 
       <SpeakerLabelsCard />
 
+      {update && <UpdatesCard s={update} />}
+
       <button type="button" className="cta cta--signout" disabled={out.busy} onClick={() => out.run(() => rpc('auth.signOut'))}>{out.busy && <span className="spin" />}Sign Out</button>
       {out.error && <Note kind="bad">{out.error}</Note>}
-      <div className="version">VOCALSTACK FOR {import.meta.env.BROWSER === 'edge' ? 'EDGE' : 'CHROME'} · {chrome.runtime.getManifest().version}</div>
+      <div className={`version${foot.tone ? ` version--${foot.tone}` : ''}`}>VOCALSTACK FOR {import.meta.env.BROWSER === 'edge' ? 'EDGE' : 'CHROME'} · {foot.text}</div>
     </div>
   );
 }

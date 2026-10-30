@@ -10,6 +10,7 @@ import type { EnvName } from './env';
 import type { FoundMedia } from './media';
 import type { LiveStatus, LiveStart, DubStart, DubStatus, CaptionStyle, VcapStart, VcapStatus } from './live';
 import { failure, type Failure } from './errors';
+import type { UpdateState } from './version';
 import type { PlayerState } from './shared';
 import { report } from './sentry';
 
@@ -68,6 +69,13 @@ export interface Methods {
   /** Open the mic permission page (offscreen documents cannot ask). */
   'mic.ask': [void, boolean];
   'panel.open': [{ tabId?: number; view?: string }, void];
+  /** This version next to the newest release (`force`: ask GitHub now). */
+  'update.state': [{ force?: boolean } | void, UpdateState];
+  /** Fetch the update: from the store, or the release's zip when unpacked. */
+  'update.get': [void, void];
+  /** Reload the extension, which installs a downloaded update. */
+  'update.reload': [void, void];
+  'update.auto': [{ on: boolean }, UpdateState];
 }
 
 export type Method = keyof Methods;
@@ -123,7 +131,8 @@ export type Push =
   | { push: 'dub.status'; status: DubStatus }
   | { push: 'vcap.status'; status: VcapStatus }
   | { push: 'vcap.gone'; tabId: number }
-  | { push: 'auth.changed'; account: Account | null };
+  | { push: 'auth.changed'; account: Account | null }
+  | { push: 'update.state'; state: UpdateState };
 
 /** What a live session tells the panel and the captions overlay. */
 export type LiveEvent =

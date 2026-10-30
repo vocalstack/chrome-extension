@@ -12,6 +12,7 @@ import { registerVcap } from '../background/vcap';
 import { registerTabCaptions, takeOffer } from '../background/tabCaptions';
 import { registerVideo } from '../background/video';
 import { registerMeetings } from '../background/meetings';
+import { registerUpdates } from '../background/updates';
 import { showInPanel } from '../background/panel';
 import { initSentry } from '../lib/sentry';
 
@@ -64,6 +65,7 @@ export default defineBackground(() => {
     ...registerVcap(),
     ...registerVideo(),
     ...registerMeetings(),
+    ...registerUpdates(),
   };
   serve(handlers);
 });
