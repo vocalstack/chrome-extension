@@ -43,6 +43,8 @@ const EASE = 'cubic-bezier(.2,.7,.2,1)';
 const HOLD_S = 3;
 /** Read ahead: how many lines and translations are kept. */
 const KEEP_TIMED = 2000;
+/** The most lines a window set tall shows. */
+const KEEP_SHOWN = 30;
 
 const svg = (d: string, size: number, width = 1.6) =>
   `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
@@ -321,6 +323,8 @@ export function startOverlay() {
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
       saveGeo(next);
+      // Resized: as many lines as now fit.
+      if (dir) render();
     };
     if (!dir) win.classList.add('win--drag');
     window.addEventListener('pointermove', move);
@@ -456,11 +460,15 @@ export function startOverlay() {
     win.querySelector<HTMLElement>('.buf')!.hidden = !buffering();
   }
 
-  /** The two lines shown: the one before, dimmed, and the one being said. */
+  /** Lines shown: the one being said and, dimmed, the ones before it: one
+   *  at the window's own height, as many as fit once the person sets it
+   *  (render drops those that don't). */
+  const depth = () => (geo?.th != null ? KEEP_SHOWN : 2);
+
   function shown(): Shown[] {
     if (cues) {
       if (cue < 0) return [];
-      return [cues[cue - 1], cues[cue]].filter((c): c is Cue => !!c).map((c, i, all) => ({ key: `q${c.s}`, who: '', color: '', text: c.t,
+      return cues.slice(Math.max(0, cue - depth() + 1), cue + 1).map((c, i, all) => ({ key: `q${c.s}`, who: '', color: '', text: c.t,
         ...(i === all.length - 1 ? { said: reached({ key: '', s: c.s, e: c.e, text: c.t, speaker: '', words: c.w, translated: c.tr }) } : {}) }));
     }
     const names: Record<string, string> = { ...Object.fromEntries(Object.entries(voiced).filter(([, v]) => v)), ...Object.fromEntries(Object.entries(typed).filter(([, v]) => v)) };
@@ -480,7 +488,7 @@ export function startOverlay() {
       for (const l of lines) items.push({ key: `c${l.seq}`, ...tag(l.speaker), text: l.text });
       if (draft) items.push({ key: next, ...tag(last?.speaker ?? '0'), text: draft });
     }
-    return items.slice(-2);
+    return items.slice(-depth());
   }
 
   /** Read ahead: the units of this video, in time order: the API's
@@ -514,7 +522,10 @@ export function startOverlay() {
     let i = -1;
     for (let k = 0; k < all.length; k++) { if (all[k]!.s > t) break; i = k; }
     const cur = all[i];
-    if (!cur || t > cur.e + HOLD_S) return [];
+    if (!cur) return [];
+    // Set taller by the person: what has been said so far, as fits.
+    if (depth() > 2) return all.slice(Math.max(0, i - depth() + 1), i + 1);
+    if (t > cur.e + HOLD_S) return [];
     const prev = all[i - 1];
     return prev && cur.s - prev.e < HOLD_S ? [prev, cur] : [cur];
   }
@@ -605,14 +616,19 @@ export function startOverlay() {
         el.animate([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 380, easing: EASE });
       }
     }
-    shownKeys = items.map((x) => x.key);
-    // The text's height follows its lines, unless the person set it.
-    if (geo?.th != null) { txt.style.transition = 'none'; txt.style.height = `${geo.th}px`; }
+    // The text's height follows its lines, unless the person set it: then
+    // the oldest lines that don't fit go.
+    if (geo?.th != null) {
+      txt.style.transition = 'none';
+      txt.style.height = `${geo.th}px`;
+      while (inner.children.length > 1 && inner.offsetHeight > geo.th) inner.firstElementChild!.remove();
+    }
     else {
       const h = inner.offsetHeight;
       txt.style.transition = txt.style.height ? `height .4s ${EASE}` : 'none';
       txt.style.height = `${h}px`;
     }
+    shownKeys = [...inner.querySelectorAll<HTMLElement>('[data-k]')].map((el) => el.dataset.k!);
     place();
   }
 
@@ -697,14 +713,14 @@ export function startOverlay() {
     }
     if (ev.type === 'committed') {
       // A line sent again (a subscription reopened) replaces itself.
-      lines = [...lines.filter((x) => x.seq !== ev.seq), { seq: ev.seq, text: ev.text, speaker: ev.speaker ?? '0' }].sort((a, b) => a.seq - b.seq).slice(-8);
+      lines = [...lines.filter((x) => x.seq !== ev.seq), { seq: ev.seq, text: ev.text, speaker: ev.speaker ?? '0' }].sort((a, b) => a.seq - b.seq).slice(-KEEP_SHOWN);
       draft = draftTr = '';
     } else if (ev.type === 'draft') draft = ev.text;
     else if (ev.type === 'draftTranslated') { trLang = ev.lang; draftTr = ev.text; }
     else if (ev.type === 'translated') {
       trLang = ev.lang;
       const key = ev.sentenceId ?? -1 - ev.seq;
-      said = [...said.filter((x) => x.key !== key), { key, seq: ev.seq, tr: ev.text }].sort((a, b) => a.seq - b.seq).slice(-6);
+      said = [...said.filter((x) => x.key !== key), { key, seq: ev.seq, tr: ev.text }].sort((a, b) => a.seq - b.seq).slice(-KEEP_SHOWN);
       draftTr = '';
     } else if (ev.type === 'speaker') (ev.by === 'person' ? typed : voiced)[ev.speaker] = ev.name;
     render();
