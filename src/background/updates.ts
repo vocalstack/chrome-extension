@@ -1,10 +1,13 @@
 /** Updates: the newest version this install can get against this
  *  version (lib/version.ts), and installing it. A store install asks its
- *  store (requestUpdateCheck), whose answer is the version it serves now,
- *  past its review; asking also downloads it, which installs when the
- *  extension reloads, never on its own: the listener on onUpdateAvailable
- *  keeps Chrome from reloading under a recording. An unpacked install has
- *  no store: GitHub's Latest release (PUBLISHING.md), and the zip again. */
+ *  store's update server (the manifest's update_url: the same ask the
+ *  browser makes), whose answer is the version it serves now, past its
+ *  review. requestUpdateCheck can't say that: it answers update_available
+ *  only once the new version is downloaded, no_update until then. It
+ *  starts the download, which installs when the extension reloads, never
+ *  on its own: the listener on onUpdateAvailable keeps Chrome from
+ *  reloading under a recording. An unpacked install has no store:
+ *  GitHub's Latest release (PUBLISHING.md), and the zip again. */
 
 import { push, RpcError, type Handlers } from '../lib/rpc';
 import { versionState, type UpdateState } from '../lib/version';
@@ -14,10 +17,10 @@ const RELEASES = 'https://api.github.com/repos/vocalstack/chrome-extension/relea
 const ZIP = `https://github.com/vocalstack/chrome-extension/releases/download/latest/vocalstack-${import.meta.env.BROWSER === 'edge' ? 'edge' : 'chrome'}.zip`;
 /** GitHub asked again after this long (it allows 60 asks an hour per address). */
 const FRESH_MS = 6 * 60 * 60 * 1000;
-/** The store asked again after this long (Chrome throttles asking often). */
+/** The store's update server asked again after this long. */
 const STORE_FRESH_MS = 30 * 60 * 1000;
 const LATEST_KEY = 'vs.update.latest';
-const STORE_KEY = 'vs.update.store';
+const STORE_KEY = 'vs.update.served';
 const READY_KEY = 'vs.update.ready';
 export const AUTO_UPDATE = 'vs.update.auto';
 
@@ -46,21 +49,48 @@ async function fromGitHub(force: boolean): Promise<string | null> {
   }
 }
 
-let asking: Promise<string | null> | null = null;
-
-/** The store's newest version: update_available names it (and starts its
- *  download), no_update means this one; throttled keeps the last answer. */
-function fromStore(force: boolean): Promise<string | null> {
-  return (asking ??= (async () => {
-    const got = await seen(STORE_KEY);
-    if (got && !force && Date.now() - got.at < STORE_FRESH_MS) return got.v;
-    if (step === 'idle') { step = 'checking'; void tell(); }
-    const r = await chrome.runtime.requestUpdateCheck().catch(() => ({ status: 'throttled' as const, version: undefined }));
-    const v = r.status === 'update_available' && r.version ? r.version : r.status === 'no_update' ? current() : got?.v ?? null;
-    if (r.status !== 'throttled' && v) await chrome.storage.local.set({ [STORE_KEY]: { v, at: Date.now() } });
-    if (step === 'checking') step = r.status === 'update_available' ? 'downloading' : 'idle';
+/** The version the store serves now, from its update server: `version`
+ *  on the update when there is one, else this version (`noupdate`). */
+async function fromStore(force: boolean): Promise<string | null> {
+  const got = await seen(STORE_KEY);
+  if (got && !force && Date.now() - got.at < STORE_FRESH_MS) return got.v;
+  const server = chrome.runtime.getManifest().update_url;
+  if (!server) return got?.v ?? null;
+  const browser = navigator.userAgent.match(/Chrom(?:e|ium)\/([\d.]+)/)?.[1] ?? '120.0';
+  const x = new URLSearchParams({ id: chrome.runtime.id, v: current(), uc: '' }).toString();
+  const q = new URLSearchParams({ response: 'updatecheck', acceptformat: 'crx3', prodversion: browser, x });
+  try {
+    const r = await fetch(`${server}${server.includes('?') ? '&' : '?'}${q}`, { credentials: 'omit' });
+    if (!r.ok) return got?.v ?? null;
+    const check = (await r.text()).match(/<updatecheck\b[^>]*>/)?.[0] ?? '';
+    const status = check.match(/\bstatus="([^"]*)"/)?.[1];
+    // Edge writes four parts (0.1.33.0).
+    const served = check.match(/\bversion="(\d+\.\d+\.\d+)/)?.[1];
+    const v = status === 'noupdate' ? current() : status === 'ok' && served ? served : null;
+    if (!v) return got?.v ?? null;
+    await chrome.storage.local.set({ [STORE_KEY]: { v, at: Date.now() } });
     return v;
-  })().finally(() => { asking = null; }));
+  } catch {
+    return got?.v ?? null;
+  }
+}
+
+/** Has the browser fetch the store's newest version now: onUpdateAvailable
+ *  says when it is downloaded. */
+async function download() {
+  if (step === 'idle') { step = 'downloading'; await tell(); }
+  const r = await chrome.runtime.requestUpdateCheck().catch(() => null);
+  // Downloaded already (onUpdateAvailable may have come before this worker).
+  if (r?.status === 'update_available' && r.version) {
+    step = 'ready';
+    await chrome.storage.local.set({ [READY_KEY]: r.version });
+    return tell();
+  }
+  if (r?.status === 'throttled') {
+    step = 'idle';
+    await tell();
+    throw new RpcError('The browser checked for updates moments ago. Try again in a few minutes.');
+  }
 }
 
 async function latest(force = false): Promise<string | null> {
@@ -81,7 +111,15 @@ async function state(force = false): Promise<UpdateState> {
 const tell = async () => push({ push: 'update.state', state: await state() });
 
 /** Check now (Settings, and each time the panel opens). */
-const check = (force: boolean): Promise<UpdateState> => state(force);
+const check = async (force: boolean): Promise<UpdateState> => {
+  if (!force || step !== 'idle') return state(force);
+  step = 'checking';
+  await tell();
+  try { await latest(true); } finally { if (step === 'checking') step = 'idle'; }
+  const s = await state();
+  push({ push: 'update.state', state: s });
+  return s;
+};
 
 export function registerUpdates(): Handlers {
   // Registered once, at the worker's start: Chrome then waits for a reload.
@@ -95,9 +133,7 @@ export function registerUpdates(): Handlers {
   return {
     'update.state': ({ force } = {}) => check(!!force),
     'update.get': async () => {
-      // The store's answer started the download already; asked again, it
-      // resumes one that stopped.
-      if (await isStore()) { await fromStore(true); return void (await tell()); }
+      if (await isStore()) return download();
       await chrome.tabs.create({ url: ZIP });
       step = 'downloaded';
       await tell();
