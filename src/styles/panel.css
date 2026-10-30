@@ -393,6 +393,8 @@ label.item--click{cursor:pointer}
 .lrow:last-child{border-bottom:0}
 .lrow--click{cursor:pointer}
 .lrow--click:hover{background:var(--fill-04)}
+.lrow--btn{width:100%;border:0;border-bottom:1px solid var(--hair);background:none;color:inherit;font:inherit;text-align:left}
+.lrow--btn:last-child{border-bottom:0}
 .lrow__main{flex:1;min-width:0}
 .lrow__title{font-size:14px;font-weight:600;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lrow__meta{margin-top:4px;font:500 11px var(--vs-font-mono);color:var(--ink-40);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:uppercase}

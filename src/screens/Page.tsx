@@ -28,7 +28,7 @@ import { AccessNote, ProblemNote } from '../ui/access';
 import { client } from '../lib/client';
 import { advised, checkLink, foundText, pageMedia, probeOnce } from '../lib/linkCheck';
 import { playerFile } from '../lib/embedFiles';
-import { rpc, type Answer } from '../lib/rpc';
+import { rpc, RpcError, type Answer } from '../lib/rpc';
 import { MEDIA_PAGE, type FoundMedia } from '../lib/media';
 import { Note, errorText, useAction } from '../ui/kit';
 import { Eyebrow, Switch, Toggle } from '../ui/ds';
@@ -92,6 +92,9 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   const mayRecord = can(account, 'record');
   const [scan, setScan] = useState<Scan | null>(null);
   const [scanError, setScanError] = useState('');
+  /** A tab no extension may read (the browser's store and own pages, a
+   *  file): nothing went wrong, there's just nothing here. */
+  const [closed, setClosed] = useState<{ why: string; title?: string; url?: string } | null>(null);
   const [scanning, setScanning] = useState(true);
   const [pinned, setPinned] = useState<Row | null>(null);
   const [probed, setProbed] = useState<Record<string, ProbeState>>({});
@@ -118,10 +121,13 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
       scanUrl.current = s.url;
       setScan(s);
       setScanError('');
+      setClosed(null);
     } catch (e) {
       if (n !== seq.current) return;
       setScan(null);
-      setScanError(errorText(e));
+      const shut = e instanceof RpcError && (e.code === 'restricted' || e.code === 'no_tab');
+      setClosed(shut ? { why: e.message, title: tabRef.current !== null ? (await chrome.tabs.get(tabRef.current).catch(() => null))?.title : undefined } : null);
+      setScanError(shut ? '' : errorText(e));
     } finally {
       if (n === seq.current) setScanning(false);
     }
@@ -258,7 +264,7 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   /** What the page has besides itself: the page's own row (always listed,
    *  background/page.ts mergeMedia) alone is nothing found. */
   const found = rows.filter((r) => !(r.url === pageUrl && r.kind === 'page'));
-  const empty = !own && !ytBrowse && !videoPage && !found.length && !scanError && (!scanning || !!scan);
+  const empty = !own && !ytBrowse && !videoPage && !found.length && !scanError && !closed && (!scanning || !!scan);
   /** Listed, but nothing in it can be sent: recording the tab is the way. */
   const noneSendable = found.length > 0 && !rows.some(selectable);
   const pageProbe = probed[pageUrl];
@@ -272,7 +278,7 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
       <div className={`card2 site${recording ? ' site--go' : ''}`} {...(recording ? { role: 'button', tabIndex: 0, title: 'Go to Live', onClick: onLive, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onLive(); } } } : {})}>
         <span className="round">{meeting ? <MeetingLogo k={meeting.key} size={20} /> : isYouTube(scan?.url) ? <YouTubeLogo size={20} /> : own ? <Mark width={18} height={18} alt="" /> : <HiGlobe width={18} height={18} style={{ color: 'var(--ink-62)' }} />}</span>
         <div className="lrow__main">
-          <div className="lrow__title" title={scan?.title}>{scan?.title || (scanning ? 'Reading this tab…' : 'This tab')}</div>
+          <div className="lrow__title" title={scan?.title}>{scan?.title || closed?.title || (scanning ? 'Reading this tab…' : 'This tab')}</div>
           {scan && (
             <div className="site__sub">
               <i className={`site__dot${recording ? ' site__dot--rec' : ''}`} style={recording ? undefined : { background: videoPage ? 'var(--live)' : 'var(--ink-45)' }} />
@@ -291,6 +297,33 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
       {tabOk && invoked === false && (empty || videoPage) && !recording && <InvokeNotice tabId={scan?.tabId} />}
       <AccessNote account={account} need="record" onSettings={onSettings} />
       {scanError && <Note kind="warn">{scanError}</Note>}
+
+      {closed && (
+        <>
+          <div className="card2 empty2">
+            <span className="round round--lg"><HiNone /></span>
+            <div className="empty2__head">Nothing to transcribe here</div>
+            <div className="empty2__text">{closed.why} Open a page with audio or video and it shows up here.</div>
+          </div>
+          <div className="card2 card2--list">
+            <button type="button" className="lrow lrow--click lrow--btn" onClick={onUpload}>
+              <span className="round round--brand"><HiUpload /></span>
+              <div className="lrow__main"><div className="lrow__title">Upload a File</div><div className="lrow__meta">Audio or video from this computer</div></div>
+              <HiChevronRight width={14} height={14} style={{ flex: 'none', color: 'var(--ink-45)' }} />
+            </button>
+            <button type="button" className="lrow lrow--click lrow--btn" onClick={onLive}>
+              <span className="round round--brand"><HiMic /></span>
+              <div className="lrow__main"><div className="lrow__title">Live Transcription</div><div className="lrow__meta">From your microphone, or another tab</div></div>
+              <HiChevronRight width={14} height={14} style={{ flex: 'none', color: 'var(--ink-45)' }} />
+            </button>
+            <button type="button" className="lrow lrow--click lrow--btn" onClick={onLibrary}>
+              <span className="round round--brand"><HiDoc /></span>
+              <div className="lrow__main"><div className="lrow__title">Library</div><div className="lrow__meta">Every transcript, synced to your account</div></div>
+              <HiChevronRight width={14} height={14} style={{ flex: 'none', color: 'var(--ink-45)' }} />
+            </button>
+          </div>
+        </>
+      )}
 
       {own && !recording && <OwnPage url={pageUrl} />}
       {ytBrowse && !recording && <PickVideo />}

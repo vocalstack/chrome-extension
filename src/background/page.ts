@@ -22,12 +22,12 @@ class ScanError extends RpcError {
 /** Pages no extension may read, or nothing VocalStack could fetch. */
 function restricted(url: string): string | null {
   let u: URL;
-  try { u = new URL(url); } catch { return 'This tab has no page to read.'; }
-  if (u.protocol === 'file:') return 'Files on this computer can’t be read from a tab. Drop the file on this panel instead.';
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'Browser and extension pages can’t be read. Open a web page with audio or video.';
+  try { u = new URL(url); } catch { return 'This tab has no page on it yet.'; }
+  if (u.protocol === 'file:') return 'Files on this computer go in through Upload. Drop the file on this panel.';
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'This is one of the browser’s own pages, which extensions can’t read.';
   const h = u.hostname;
   if (h === 'chromewebstore.google.com' || (h === 'chrome.google.com' && u.pathname.startsWith('/webstore')) || h === 'microsoftedge.microsoft.com') {
-    return 'The browser’s extension store can’t be read. Open a web page with audio or video.';
+    return import.meta.env.BROWSER === 'edge' ? 'Edge doesn’t let extensions read its add-ons store.' : 'Chrome doesn’t let extensions read its Web Store.';
   }
   return null;
 }
