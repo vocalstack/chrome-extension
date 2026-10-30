@@ -43,7 +43,6 @@ function label(s: UpdateState, long = false): string {
 
 /** What happens after a click that the button can't say. */
 function after(s: UpdateState): string | null {
-  if (s.step === 'waiting') return `Version ${s.latest} is still in review at the ${import.meta.env.BROWSER === 'edge' ? 'Edge Add-ons store' : 'Chrome Web Store'}. It installs as soon as it’s out.`;
   if (s.step === 'downloaded') return `Unzip it in place of this version’s folder, then reload VocalStack in ${import.meta.env.BROWSER === 'edge' ? 'edge' : 'chrome'}://extensions.`;
   return null;
 }
