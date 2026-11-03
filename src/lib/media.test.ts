@@ -65,7 +65,10 @@ test('a page that is one recording, and the site pages that are not', () => {
     'https://open.spotify.com/episode/abc', 'https://www.dailymotion.com/video/x8abc',
     'https://www.twitch.tv/shroud', 'https://www.twitch.tv/shroud/', 'https://www.twitch.tv/videos/123456', 'https://www.twitch.tv/shroud/clip/Funny-Clip-abc', 'https://clips.twitch.tv/Funny-Clip-abc',
     'https://kick.com/xqc', 'https://kick.com/xqc/videos/1a2b-3c', 'https://kick.com/xqc/clips/clip_01',
-    'https://www.loom.com/share/ce8ee1c8901649e1a79c421e9c3fcfc5',
+    'https://www.loom.com/share/ce8ee1c8901649e1a79c421e9c3fcfc5', 'https://dai.ly/x5kesuj',
+    'https://www.tiktok.com/@someone/video/6748451240264420610', 'https://x.com/NASA/status/1806408962516066450', 'https://twitter.com/NASA/status/1806408962516066450',
+    'https://www.instagram.com/reel/C1a2b3c4d5/', 'https://www.instagram.com/p/C1a2b3c4d5/', 'https://www.facebook.com/watch/?v=274175099429670', 'https://www.facebook.com/somepage/videos/274175099429670/', 'https://www.facebook.com/reel/274175099429670', 'https://fb.watch/abc123/', 'https://www.facebook.com/groups/123/videos/456/',
+    'https://artist.bandcamp.com/track/song', 'https://artist.bandcamp.com/album/an-album', 'https://www.ted.com/talks/some_talk', 'https://streamable.com/abc12', 'https://archive.org/details/some-item', 'https://drive.google.com/file/d/1AbC_dEf/view',
   ];
   const no = [
     'https://www.youtube.com/', 'https://music.youtube.com/', 'https://www.youtube.com/@channel', 'https://www.youtube.com/results?search_query=x', 'https://www.youtube.com/playlist?list=PL1',
@@ -74,6 +77,8 @@ test('a page that is one recording, and the site pages that are not', () => {
     'https://www.twitch.tv/', 'https://www.twitch.tv/directory', 'https://www.twitch.tv/directory/category/just-chatting', 'https://www.twitch.tv/shroud/videos', 'https://www.twitch.tv/search?term=x', 'https://www.twitch.tv/settings/profile',
     'https://kick.com/', 'https://kick.com/browse', 'https://kick.com/categories/irl', 'https://kick.com/category/irl', 'https://kick.com/search?q=x', 'https://kick.com/following',
     'https://www.loom.com/', 'https://example.com/watch?v=1',
+    'https://www.tiktok.com/', 'https://www.tiktok.com/@someone', 'https://www.tiktok.com/foryou', 'https://x.com/home', 'https://x.com/NASA', 'https://www.instagram.com/', 'https://www.instagram.com/someone/',
+    'https://www.facebook.com/', 'https://www.facebook.com/watch/', 'https://artist.bandcamp.com/', 'https://www.ted.com/talks', 'https://streamable.com/', 'https://streamable.com/login', 'https://streamable.com/documentation', 'https://archive.org/details/movies', 'https://archive.org/details/@someone', 'https://drive.google.com/drive/my-drive',
   ];
   for (const u of yes) assert.equal(MEDIA_PAGE.test(u), true, u);
   for (const u of no) assert.equal(MEDIA_PAGE.test(u), false, u);

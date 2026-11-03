@@ -112,6 +112,18 @@ export function LibraryScreen({ account, intent, onIntentDone }: { account: Acco
 const meetingOfName = (name: string) => MEETING_HOSTS.find((m) => name.startsWith(`${m.name} ·`))?.name ?? null;
 const hostLabel = (u: string | null | undefined) => { try { const h = new URL(u ?? '').hostname.replace(/^(www|m)\./, ''); return h === 'youtu.be' ? 'YOUTUBE' : h.split('.').slice(-2, -1)[0]!.toUpperCase(); } catch { return ''; } };
 
+/** A link's site, by the id the server gives it (`job.source.site`), as
+ *  the meta line says it: the id itself, but where its name differs. */
+const SITE_LABEL: Record<string, string> = { gdrive: 'GOOGLE DRIVE', archive: 'INTERNET ARCHIVE', iheart: 'IHEARTRADIO', jwplayer: 'JW PLAYER' };
+/** The link fields the SDK this builds with doesn't have yet (transcribe: SourceInfo). */
+type SiteSource = { site?: string | null; thumbnailUrl?: string | null };
+
+/** A link's picture on its site (`job.source.thumbnailUrl`), once known. */
+function pictureOf(t: Transcription): string | null {
+  const u = (t.job?.source as SiteSource | undefined)?.thumbnailUrl;
+  return u && /^https:\/\//.test(u) ? u : null;
+}
+
 /** Where it came from, as the design's meta line says it. */
 function sourceOf(t: Transcription): { label: string; Icon: typeof HiDoc } {
   if ((t.broadcasts?.length ?? 0) > 0) return { label: 'BROADCAST', Icon: HiBroadcast };
@@ -123,7 +135,10 @@ function sourceOf(t: Transcription): { label: string; Icon: typeof HiDoc } {
   }
   const src = t.job?.source;
   if (src?.kind === 'file') return { label: 'UPLOAD', Icon: HiAudio };
-  if (src?.kind === 'url') return { label: hostLabel(src.url) || 'LINK', Icon: HiVideo };
+  if (src?.kind === 'url') {
+    const site = (src as SiteSource).site;
+    return { label: (site && (SITE_LABEL[site] ?? site.toUpperCase())) || hostLabel(src.url) || 'LINK', Icon: HiVideo };
+  }
   return { label: 'TRANSCRIPTION', Icon: HiDoc };
 }
 
@@ -188,6 +203,9 @@ function useSummary(rid: string | null | undefined): boolean {
 function LibRow({ t, today, onChanged }: { t: Transcription; today: boolean; onChanged: () => void }) {
   const retry = useAction();
   const { label, Icon } = sourceOf(t);
+  // Known once the fetch has it; one that won't load, the source's icon.
+  const [badPic, setBadPic] = useState<string | null>(null);
+  const pic = pictureOf(t) !== badPic ? pictureOf(t) : null;
   const job = t.job;
   const cur = t.currentRecording?.state;
   const dur = t.lastRecording?.durationS ?? job?.source?.durationS;
@@ -207,7 +225,7 @@ function LibRow({ t, today, onChanged }: { t: Transcription; today: boolean; onC
   return (
     <div className="lib-row">
       <div className="lrow lrow--click" role="link" tabIndex={0} onClick={open} onKeyDown={(e) => { if (e.key === 'Enter') open(); }}>
-        <span className="round"><Icon /></span>
+        <span className={`round${pic ? ' round--pic' : ''}`}>{pic ? <img src={pic} alt="" referrerPolicy="no-referrer" onError={() => setBadPic(pic)} /> : <Icon />}</span>
         <div className="lrow__main">
           <div className="lrow__title" title={t.name}>{t.name}</div>
           <div className="lrow__meta" style={failed ? { color: 'var(--bad)' } : undefined} title={meta}>{meta}</div>

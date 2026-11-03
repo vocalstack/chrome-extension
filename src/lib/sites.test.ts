@@ -8,19 +8,19 @@ const played = (p: Partial<Played> & { pageUrl: string }): Played => ({ frameUrl
 test('the ten sites are known, each by its subdomains too', () => {
   const cases: [string, string, 'server' | 'tab'][] = [
     ['https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'YouTube', 'server'],
-    ['https://vimeo.com/76979871', 'Vimeo', 'tab'],
-    ['https://player.vimeo.com/video/76979871', 'Vimeo', 'tab'],
-    ['https://www.twitch.tv/somechannel', 'Twitch', 'tab'],
-    ['https://clips.twitch.tv/SomeClip', 'Twitch', 'tab'],
-    ['https://www.dailymotion.com/video/x8abcd', 'Dailymotion', 'tab'],
+    ['https://vimeo.com/76979871', 'Vimeo', 'server'],
+    ['https://player.vimeo.com/video/76979871', 'Vimeo', 'server'],
+    ['https://www.twitch.tv/somechannel', 'Twitch', 'server'],
+    ['https://clips.twitch.tv/SomeClip', 'Twitch', 'server'],
+    ['https://www.dailymotion.com/video/x8abcd', 'Dailymotion', 'server'],
     ['https://www.facebook.com/watch/?v=123', 'Facebook', 'tab'],
     ['https://fb.watch/abc/', 'Facebook', 'tab'],
     ['https://x.com/someone/status/1', 'X', 'tab'],
     ['https://twitter.com/someone/status/1', 'X', 'tab'],
     ['https://www.instagram.com/reel/abc/', 'Instagram', 'tab'],
     ['https://www.tiktok.com/@someone/video/1', 'TikTok', 'tab'],
-    ['https://kick.com/somechannel', 'Kick', 'tab'],
-    ['https://www.loom.com/share/ce8ee1c8901649e1a79c421e9c3fcfc5', 'Loom', 'tab'],
+    ['https://kick.com/somechannel', 'Kick', 'server'],
+    ['https://www.loom.com/share/ce8ee1c8901649e1a79c421e9c3fcfc5', 'Loom', 'server'],
   ];
   for (const [url, name, route] of cases) assert.deepEqual([siteOf(url)?.name, siteOf(url)?.route], [name, route], url);
 });
@@ -67,19 +67,32 @@ test('YouTube live: from the tab, as it plays', () => {
   assert.deepEqual(captionPlan(played({ pageUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', durationS: Infinity })), { path: 'tab', site: 'YouTube' });
 });
 
-test('sites the server cannot fetch: from the tab, never from their address', () => {
-  for (const pageUrl of ['https://vimeo.com/76979871', 'https://www.twitch.tv/somechannel', 'https://www.dailymotion.com/video/x8abcd', 'https://kick.com/somechannel', 'https://www.loom.com/share/ce8ee1c8901649e1a79c421e9c3fcfc5']) {
-    const plan = captionPlan(played({ pageUrl, durationS: Infinity }));
-    assert.equal(plan.path, 'tab', pageUrl);
-  }
-  // Twitch VOD, a Vimeo video with an mp4 source: still the tab.
-  assert.equal(captionPlan(played({ pageUrl: 'https://www.twitch.tv/videos/1', durationS: 3600 })).path, 'tab');
-  assert.equal(captionPlan(played({ pageUrl: 'https://vimeo.com/1', src: 'https://vod-progressive.akamaized.net/x.mp4', durationS: 300 })).path, 'tab');
+test('a video’s own page on a site the server reads: the whole video, from its address', () => {
+  assert.deepEqual(captionPlan(played({ pageUrl: 'https://vimeo.com/76979871', durationS: 300 })), { path: 'server', url: 'https://vimeo.com/76979871', site: 'Vimeo' });
+  assert.deepEqual(captionPlan(played({ pageUrl: 'https://www.twitch.tv/videos/1', durationS: 3600 })), { path: 'server', url: 'https://www.twitch.tv/videos/1', site: 'Twitch' });
+  assert.deepEqual(captionPlan(played({ pageUrl: 'https://www.dailymotion.com/video/x8abcd', durationS: 300 })), { path: 'server', url: 'https://www.dailymotion.com/video/x8abcd', site: 'Dailymotion' });
+  assert.deepEqual(captionPlan(played({ pageUrl: 'https://www.loom.com/share/ce8ee1c8901649e1a79c421e9c3fcfc5', durationS: 300 })), { path: 'server', url: 'https://www.loom.com/share/ce8ee1c8901649e1a79c421e9c3fcfc5', site: 'Loom' });
+  // A Twitch past broadcast's or clip's address, a Dailymotion player.
+  assert.deepEqual(captionPlan(played({ pageUrl: 'https://clips.twitch.tv/Funny-Clip-abc', durationS: 30 })), { path: 'server', url: 'https://clips.twitch.tv/Funny-Clip-abc', site: 'Twitch' });
+  assert.deepEqual(captionPlan(played({ pageUrl: 'https://news.example.com/story', frameUrl: 'https://www.dailymotion.com/embed/video/x8abcd', durationS: 300 })), { path: 'server', url: 'https://www.dailymotion.com/video/x8abcd', site: 'Dailymotion' });
+  // Its own player, embedded in another page.
+  assert.deepEqual(captionPlan(played({ pageUrl: 'https://blog.example.com/post', frameUrl: 'https://player.vimeo.com/video/1', durationS: 300 })), { path: 'server', url: 'https://vimeo.com/1', site: 'Vimeo' });
 });
 
-test('an embedded Vimeo or Loom player on another page: the tab, not a page search', () => {
-  assert.deepEqual(captionPlan(played({ pageUrl: 'https://blog.example.com/post', frameUrl: 'https://player.vimeo.com/video/1', durationS: 300 })), { path: 'tab', site: 'Vimeo' });
-  assert.deepEqual(captionPlan(played({ pageUrl: 'https://blog.example.com/post', frameUrl: 'https://www.loom.com/embed/abc', durationS: 300 })), { path: 'tab', site: 'Loom' });
+test('live, off a video’s page, or a feed of clips: from the tab', () => {
+  for (const pageUrl of ['https://vimeo.com/76979871', 'https://www.twitch.tv/somechannel', 'https://kick.com/somechannel']) {
+    assert.equal(captionPlan(played({ pageUrl, durationS: Infinity })).path, 'tab', pageUrl);
+  }
+  assert.equal(captionPlan(played({ pageUrl: 'https://vimeo.com/', durationS: 300 })).path, 'tab');
+  // A channel's stream with a long finite length, as some players give it.
+  assert.equal(captionPlan(played({ pageUrl: 'https://www.twitch.tv/somechannel', durationS: 2 ** 30 })).path, 'tab');
+  assert.equal(captionPlan(played({ pageUrl: 'https://kick.com/somechannel/', durationS: 2 ** 30 })).path, 'tab');
+  assert.equal(captionPlan(played({ pageUrl: 'https://www.tiktok.com/@someone/video/6748451240264420610', durationS: 30 })).path, 'tab');
+  assert.equal(captionPlan(played({ pageUrl: 'https://x.com/NASA/status/1806408962516066450', durationS: 120 })).path, 'tab');
+});
+
+test('a Loom player on another page: its share link, not a page search', () => {
+  assert.deepEqual(captionPlan(played({ pageUrl: 'https://blog.example.com/post', frameUrl: 'https://www.loom.com/embed/abc', durationS: 300 })), { path: 'server', url: 'https://www.loom.com/share/abc', site: 'Loom' });
 });
 
 test('clip feeds count short clips; long-video sites do not', () => {

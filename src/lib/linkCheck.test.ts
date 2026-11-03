@@ -6,11 +6,19 @@ const LOOM = 'https://www.loom.com/share/ce8ee1c8901649e1a79c421e9c3fcfc5';
 const probe = (p: object) => ({ kind: 'unknown', source: 'web', ok: false, ...p }) as Parameters<typeof verdictOf>[0];
 
 test('a file that opens is transcribed', () => {
-  assert.deepEqual(verdictOf(probe({ kind: 'file', ok: true })), { go: true, live: false });
+  assert.deepEqual(verdictOf(probe({ kind: 'file', ok: true })), { go: true, live: false, about: {} });
+});
+
+test('a site link comes with its site, title, length and picture', () => {
+  assert.deepEqual(verdictOf(probe({ kind: 'file', ok: true, site: 'vimeo', siteName: 'Vimeo', title: ' The Mountain ', durationS: 212.4, thumbnailUrl: 'https://i.vimeocdn.com/video/1.jpg' })),
+    { go: true, live: false, about: { site: 'vimeo', siteName: 'Vimeo', title: 'The Mountain', durationS: 212.4, thumbnailUrl: 'https://i.vimeocdn.com/video/1.jpg' } });
+  // Nothing made up: no length for a live channel, no picture off https.
+  assert.deepEqual(verdictOf(probe({ kind: 'live', ok: true, site: 'twitch', siteName: 'Twitch', durationS: null, thumbnailUrl: 'http://x/1.jpg' })),
+    { go: true, live: true, about: { site: 'twitch', siteName: 'Twitch' } });
 });
 
 test('a live link is transcribed live', () => {
-  assert.deepEqual(verdictOf(probe({ kind: 'live', source: 'youtube', ok: true })), { go: true, live: true });
+  assert.deepEqual(verdictOf(probe({ kind: 'live', source: 'youtube', ok: true })), { go: true, live: true, about: {} });
 });
 
 test('a web page with nothing on it is refused in the server’s words, never sent', () => {
@@ -28,7 +36,7 @@ test('a web page with recordings offers them instead', () => {
 });
 
 test('an answer without ok (an older API) takes the address', () => {
-  assert.deepEqual(verdictOf({ kind: 'unknown', source: 'web' } as unknown as Parameters<typeof verdictOf>[0]), { go: true, live: false });
+  assert.deepEqual(verdictOf({ kind: 'unknown', source: 'web' } as unknown as Parameters<typeof verdictOf>[0]), { go: true, live: false, about: {} });
 });
 
 test('an answer that worked is kept; a refusal or a failure is asked again', async () => {
@@ -50,7 +58,7 @@ test('an answer that worked is kept; a refusal or a failure is asked again', asy
   assert.equal(n, 1);
   // No answer: taken as it is (as the dashboard does).
   n = 0;
-  assert.deepEqual(await checkLink(vs, `${LOOM}x`), { go: true, live: false });
+  assert.deepEqual(await checkLink(vs, `${LOOM}x`), { go: true, live: false, about: {} });
   await checkLink(vs, `${LOOM}x`);
   assert.equal(n, 2);
 });

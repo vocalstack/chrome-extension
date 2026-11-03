@@ -5,7 +5,7 @@
  *    the video) or, but on YouTube, File Upload (the whole video fetched,
  *    in Upload's list). YouTube's Live Transcription reads the video's
  *    audio ahead of playback (lib/ahead.ts): no File Upload there, but
- *    the Embedded Video Player (transcribed on the server, opened on
+ *    the Video Player (transcribed on the server, opened on
  *    video.vocalstack.com in a new tab);
  *  - another page with media: what it plays or links to, ticked, then
  *    Transcribe N Items;
@@ -26,7 +26,7 @@ import { can, whyNot } from '../lib/access';
 import { capturable, inMeeting, isRunning, meetingHost, tabHolder, type LiveStatus } from '../lib/live';
 import { AccessNote, ProblemNote } from '../ui/access';
 import { client } from '../lib/client';
-import { advised, checkLink, foundText, pageMedia, probeOnce } from '../lib/linkCheck';
+import { aboutOf, advised, checkLink, foundText, pageMedia, probeOnce, type About } from '../lib/linkCheck';
 import { playerFile } from '../lib/embedFiles';
 import { rpc, RpcError, type Answer } from '../lib/rpc';
 import { MEDIA_PAGE, type FoundMedia } from '../lib/media';
@@ -69,13 +69,16 @@ const isPlayer = (r: FoundMedia) => r.kind === 'embed' && !MEDIA_PAGE.test(r.url
 type InPlayer = FoundMedia | null | 'loading';
 
 const host = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
-const KIND_META: Record<FoundMedia['kind'], string> = { video: 'VIDEO', audio: 'AUDIO', embed: 'EMBEDDED PLAYER', link: 'LINK', page: 'PAGE' };
+const KIND_META: Record<FoundMedia['kind'], string> = { video: 'VIDEO', audio: 'AUDIO', embed: 'PLAYER', link: 'LINK', page: 'PAGE' };
 
 async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
   const w = await chrome.windows.getCurrent().catch(() => null);
   const [t] = await chrome.tabs.query(w?.id !== undefined ? { active: true, windowId: w.id } : { active: true, lastFocusedWindow: true });
   return t;
 }
+
+/** Sites of sound alone (transcribe src/stream_source/sites.rs): no video to play. */
+const AUDIO_SITES = new Set(['soundcloud', 'mixcloud', 'bandcamp', 'spreaker', 'iheart', 'audioboom']);
 
 const isYouTube = (u: string | undefined) => /^https?:\/\/(?:[\w-]+\.)?(?:youtube\.com|youtu\.be)\//i.test(u ?? '');
 
@@ -248,7 +251,11 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
     setSel(n);
   };
 
-  const linkOf = (r: Row) => ({ url: r.url, name: (r.title || host(r.url) || 'From the web').slice(0, 120), live: isLive(r) });
+  const linkOf = (r: Row) => {
+    const v = verdict(r);
+    // The site's own title first: an embed's row has the page's.
+    return { url: r.url, name: ((v?.ok ? aboutOf(v).title : undefined) || r.title || host(r.url) || 'From the web').slice(0, 120), live: isLive(r) };
+  };
   const transcribe = async () => {
     if (!chosen.length || !mayRecord) return;
     setStarting(true);
@@ -388,7 +395,7 @@ function usePlayer(url: string) {
   return { state, refresh: () => setN((x) => x + 1) };
 }
 
-type Fetchable = { state: 'checking' | 'yes' | 'media' } | { state: 'no'; why: string };
+type Fetchable = { state: 'checking' | 'media' } | { state: 'yes'; about: About; live: boolean } | { state: 'no'; why: string };
 
 /** Whether the server can fetch the video on `url` (null: not asked):
  *  its check of the address, shared with the one before sending. */
@@ -399,9 +406,9 @@ function useFetchable(url: string | null): Fetchable {
     let stop = false;
     setF({ state: 'checking' });
     client().then((vs) => checkLink(vs, url)).then(
-      (c) => { if (!stop) setF(c.go ? { state: 'yes' } : c.media.length ? { state: 'media' } : { state: 'no', why: advised(c) }); },
+      (c) => { if (!stop) setF(c.go ? { state: 'yes', about: c.about, live: c.live } : c.media.length ? { state: 'media' } : { state: 'no', why: advised(c) }); },
       // Refused for now (too many checks): File Upload stays, and its own check says why.
-      () => { if (!stop) setF({ state: 'yes' }); },
+      () => { if (!stop) setF({ state: 'yes', about: {}, live: false }); },
     );
     return () => { stop = true; };
   }, [url]);
@@ -435,7 +442,7 @@ function PlayerCard({ state, note, ready }: { state: PlayerState | null | undefi
 
 /** A YouTube video ready on the player, as one big button: its picture
  *  (the sharpest YouTube has), READY, and where it opens. */
-function ReadyCard({ videoId, title, busy, onOpen }: { videoId: string | null; title: string; busy: boolean; onOpen: () => void }) {
+function ReadyCard({ videoId, picture, title, busy, onOpen }: { videoId: string | null; picture?: string; title: string; busy: boolean; onOpen: () => void }) {
   const [res, setRes] = useState<'maxresdefault' | 'hqdefault'>('maxresdefault');
   useEffect(() => { setRes('maxresdefault'); }, [videoId]);
   return (
@@ -444,6 +451,8 @@ function ReadyCard({ videoId, title, busy, onOpen }: { videoId: string | null; t
         {/* A video without a large picture answers with a small grey one: that one is not taken. */}
         {videoId && <img src={`https://i.ytimg.com/vi/${videoId}/${res}.jpg`} alt="" onError={() => setRes('hqdefault')}
           onLoad={(e) => { if (res === 'maxresdefault' && e.currentTarget.naturalWidth < 400) setRes('hqdefault'); }} />}
+        {/* Another site's video: its picture there (the probe's). */}
+        {!videoId && picture && <img src={picture} alt="" referrerPolicy="no-referrer" />}
         <span className="ready__badge"><HiCheck width={12} height={12} />READY</span>
         <span className="ready__play">{busy ? <span className="spin" /> : <HiPlay width={22} height={22} />}</span>
         <span className="ready__brand"><Mark width={14} height={14} />VocalStack Player</span>
@@ -561,13 +570,17 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
      list of sites here. Offered while it is asked. */
   const fetchable = useFetchable(isYouTube(url) ? null : url);
   const upload = !isYouTube(url) && fetchable.state !== 'no';
+  /** A video the VocalStack player plays: YouTube's, or one on another site
+   *  the server reads (Vimeo, Dailymotion, TikTok…: the probe names it). */
+  const about = fetchable.state === 'yes' ? fetchable.about : null;
+  const siteVideo = isYouTube(url) || (!!about?.site && !AUDIO_SITES.has(about.site) && fetchable.state === 'yes' && !fetchable.live);
   const player = useAction();
-  /** Given a player link from here before (YouTube): watched there, not transcribed again. */
+  /** Transcribed before (here, or elsewhere in the account): watched on the player, not transcribed again. */
   const known = usePlayer(url);
-  const onPlayer = isYouTube(url) && !!known.state && known.state.phase !== 'failed';
+  const onPlayer = siteVideo && !!known.state && known.state.phase !== 'failed';
   const openPlayer = () => void player.run(async () => {
     // Watched there instead of here: Open in VocalStack takes this tab; the
-    // first open (Embedded Video Player) a new one beside it.
+    // first open (Video Player) a new one beside it.
     await rpc('video.player', { tabId, url, title: (title || '').replace(/ - YouTube$/, '').slice(0, 120) || undefined, here: onPlayer });
     if (!onPlayer) known.refresh();
   });
@@ -582,7 +595,8 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
   const toUpload = () => void check.run(async () => {
     const c = await checkLink(await client(), url);
     const name = (title || host(url) || 'From the web').slice(0, 120);
-    if (c.go) queueLink({ url, name, host: isYouTube(url) ? 'YouTube' : host(url), durationS, live: stream || c.live });
+    // The site's own title and length where it gives them (the probe's).
+    if (c.go) queueLink({ url, name: (c.about.title || name).slice(0, 120), host: c.about.siteName ?? (isYouTube(url) ? 'YouTube' : host(url)), durationS: c.about.durationS ?? durationS, live: stream || c.live });
     // A page's recordings, never its live streams (those are picked on Now).
     else if (c.media.length) for (const m of [...c.media].reverse()) queueLink({ url: m.url, name: (m.title?.trim() || name).slice(0, 120), host: host(m.url) });
     else { check.setError(advised(c)); return; }
@@ -597,7 +611,7 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
       <>
         <Eyebrow>WATCH ON VOCALSTACK</Eyebrow>
         {known.state!.phase === 'ready'
-          ? <ReadyCard videoId={videoIdOf(url)} title={title.replace(/ - YouTube$/, '')} busy={player.busy} onOpen={openPlayer} />
+          ? <ReadyCard videoId={videoIdOf(url)} picture={about?.thumbnailUrl} title={about?.title ?? title.replace(/ - YouTube$/, '')} busy={player.busy} onOpen={openPlayer} />
           : <PlayerCard state={known.state} note="Open it now: the transcript fills in as it goes." ready={{ head: 'Ready on VocalStack', text: '' }} />}
         {player.error && <ProblemNote error={player.error} onSettings={onSettings} />}
         {known.state!.phase !== 'ready' && (
@@ -620,8 +634,8 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
           {upload && <PickCard icon={<HiUpload />} head="File Upload" text={fetchable.state === 'media' ? 'The recordings VocalStack found on this page are fetched and transcribed at once, with full transcripts in your Library.' : 'The whole video is fetched and transcribed at once, with a full transcript in your Library.'}
             busy={check.busy || fetchable.state === 'checking'} onClick={toUpload} />}
           {fetchable.state === 'no' && <p className="pick__why">{fetchable.why}</p>}
-          {isYouTube(url) && !stream && (
-            <PickCard icon={<HiVideo />} head="Embedded Video Player" text="Open the video on VocalStack, with its transcript beside it, in a new tab."
+          {siteVideo && !stream && (
+            <PickCard icon={<HiVideo />} head="Video Player" text="Open the video on VocalStack, with its transcript beside it, in a new tab."
               busy={player.busy} disabled={!mayRecord} title={!mayRecord ? whyNot(account, 'record') : undefined} onClick={openPlayer} />
           )}
         </div>
@@ -688,10 +702,16 @@ function FoundRow({ r, page, probe: p, player, selectable, ticked, started, onTo
 }) {
   const v = p?.state === 'done' ? p.probe : null;
   const live = !!r.live || v?.kind === 'live';
+  // A link from a site VocalStack reads: its title, length and picture there.
+  const about = v?.ok ? aboutOf(v) : {};
+  const title = about.title || r.title || r.url;
+  const durationS = r.durationS ?? about.durationS;
+  const [badPic, setBadPic] = useState(false);
+  const pic = !badPic ? about.thumbnailUrl : undefined;
   const meta = [
-    live ? 'LIVE STREAM' : KIND_META[r.kind],
-    r.durationS && !live ? mmss(r.durationS) : '',
-    r.from === 'click' ? 'YOU PICKED THIS' : r.from === 'server' ? 'FOUND ON THE PAGE' : r.from === 'player' ? 'FOUND IN THE PLAYER' : r.playing ? 'MAIN PLAYER' : r.frameUrl ? 'EMBEDDED' : '',
+    live ? 'LIVE STREAM' : about.siteName ? about.siteName.toUpperCase() : KIND_META[r.kind],
+    durationS && !live ? mmss(durationS) : '',
+    r.from === 'click' ? 'YOU PICKED THIS' : r.from === 'server' ? 'FOUND ON THE PAGE' : r.from === 'player' ? 'FOUND IN THE PLAYER' : r.playing ? 'MAIN PLAYER' : r.frameUrl ? 'IN A PLAYER' : '',
     started ? 'STARTED' : '',
   ].filter(Boolean).join(' · ');
   const cantFetch = (r.streamOnly && (!v || !v.ok)) || (v && !v.ok && !v.media?.length && v.kind !== 'live');
@@ -712,9 +732,9 @@ function FoundRow({ r, page, probe: p, player, selectable, ticked, started, onTo
       <div className={`lrow${selectable ? ' lrow--click' : ''}`} onClick={onToggle} role="checkbox" aria-checked={ticked} aria-disabled={!selectable} tabIndex={selectable ? 0 : -1}
         onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); onToggle(); } }}>
         <span className="box" aria-checked={ticked} aria-disabled={!selectable}><HiCheck /></span>
-        <span className="round"><Icon /></span>
+        <span className={`round${pic ? ' round--pic' : ''}`}>{pic ? <img src={pic} alt="" referrerPolicy="no-referrer" onError={() => setBadPic(true)} /> : <Icon />}</span>
         <div className="lrow__main">
-          <div className="lrow__title" title={r.title || r.url}>{r.title || r.url}</div>
+          <div className="lrow__title" title={title}>{title}</div>
           <div className="lrow__meta" title={r.url}>{meta}</div>
         </div>
       </div>

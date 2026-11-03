@@ -507,7 +507,8 @@ async function summarize(l: Live, rid: string) {
       await new Promise((r) => setTimeout(r, i < 5 ? 3000 : 6000));
       const s = await l.vs.recordings.summary(rid);
       if (s.state === 'ready') { set(l, { summary: s.summary ?? '', name: s.title || l.status.name }); break; }
-      if (s.state === 'unavailable') break;
+      // Nothing was said: no summary to wait for.
+      if (s.state === 'unavailable') { set(l, { summary: null }); break; }
     }
   } catch { /* the summary stays in the dashboard */ }
   forgetLater(l);

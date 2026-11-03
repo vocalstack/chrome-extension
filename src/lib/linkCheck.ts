@@ -7,10 +7,28 @@
 
 import type { LinkProbe } from '@vocalstack/contract';
 
+/** A link from a site VocalStack reads (YouTube, Vimeo, SoundCloud,
+ *  Twitch…), as the probe names it: the site by id and name, and the
+ *  recording's title, length and image there, where the site gives them. */
+export interface About { site?: string; siteName?: string; title?: string; durationS?: number; thumbnailUrl?: string }
+
+/** The probe's word on what a link is (read as optional until
+ *  @vocalstack/contract has these fields). */
+export function aboutOf(p: LinkProbe): About {
+  const x = p as { site?: string | null; siteName?: string | null; title?: string | null; durationS?: number | null; thumbnailUrl?: string | null };
+  const a: About = {};
+  if (x.site) a.site = x.site;
+  if (x.siteName) a.siteName = x.siteName;
+  if (x.title?.trim()) a.title = x.title.trim();
+  if (typeof x.durationS === 'number' && x.durationS > 0) a.durationS = x.durationS;
+  if (x.thumbnailUrl && /^https:\/\//.test(x.thumbnailUrl)) a.thumbnailUrl = x.thumbnailUrl;
+  return a;
+}
+
 /** What to do with an address. */
 export type Checked =
   /** Transcribe it: a file the server fetches, or a live stream it records. */
-  | { go: true; live: boolean }
+  | { go: true; live: boolean; about: About }
   /** Not this address: why, in plain words, the recordings found on it (a
    *  web page's), and the server's reason, for the advice this extension
    *  gives (`advised`). */
@@ -66,8 +84,8 @@ export const CANT_FETCH = 'That link didn’t work. VocalStack can’t fetch a r
 /** The probe's answer, as what to do. An answer without `ok` (an API
  *  older than the check) can't say: the address is taken. */
 export function verdictOf(p: LinkProbe): Checked {
-  if (p.kind === 'live') return { go: true, live: true };
-  if (p.ok ?? true) return { go: true, live: false };
+  if (p.kind === 'live') return { go: true, live: true, about: aboutOf(p) };
+  if (p.ok ?? true) return { go: true, live: false, about: aboutOf(p) };
   const { files, streams } = pageMedia(p);
   const reason = (p as { reason?: Reason | null }).reason ?? undefined;
   const why = reason ? { reason } : {};
@@ -107,7 +125,7 @@ export async function checkLink(vs: Parameters<typeof probeOnce>[0], url: string
     p = await probeOnce(vs, url);
   } catch (e) {
     if (REFUSED.has((e as { code?: string } | null)?.code ?? '')) throw e;
-    return { go: true, live: false };
+    return { go: true, live: false, about: {} };
   }
   return verdictOf(p);
 }

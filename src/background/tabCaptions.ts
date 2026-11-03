@@ -1,7 +1,7 @@
 /** Captions on videos, from the tab's sound: for the sites VocalStack
- *  can't fetch a video from (Vimeo, Twitch, Dailymotion, Facebook, X,
- *  Instagram, TikTok, Kick, Loom…; lib/sites.ts), for live streams, and
- *  for players with no file address. The same capture and Floating
+ *  doesn't fetch a video from, the feeds of short clips (Facebook, X,
+ *  Instagram, TikTok; lib/sites.ts), for live streams, and for players
+ *  with no file address. The same capture and Floating
  *  Captions as Live → Captions (`startLive`, mode `captions`): realtime,
  *  nothing stored, translated into the reading language.
  *

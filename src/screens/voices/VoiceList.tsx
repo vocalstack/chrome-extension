@@ -53,7 +53,9 @@ export function VoiceList({ onOpen, onNew }: { onOpen: (v: Voice) => void; onNew
   const rows = usePickLangs('voice');
   const info = useLang()(lang);
   const player = usePlayer();
-  const voices = data ?? [];
+  // The library, as the dashboard's Voices lists it: not the automatic
+  // clones waiting on consent, nor a voice kept with one recording only.
+  const voices = (data ?? []).filter((v) => !(v as { auto?: boolean }).auto && (v as { library?: boolean }).library !== false);
   const sorted = [...voices].sort((a, b) => Number(b.draft) - Number(a.draft) || Date.parse(b.createdAt) - Date.parse(a.createdAt));
   usePollWhile(voices.some((v) => v.state === 'training'), async () => {
     try { setData(await (await client()).voices.list()); } catch { /* the next poll may work */ }
@@ -101,7 +103,7 @@ export function VoiceList({ onOpen, onNew }: { onOpen: (v: Voice) => void; onNew
         <div className="ey ey--line">YOUR VOICES</div>
         <div style={{ marginTop: 6 }}>
           {loading && !data && <div className="empty"><span className="spin" style={{ margin: '0 auto' }} /></div>}
-          {data && !sorted.length && !stock.length && <p className="pref__sub" style={{ margin: '6px 0 12px' }}>No voices yet. Record thirty seconds and the voice is built from it.</p>}
+          {data && !sorted.length && !stock.length && <p className="pref__sub" style={{ margin: '6px 0 12px' }}>No voices yet. Record twenty seconds and the voice is built from it.</p>}
           {sorted.map((v, i) => {
             const c = voiceColor(v.color) ?? SLOTS[i % SLOTS.length]!;
             const canPlay = v.state === 'ready' && !v.draft;

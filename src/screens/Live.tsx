@@ -358,7 +358,9 @@ function EndedCard({ s, account, onSettings }: { s: LiveStatus; account: Account
       {s.mode === 'meeting' && s.state === 'done' && (
         s.summary
           ? <div className="stack" style={{ gap: 6 }}><Eyebrow>SUMMARY</Eyebrow><p className="txl__text" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{s.summary}</p></div>
-          : <p className="hint row" style={{ margin: 0 }}><span className="spin" />Writing the summary…</p>
+          : s.summary === null
+            ? <p className="hint" style={{ margin: 0 }}>No summary: no speech was heard in this meeting.</p>
+            : <p className="hint row" style={{ margin: 0 }}><span className="spin" />Writing the summary…</p>
       )}
       {retry.error && <ProblemNote error={retry.error} onSettings={onSettings} />}
       <div className="row row--wrap" style={{ gap: 6 }}>

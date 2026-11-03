@@ -2,18 +2,27 @@
  *  just started playing with its sound on gets its captions.
  *
  *  - `server`: VocalStack fetches the video from its address and
- *    transcribes it (background/vcap.ts): a YouTube video, or a page's own
- *    media file. Only addresses the server opens as a recording, so the
- *    link check never searches a web page (an hourly allowance).
+ *    transcribes it (background/vcap.ts): a YouTube video, a video's own
+ *    page on a site the server reads (Vimeo, Dailymotion, Twitch, Kick,
+ *    Loom: transcribe src/stream_source/sites.rs), or a page's own media
+ *    file. Only addresses the server opens as a recording, so the link
+ *    check never searches a web page (an hourly allowance); one it
+ *    refuses all the same takes the tab's sound.
  *  - `tab`: the tab's own sound, captioned live in Floating Captions
- *    (background/tabCaptions.ts): every site the server refuses to fetch
- *    (transcribe: src/stream_source/mod.rs `PAGE_HOSTS`), live streams,
- *    and players with no file address of their own.
+ *    (background/tabCaptions.ts): the sites the server doesn't read, the
+ *    feeds of short clips (a transcription each, scrolling, would fill the
+ *    Library), live streams, and players with no file address of their own.
  *  - `none`: an ad, a small or secondary video, or a clip too short to be
  *    the page's video.
  *
  *  Pure: the content script measures the video (`Played`), the
  *  background decides here. */
+
+import { MEDIA_PAGE, embedOf } from './media.ts';
+
+/** A Twitch or Kick channel's own page: what plays there is its live
+ *  stream (a player may give it a long finite length), never a whole video. */
+const CHANNEL = /^https?:\/\/(?:www\.|m\.)?(?:twitch\.tv|kick\.com)\/[\w-]+\/?(?:[?#]|$)/i;
 
 export type CaptionRoute = 'server' | 'tab';
 
@@ -29,18 +38,18 @@ const SITES: [string, VideoSite][] = [
   ['youtube.com', { name: 'YouTube', route: 'server' }],
   ['youtube-nocookie.com', { name: 'YouTube', route: 'server' }],
   ['youtu.be', { name: 'YouTube', route: 'server' }],
-  ['vimeo.com', { name: 'Vimeo', route: 'tab' }],
-  ['twitch.tv', { name: 'Twitch', route: 'tab' }],
-  ['dailymotion.com', { name: 'Dailymotion', route: 'tab' }],
-  ['dai.ly', { name: 'Dailymotion', route: 'tab' }],
+  ['vimeo.com', { name: 'Vimeo', route: 'server' }],
+  ['twitch.tv', { name: 'Twitch', route: 'server' }],
+  ['dailymotion.com', { name: 'Dailymotion', route: 'server' }],
+  ['dai.ly', { name: 'Dailymotion', route: 'server' }],
   ['facebook.com', { name: 'Facebook', route: 'tab', clips: true }],
   ['fb.watch', { name: 'Facebook', route: 'tab', clips: true }],
   ['x.com', { name: 'X', route: 'tab', clips: true }],
   ['twitter.com', { name: 'X', route: 'tab', clips: true }],
   ['instagram.com', { name: 'Instagram', route: 'tab', clips: true }],
   ['tiktok.com', { name: 'TikTok', route: 'tab', clips: true }],
-  ['kick.com', { name: 'Kick', route: 'tab' }],
-  ['loom.com', { name: 'Loom', route: 'tab' }],
+  ['kick.com', { name: 'Kick', route: 'server' }],
+  ['loom.com', { name: 'Loom', route: 'server' }],
   ['wistia.com', { name: 'Wistia', route: 'tab' }],
   ['wistia.net', { name: 'Wistia', route: 'tab' }],
   ['soundcloud.com', { name: 'SoundCloud', route: 'tab' }],
@@ -170,6 +179,13 @@ export function captionPlan(p: Played): CaptionPlan {
   }
   if (site) {
     if (known && !site.clips && d! < MIN_TAB_S) return { path: 'none', why: 'short' };
+    // A video's own page (or its player) on a site the server reads: the
+    // whole video, as on YouTube. Live, its sound as it plays.
+    // An embedded player by its video's page (a Dailymotion embed).
+    const own = site.route === 'server' && !live
+      ? [embedOf(p.frameUrl ?? '')?.url, p.frameUrl, p.pageUrl].find((u): u is string => !!u && siteOf(u) === site && MEDIA_PAGE.test(u) && !CHANNEL.test(u))
+      : undefined;
+    if (own) return { path: 'server', url: own, site: site.name };
     return { path: 'tab', site: site.name };
   }
   // Any other page: its own media file, transcribed whole, only when it is

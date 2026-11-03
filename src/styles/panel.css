@@ -384,6 +384,8 @@ label.item--click{cursor:pointer}
 .round{flex:none;width:32px;height:32px;border-radius:50%;background:var(--fill-06);display:flex;align-items:center;justify-content:center;color:var(--ink-45)}
 .round svg{width:15px;height:15px}
 .round--lg{width:44px;height:44px}
+.round--pic{overflow:hidden;background:var(--fill-06)}
+.round--pic img{width:100%;height:100%;object-fit:cover;display:block}
 .round--lg svg{width:20px;height:20px}
 .round--brand{background:var(--brand-soft);color:var(--brand)}
 .sitedot{width:8px;height:8px;border-radius:50%;background:var(--ink-45)}

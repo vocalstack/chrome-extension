@@ -48,21 +48,45 @@ async function remember(key: string, ids: VideoIds) {
 
 const ytId = (url: string) => (/^https?:\/\/(?:[\w-]+\.)?(?:youtube\.com|youtu\.be)\//i.test(url) ? (videoIdOf(url) ?? url.match(/youtu\.be\/([\w-]{6,})/)?.[1] ?? null) : null);
 
-/** A YouTube video's transcription in the account, found on the server
- *  when this browser doesn't know it (made elsewhere, or the extension's
- *  storage cleared): the newest active one of the video's address, among
- *  the latest 200. A miss is remembered for a minute. */
+/** The account's transcription of a link, found on the server when this
+ *  browser doesn't know it (made elsewhere, or the extension's storage
+ *  cleared): `transcriptions.lookup`, the newest active one of the same
+ *  video (any address of a YouTube video) or the same address, a finished
+ *  one first. Not in the SDK this builds with yet, so asked directly. An
+ *  API without it (404): the newest active one among the latest 200, by
+ *  YouTube video. A miss is remembered for a minute. */
 const misses = new Map<string, number>();
-async function onServer(vs: VocalStack, url: string): Promise<VideoIds | null> {
+/** undefined: the server couldn't say (signed out, offline, busy). */
+async function lookup(vs: VocalStack, url: string): Promise<Transcription | null | undefined> {
+  const env = await currentEnv();
+  const token = await accessToken().catch(() => null);
+  if (!token) return undefined;
+  const r = await fetch(`${env.api}/v1/transcriptions/lookup?url=${encodeURIComponent(url)}`, { headers: { authorization: `Bearer ${token}` }, credentials: 'omit' }).catch(() => null);
+  if (r?.ok) {
+    const body = (await r.json().catch(() => null)) as { transcription?: Transcription | null } | null;
+    return body ? body.transcription ?? null : undefined;
+  }
+  if (r?.status !== 404) return undefined;
   const id = ytId(url);
-  if (!id || (misses.get(id) ?? 0) > Date.now()) return null;
+  if (!id) return null;
   const page = await vs.transcriptions.listPage({ limit: 200 }).catch(() => null);
-  const t = page?.transcriptions.find((x) => x.lifecycle === 'active' && x.job?.source?.url && ytId(x.job.source.url) === id);
-  if (!t?.job) {
-    if (page) misses.set(id, Date.now() + 60_000);
+  if (!page) return undefined;
+  return page.transcriptions.find((x) => x.lifecycle === 'active' && x.job?.source?.url && ytId(x.job.source.url) === id) ?? null;
+}
+
+/** `strict`: about to make one, so a server that couldn't say is an
+ *  error, never taken for "none" (that would transcribe the video twice). */
+async function onServer(vs: VocalStack, url: string, strict = false): Promise<VideoIds | null> {
+  const key = ytId(url) ?? url;
+  if ((misses.get(key) ?? 0) > Date.now()) return null;
+  const t = await lookup(vs, url);
+  if (t === undefined && strict) throw new RpcError('VocalStack couldn’t check whether this video is transcribed already. Try again in a moment.');
+  const rid = t?.job?.recordingId ?? t?.lastRecording?.recordingId;
+  if (!t || !rid) {
+    if (t !== undefined) misses.set(key, Date.now() + 60_000);
     return null;
   }
-  const ids = { transcriptionId: t.id, recordingId: t.job.recordingId };
+  const ids = { transcriptionId: t.id, recordingId: rid };
   await remember(await keyOf(url), ids);
   return ids;
 }
@@ -75,7 +99,7 @@ function idsFor(vs: VocalStack, key: string, req: { url: string; title?: string 
   let p = inflight.get(key);
   if (p) return p;
   p = (async () => {
-    let ids = (await known(key)) ?? (await onServer(vs, req.url));
+    let ids = (await known(key)) ?? (await onServer(vs, req.url, true));
     if (ids) {
       const t = await vs.transcriptions.get(ids.transcriptionId).catch(() => null);
       if (!t || t.lifecycle !== 'active') {
@@ -131,13 +155,25 @@ export async function transcribeVideo(vs: VocalStack, req: { url: string; title?
 }
 
 const PLAYER_LABEL = 'Video player';
-/** A YouTube video's player link, by environment and video id (any
- *  address of the video: a timestamp or a playlist doesn't matter). */
+/** A video's player link, by environment: a YouTube video by its id (any
+ *  address of the video: a timestamp or a playlist doesn't matter), a
+ *  video on another site by its address, as the server matches it
+ *  (`transcriptions.lookup`: no fragment, no trailing slash, the host in
+ *  any case). */
 const PLAYER = 'video.player';
 
 async function playerKey(url: string): Promise<string | null> {
+  const env = (await currentEnv()).name;
   const id = ytId(url);
-  return id ? `${PLAYER}:${(await currentEnv()).name}|yt:${id}` : null;
+  if (id) return `${PLAYER}:${env}|yt:${id}`;
+  try {
+    const u = new URL(url);
+    if (!/^https?:$/.test(u.protocol)) return null;
+    u.hash = '';
+    return `${PLAYER}:${env}|${u.protocol}//${u.host.toLowerCase()}${u.pathname.replace(/\/+$/, '')}${u.search}`;
+  } catch {
+    return null;
+  }
 }
 
 /** A video's transcription (the player's, the captions', the dub's): known

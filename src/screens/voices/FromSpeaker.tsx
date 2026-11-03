@@ -19,8 +19,10 @@ function candidates(t: TranscriptSnapshot): Cand[] {
     secs.set(s.speaker, (secs.get(s.speaker) ?? 0) + Math.max(0, s.end - s.start));
   }
   return [...secs.entries()]
-    .map(([speaker, seconds]) => {
-      const info = t.speakers.find((x) => x.speaker === speaker);
+    .map(([speaker, lines]) => {
+      const info = t.speakers.find((x) => x.speaker === speaker) as (TranscriptSnapshot['speakers'][number] & { speechS?: number | null }) | undefined;
+      // What the server counts (their diarized turns added up), else their lines' length.
+      const seconds = info?.speechS ?? lines;
       return { speaker, seconds, name: info?.name || `Speaker ${speaker + 1}`, hasVoice: !!info?.voiceId };
     })
     .sort((a, b) => b.seconds - a.seconds);

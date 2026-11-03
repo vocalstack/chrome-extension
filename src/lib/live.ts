@@ -70,7 +70,8 @@ export interface LiveStatus {
   speakerLabels?: 'auto' | 'on' | 'off';
   meeting?: MeetingKey;
   host?: string;
-  /** Meeting: the summary, once the recording is done. */
+  /** Meeting: the summary, once the recording is done; null when it has
+   *  none (nothing was said). */
   summary?: string | null;
   /** 0..1 input level, for the meter. */
   level?: number;

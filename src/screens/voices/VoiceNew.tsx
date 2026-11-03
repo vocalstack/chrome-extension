@@ -149,7 +149,7 @@ export function VoiceNew({ onBack, onCreated }: { onBack: () => void; onCreated:
         <Btn block icon={<IconUpload />} onClick={() => input.current?.click()}>Choose an audio file</Btn>
       )}
       {fileErr && <Note kind="bad">{fileErr}</Note>}
-      <p className="hint" style={{ margin: 0 }}>MP3, M4A or WAV of one person speaking. Thirty seconds is enough; a few minutes is better. Up to {MAX_SAMPLE_BYTES / (1024 * 1024)} MB.</p>
+      <p className="hint" style={{ margin: 0 }}>MP3, M4A or WAV of one person speaking. Twenty seconds is enough; a few minutes is better. Up to {MAX_SAMPLE_BYTES / (1024 * 1024)} MB.</p>
     </div>
   );
 

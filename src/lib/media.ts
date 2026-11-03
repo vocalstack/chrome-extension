@@ -227,7 +227,7 @@ export function scanDocument(doc: Document = document): FoundMedia[] {
 export const KIND_LABEL: Record<MediaKind, string> = {
   video: 'Video',
   audio: 'Audio',
-  embed: 'Embedded player',
+  embed: 'Player',
   link: 'Media link',
   page: 'This page',
 };
@@ -255,4 +255,20 @@ export const MEDIA_PAGE = new RegExp([
   // Kick: a channel (live), its past broadcasts and clips.
   String.raw`^https?:\/\/(?:www\.)?kick\.com\/(?!${NOT_CHANNEL}(?:[/?#]|$))[\w-]+(?:\/(?:videos|clips)\/[\w-]+)?(?:[?#]|\/?$)`,
   String.raw`^https?:\/\/(?:www\.)?loom\.com\/share\/`,
+  String.raw`^https?:\/\/dai\.ly\/\w`,
+  // The posts the server reads from a feed site: a TikTok video, an X
+  // post, an Instagram reel or post, a Facebook video or reel.
+  String.raw`^https?:\/\/(?:www\.|m\.)?tiktok\.com\/@[^/?#]+\/video\/\d+`,
+  String.raw`^https?:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\/\w+\/status\/\d+`,
+  String.raw`^https?:\/\/(?:www\.)?instagram\.com\/(?:[\w.]+\/)?(?:reels?|p|tv)\/[\w-]+`,
+  String.raw`^https?:\/\/(?:www\.|m\.|web\.)?facebook\.com\/(?:watch\/?\?(?:.*&)?v=\d|reel\/\d|(?:groups\/)?[^/?#]+\/videos\/(?:[^/?#]+\/)?\d)`,
+  String.raw`^https?:\/\/fb\.watch\/\w`,
+  // A Bandcamp track or album, a TED talk, a Streamable or Archive.org
+  // item, a Google Drive file.
+  String.raw`^https?:\/\/[\w-]+\.bandcamp\.com\/(?:track|album)\/[\w-]+`,
+  String.raw`^https?:\/\/(?:www\.)?ted\.com\/talks\/\w`,
+  String.raw`^https?:\/\/(?:www\.)?streamable\.com\/(?:e\/)?(?!(?:login|signup|settings|documentation|pricing|terms|privacy|about|blog|upload|videos|clipper|community|help|careers|features|api)\/?(?:[?#]|$))[a-z0-9]{4,10}\/?(?:[?#]|$)`,
+  // An item, not a person's page (@name) or one of the site's collections.
+  String.raw`^https?:\/\/(?:www\.)?archive\.org\/details\/(?!@|(?:movies|audio|texts|software|image|etree|opensource|opensource_movies|opensource_audio|feature_films|prelinger|tv|podcasts|radioprograms|oldtimeradio|librivoxaudio|audio_music|audio_bookspoetry|78rpm|georgeblood|internetarcade|softwarelibrary|classic_tv|ephemera|community|communityvideo|communityaudio)(?:[/?#]|$))[^/?#]+`,
+  String.raw`^https?:\/\/drive\.google\.com\/file\/d\/[\w-]+`,
 ].join('|'), 'i');

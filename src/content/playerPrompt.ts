@@ -1,5 +1,5 @@
 /** YouTube: a video given a VocalStack player link from the side panel
- *  (Now → Embedded Video Player) offers it on the page too: a card in the
+ *  (Now → Video Player) offers it on the page too: a card in the
  *  corner, its transcription's progress while the job runs, Open in
  *  VocalStack, and a close button that keeps it closed for that video
  *  for the rest of the visit. Never over a full-screen video. */

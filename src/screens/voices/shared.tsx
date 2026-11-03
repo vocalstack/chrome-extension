@@ -13,8 +13,9 @@ import type { Voice } from '@vocalstack/js-sdk';
 import { client } from '../../lib/client';
 import { Badge, errorText } from '../../ui/kit';
 
-/** The shortest sample the server builds from (`MIN_SAMPLE_S`). */
-export const MIN_SAMPLE_S = 30;
+/** The shortest sample the server builds from (`MIN_SAMPLE_S`: 20 s of
+ *  one person's speech, `tts::clone::MIN_SPEAKER_SPEECH_S`). */
+export const MIN_SAMPLE_S = 20;
 /** The server takes a sample this much under the minimum (`SAMPLE_TOLERANCE_S`). */
 export const SAMPLE_TOLERANCE_S = 1.5;
 /** The largest sample upload (`MAX_SAMPLE_BYTES`). */
