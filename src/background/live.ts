@@ -285,10 +285,18 @@ async function stopForTab(tabId: number) {
   }
 }
 
+/** Auto detect was the start before English (ui/langs.tsx SPOKEN_DEFAULT):
+ *  an install still on it moves to English, once. */
+export async function englishOnce() {
+  const g = await chrome.storage.local.get(['liveLang', 'vs.lang.en']);
+  if (g['vs.lang.en']) return;
+  await chrome.storage.local.set({ 'vs.lang.en': true, ...(g.liveLang ? {} : { liveLang: 'en' }) });
+}
+
 /** The panel's language choices (ui/langs.tsx), for a start made here. */
 export async function livePrefs(): Promise<Pick<LiveStart, 'translateTo' | 'spokenLanguage' | 'speakerLabels'>> {
   const g = await chrome.storage.local.get(['readLang', 'liveLang', 'speakerLabels']);
-  return { translateTo: (g.readLang as string) || null, spokenLanguage: (g.liveLang as string) || null, speakerLabels: (g.speakerLabels as LiveStart['speakerLabels']) ?? 'auto' };
+  return { translateTo: (g.readLang as string) || null, spokenLanguage: g.liveLang === undefined ? 'en' : (g.liveLang as string) || null, speakerLabels: (g.speakerLabels as LiveStart['speakerLabels']) ?? 'auto' };
 }
 
 /** The captions shortcut: this tab's recording shown on the page, on or

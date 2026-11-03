@@ -24,7 +24,8 @@ export interface Methods {
   'auth.refresh': [void, Account | null];
   'env.set': [{ name: EnvName }, void];
   /** The media the active tab (all its frames) plays or links to. */
-  'page.scan': [{ tabId?: number }, { tabId: number; url: string; title: string; media: FoundMedia[] }];
+  /** `icon`: the tab's own icon (its favicon), an https: or data: image. */
+  'page.scan': [{ tabId?: number }, { tabId: number; url: string; title: string; icon?: string; media: FoundMedia[] }];
   /** Start a live session: recording, meeting, captions or a broadcast take. */
   'live.start': [LiveStart, LiveStatus];
   'live.stop': [{ id: string }, void];

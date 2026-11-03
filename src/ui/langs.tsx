@@ -17,6 +17,9 @@ import { useTip } from './tip';
 
 export const READ_LANG = 'readLang';
 const SPOKEN = 'liveLang';
+/** What a new install transcribes in: English, until the person picks
+ *  another language or Auto detect (null). */
+export const SPOKEN_DEFAULT = 'en';
 const LABELS = 'speakerLabels';
 
 export type SpeakerLabels = 'auto' | 'on' | 'off';
@@ -38,7 +41,7 @@ function useStored<T>(key: string, fallback: T): [T, (v: T) => void, boolean] {
 }
 
 export const useReadLang = () => useStored<string | null>(READ_LANG, null);
-export const useSpokenLang = () => useStored<string | null>(SPOKEN, null);
+export const useSpokenLang = () => useStored<string | null>(SPOKEN, SPOKEN_DEFAULT);
 export const useSpeakerLabels = () => useStored<SpeakerLabels>(LABELS, 'auto');
 
 /** The "CC" glyph: reading as spoken. */

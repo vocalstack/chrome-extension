@@ -30,6 +30,7 @@ import { aboutOf, advised, checkLink, foundText, pageMedia, probeOnce, type Abou
 import { playerFile } from '../lib/embedFiles';
 import { rpc, RpcError, type Answer } from '../lib/rpc';
 import { MEDIA_PAGE, type FoundMedia } from '../lib/media';
+import { siteOf } from '../lib/sites';
 import { Note, errorText, useAction } from '../ui/kit';
 import { Eyebrow, Switch, Toggle } from '../ui/ds';
 import { HiArrowRight, HiAudio, HiCaptions, HiCheck, HiChevronRight, HiDoc, HiExternal, HiPlay, HiGlobe, HiMic, HiNone, HiUpload, HiVideo, Mark, MeetingLogo, YouTubeLogo, HiBroadcast } from '../ui/icons';
@@ -280,6 +281,9 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   /** Listed, but nothing in it can be sent: recording the tab is the way. */
   const noneSendable = found.length > 0 && !rows.some(selectable);
   const pageProbe = probed[pageUrl];
+  /** The site by name (Loom, Vimeo, TED…): one VocalStack knows, or the
+   *  name the server gave the page's video. */
+  const siteName = scan ? siteOf(scan.url)?.name ?? (videoPage && pageProbe?.state === 'done' ? aboutOf(pageProbe.probe).siteName : undefined) : undefined;
   /** This tab's recording, while it runs: the card and a button lead to Live. */
   const holder = scan ? tabHolder(live, scan.tabId) : undefined;
   const recording = !!holder && isRunning(holder);
@@ -288,13 +292,13 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   return (
     <div className="screen screen--fill" data-screen-label="Now">
       <div className={`card2 site${recording ? ' site--go' : ''}`} {...(recording ? { role: 'button', tabIndex: 0, title: 'Go to Live', onClick: onLive, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onLive(); } } } : {})}>
-        <span className="round">{meeting ? <MeetingLogo k={meeting.key} size={20} /> : isYouTube(scan?.url) ? <YouTubeLogo size={20} /> : own || ownOther ? <Mark width={18} height={18} alt="" /> : <HiGlobe width={18} height={18} style={{ color: 'var(--ink-62)' }} />}</span>
+        <span className="round">{meeting ? <MeetingLogo k={meeting.key} size={20} /> : isYouTube(scan?.url) ? <YouTubeLogo size={20} /> : own || ownOther ? <Mark width={18} height={18} alt="" /> : <SiteIcon src={scan?.icon} />}</span>
         <div className="lrow__main">
           <div className="lrow__title" title={scan?.title}>{scan?.title || closed?.title || (scanning ? 'Reading this tab…' : 'This tab')}</div>
           {scan ? (
             <div className="site__sub">
               <i className={`site__dot${recording ? ' site__dot--rec' : ''}`} style={recording ? undefined : { background: videoPage ? 'var(--live)' : 'var(--ink-45)' }} />
-              <span className="site__app">{recording ? 'Recording' : meeting ? meeting.name : isYouTube(scan.url) ? 'YouTube' : own || ownOther ? 'VocalStack' : 'Web page'}</span>
+              <span className="site__app">{recording ? 'Recording' : meeting ? meeting.name : isYouTube(scan.url) ? 'YouTube' : own || ownOther ? 'VocalStack' : siteName ?? 'Web page'}</span>
               <span className="site__sep">·</span>
               <span className="site__host">{recording ? 'Go to Live' : meeting ? (inMeeting(scan.url, scan.title) ? 'Meeting in progress' : host(scan.url)) : host(scan.url)}</span>
             </div>
@@ -469,6 +473,13 @@ function ReadyCard({ videoId, picture, title, busy, onOpen }: { videoId: string 
 }
 
 /** What a tab no extension may read is, for the card's second line. */
+/** The tab's own icon (its favicon), or a globe without one. */
+function SiteIcon({ src }: { src?: string }) {
+  const [bad, setBad] = useState<string>();
+  if (!src || bad === src) return <HiGlobe width={18} height={18} style={{ color: 'var(--ink-62)' }} />;
+  return <img src={src} alt="" width={20} height={20} style={{ display: 'block', borderRadius: 4 }} onError={() => setBad(src)} />;
+}
+
 function closedKind(url?: string): string {
   if (!url) return 'Browser page';
   if (/^https:\/\/(chromewebstore\.google\.com|chrome\.google\.com\/webstore)/.test(url)) return 'Chrome Web Store';
@@ -486,22 +497,11 @@ function NothingHere({ why, onUpload, onLive, onLibrary }: { why: string; onUplo
         <div className="empty2__head">Nothing to transcribe here</div>
         <div className="empty2__text">{why} Open a page with audio or video and it shows up here.</div>
       </div>
-      <div className="card2 card2--list">
-        <button type="button" className="lrow lrow--click lrow--btn" onClick={onUpload}>
-          <span className="round round--brand"><HiUpload /></span>
-          <div className="lrow__main"><div className="lrow__title">Upload a File</div><div className="lrow__meta">Audio or video from this computer</div></div>
-          <HiChevronRight width={14} height={14} style={{ flex: 'none', color: 'var(--ink-45)' }} />
-        </button>
-        <button type="button" className="lrow lrow--click lrow--btn" onClick={onLive}>
-          <span className="round round--brand"><HiMic /></span>
-          <div className="lrow__main"><div className="lrow__title">Live Transcription</div><div className="lrow__meta">From your microphone, or another tab</div></div>
-          <HiChevronRight width={14} height={14} style={{ flex: 'none', color: 'var(--ink-45)' }} />
-        </button>
-        <button type="button" className="lrow lrow--click lrow--btn" onClick={onLibrary}>
-          <span className="round round--brand"><HiDoc /></span>
-          <div className="lrow__main"><div className="lrow__title">Library</div><div className="lrow__meta">Every transcript, synced to your account</div></div>
-          <HiChevronRight width={14} height={14} style={{ flex: 'none', color: 'var(--ink-45)' }} />
-        </button>
+      <Eyebrow>TRANSCRIBE SOMETHING ELSE</Eyebrow>
+      <div className="stack" style={{ gap: 10 }}>
+        <PickCard icon={<HiUpload />} head="Upload a File" text="Audio or video from this computer." onClick={onUpload} />
+        <PickCard icon={<HiMic />} head="Live Transcription" text="From your microphone, or another tab." onClick={onLive} />
+        <PickCard icon={<HiDoc />} head="Library" text="Every transcript, synced to your account." onClick={onLibrary} />
       </div>
     </>
   );

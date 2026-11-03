@@ -7,7 +7,7 @@ import type { FoundMedia } from '../lib/media';
 import { accessToken } from '../lib/auth';
 import { currentEnv } from '../lib/env';
 import { showInPanel } from './panel';
-import { markInvoked } from './live';
+import { englishOnce, markInvoked } from './live';
 import { hitPath } from './page/paths';
 
 /* ── page.scan ─────────────────────────────────────────────────────── */
@@ -97,7 +97,8 @@ export async function scan(tabId?: number) {
   const top = answers.find((a) => a.top);
   const pageUrl = top?.url ?? url;
   const pageTitle = top?.title || title;
-  return { tabId: tab.id, url: pageUrl, title: pageTitle, media: mergeMedia(pageUrl, pageTitle, answers.flatMap((a) => a.media)) };
+  const icon = /^(?:https:|data:image\/)/.test(tab.favIconUrl ?? '') ? tab.favIconUrl : undefined;
+  return { tabId: tab.id, url: pageUrl, title: pageTitle, icon, media: mergeMedia(pageUrl, pageTitle, answers.flatMap((a) => a.media)) };
 }
 
 /* ── Context menus ─────────────────────────────────────────────────── */
@@ -189,6 +190,7 @@ function entered(text: string, disposition: `${chrome.omnibox.OnInputEnteredDisp
 
 export function registerPage(): Handlers {
   chrome.runtime.onInstalled.addListener(() => {
+    void englishOnce();
     const made = () => void chrome.runtime.lastError;
     chrome.contextMenus.create({ id: MENU.link, title: 'Transcribe this link', contexts: ['link'] }, made);
     chrome.contextMenus.create({ id: MENU.media, title: 'Transcribe this video or audio', contexts: ['video', 'audio'] }, made);
