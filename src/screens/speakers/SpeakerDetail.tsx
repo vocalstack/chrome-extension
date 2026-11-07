@@ -1,7 +1,8 @@
 /** One saved speaker: hear their cloned voice speak the fixed preview
  *  line in any language, hear the sample they were saved from, rename,
  *  recolour, switch their voice off, delete. A speaker saved without a
- *  clone (no consent) is recognised only: no preview, no voice to switch.
+ *  clone (no consent) is recognised only: no preview, no voice to switch,
+ *  until their permission is given here.
  *  A draft (a sample uploaded from the dashboard but not saved yet) is
  *  finished here with a name and the speaker's permission. */
 
@@ -40,7 +41,7 @@ export function SpeakerDetail({ id, onBack }: { id: string; onBack: () => void }
     try { setData(await getSpeaker(id)); } catch { /* the next poll may work */ }
   });
 
-  const patch = async (body: { name?: string; color?: string; enabled?: boolean }) => {
+  const patch = async (body: { name?: string; color?: string; enabled?: boolean; consent?: boolean }) => {
     if (!voice) return;
     const was = voice;
     setData({ ...was, ...body });
@@ -57,7 +58,7 @@ export function SpeakerDetail({ id, onBack }: { id: string; onBack: () => void }
   };
 
   const finishDraft = async () => {
-    const v = await save.run(() => updateSpeaker(id, { name: name.trim(), consent: true, draft: false, gender: sex || undefined }));
+    const v = await save.run(() => updateSpeaker(id, { name: name.trim(), consent, draft: false, gender: sex || undefined }));
     if (v) setData(v);
   };
 
@@ -146,7 +147,7 @@ export function SpeakerDetail({ id, onBack }: { id: string; onBack: () => void }
 
       {voice.draft ? (
         <>
-          <Note kind="warn">This speaker is not saved yet. Name them and confirm permission to save them.</Note>
+          <Note kind="warn">This speaker is not saved yet. Name them to save them; with their permission, their voice is cloned too.</Note>
           <Field label="Name">
             <input className="input" value={name} maxLength={MAX_NAME} placeholder="Who is this?" onChange={(e) => setName(e.target.value)} />
           </Field>
@@ -154,8 +155,8 @@ export function SpeakerDetail({ id, onBack }: { id: string; onBack: () => void }
             <Seg<Sex> label="Voice type" value={sex} onChange={setSex} options={[{ value: '', label: 'Detect' }, { value: 'male', label: 'Male' }, { value: 'female', label: 'Female' }]} />
           </Field>
           <ConsentCheck checked={consent} onChange={setConsent} />
-          <Btn kind="primary" block busy={save.busy} disabled={!name.trim() || !consent || voice.state === 'failed'} onClick={() => void finishDraft()}
-            title={!consent ? 'Confirm you have permission to clone this voice' : !name.trim() ? 'Name the speaker' : undefined}>
+          <Btn kind="primary" block busy={save.busy} disabled={!name.trim() || voice.state === 'failed'} onClick={() => void finishDraft()}
+            title={!name.trim() ? 'Name the speaker' : undefined}>
             Save speaker
           </Btn>
           {sampleRow}
@@ -205,6 +206,14 @@ export function SpeakerDetail({ id, onBack }: { id: string; onBack: () => void }
               </span>
             </label>
           </Section>}
+
+          {!voice.cloned && (
+            <Section title="Cloned voice">
+              <p className="hint" style={{ margin: 0 }}>Their voice is not cloned: they are recognised and named, and transcripts are not read in their voice.</p>
+              <ConsentCheck checked={consent} onChange={setConsent} />
+              <Btn block busy={save.busy} disabled={!consent} onClick={() => void patch({ consent: true })}>Clone their voice</Btn>
+            </Section>
+          )}
 
           <Section title="Sample">
             {sampleRow}

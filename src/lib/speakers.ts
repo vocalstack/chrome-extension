@@ -107,24 +107,27 @@ export async function deleteSpeaker(id: string): Promise<void> {
   await call(`/v1/speakers/${seg(id)}`, `/v1/voices/${seg(id)}`, { method: 'DELETE' });
 }
 
-/** A saved speaker from a recorded sample (asserts their permission to clone). */
-export async function createSpeaker(req: { name: string; sample: Blob; fileName: string; gender?: string }): Promise<SavedSpeaker> {
-  const form = () => {
+/** A saved speaker from a recorded sample. `consent`: their permission to
+ *  clone their voice; without it they are recognised by their fingerprint
+ *  only (a server before the cut keeps them as a draft instead). */
+export async function createSpeaker(req: { name: string; sample: Blob; fileName: string; gender?: string; consent: boolean }): Promise<SavedSpeaker> {
+  const form = (old: boolean) => {
     const f = new FormData();
-    f.append('meta', JSON.stringify({ consent: true, name: req.name, gender: req.gender }));
+    f.append('meta', JSON.stringify({ consent: req.consent, name: req.name, gender: req.gender, ...(old && !req.consent ? { draft: true } : {}) }));
     f.append('sample', req.sample, req.fileName);
     return f;
   };
   // A FormData is read once per request: one each.
-  return flat(await json<Wire>(call('/v1/speakers', '/v1/voices', { method: 'POST', form: form() }, { method: 'POST', form: form() })));
+  return flat(await json<Wire>(call('/v1/speakers', '/v1/voices', { method: 'POST', form: form(false) }, { method: 'POST', form: form(true) })));
 }
 
-/** A saved speaker from one person in a finished transcription. */
-export async function createFromAppearance(req: { transcriptionId: string; recordingId: string; appearance: number; name: string }): Promise<SavedSpeaker> {
+/** A saved speaker from one person in a finished transcription
+ *  (`consent` as for `createSpeaker`). */
+export async function createFromAppearance(req: { transcriptionId: string; recordingId: string; appearance: number; name: string; consent: boolean }): Promise<SavedSpeaker> {
   return flat(await json<Wire>(call(
     '/v1/speakers/from-appearance', '/v1/voices/from-speaker',
-    { method: 'POST', json: { transcriptionId: req.transcriptionId, appearance: req.appearance, name: req.name, consent: true } },
-    { method: 'POST', json: { recordingId: req.recordingId, speaker: req.appearance, name: req.name, consent: true } },
+    { method: 'POST', json: { transcriptionId: req.transcriptionId, appearance: req.appearance, name: req.name, consent: req.consent } },
+    { method: 'POST', json: { recordingId: req.recordingId, speaker: req.appearance, name: req.name, consent: req.consent } },
   )));
 }
 

@@ -1,5 +1,5 @@
-/** A new saved speaker: a name, their permission to clone their voice,
- *  and a sample — recorded here, uploaded, or taken from a speaker in a
+/** A new saved speaker: a name, a sample, and their permission to clone
+ *  their voice if given (without it they are recognised only); the sample — recorded here, uploaded, or taken from a speaker in a
  *  transcription. */
 
 import { useEffect, useRef, useState } from 'react';
@@ -55,10 +55,10 @@ export function SpeakerNew({ onBack, onCreated }: { onBack: () => void; onCreate
   const takeOk = !!mic.blob && !mic.quiet && mic.secs >= MIN_SAMPLE_S - SAMPLE_TOLERANCE_S;
   const sampleOk = src === 'mic' ? takeOk : src === 'file' ? !!file : !!pick;
   const nameOk = !!name.trim();
-  const ok = nameOk && consent && sampleOk && !make.busy && mic.state !== 'recording';
+  const ok = nameOk && sampleOk && !make.busy && mic.state !== 'recording';
   const why = !sampleOk
     ? (src === 'speaker' ? 'Choose a speaker' : 'Add a sample')
-    : !consent ? 'Confirm you have permission to clone this voice' : !nameOk ? 'Name the speaker' : undefined;
+    : !nameOk ? 'Name the speaker' : undefined;
 
   const create = async () => {
     if (!ok) return;
@@ -66,9 +66,9 @@ export function SpeakerNew({ onBack, onCreated }: { onBack: () => void; onCreate
     const v = await make.run(async () => {
       const n = name.trim();
       const gender = sex || undefined;
-      if (src === 'speaker' && pick) return createFromAppearance({ transcriptionId: pick.transcriptionId, recordingId: pick.recordingId, appearance: pick.appearance, name: n });
-      if (src === 'file' && file) return createSpeaker({ name: n, sample: file, fileName: file.name, gender });
-      if (mic.blob) return createSpeaker({ name: n, sample: mic.blob, fileName: 'sample.webm', gender });
+      if (src === 'speaker' && pick) return createFromAppearance({ transcriptionId: pick.transcriptionId, recordingId: pick.recordingId, appearance: pick.appearance, name: n, consent });
+      if (src === 'file' && file) return createSpeaker({ name: n, sample: file, fileName: file.name, gender, consent });
+      if (mic.blob) return createSpeaker({ name: n, sample: mic.blob, fileName: 'sample.webm', gender, consent });
       throw new Error('Add a sample first.');
     });
     if (v) onCreated(v);
@@ -180,6 +180,7 @@ export function SpeakerNew({ onBack, onCreated }: { onBack: () => void; onCreate
 
       <Section title="Permission">
         <ConsentCheck checked={consent} onChange={setConsent} />
+        {!consent && <p className="hint" style={{ margin: 0 }}>Without it, they are saved to be recognised and named, and their voice is not cloned.</p>}
       </Section>
 
       {make.error && <Note kind="bad">{make.error}</Note>}
