@@ -161,7 +161,7 @@ export function LanguageSelect({ value, onChange, list, auto, none, label, disab
   );
 }
 
-/** Open a dashboard page (`/transcriptions/…`, `/s/…`, `/voices/…`) in a tab. */
+/** Open a dashboard page (`/transcriptions/…`, `/s/…`, `/speakers/…`) in a tab. */
 export async function openApp(path: string): Promise<void> {
   const env = await currentEnv();
   await chrome.tabs.create({ url: new URL(path, env.app).toString() });

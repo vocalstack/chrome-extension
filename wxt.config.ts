@@ -28,7 +28,7 @@ export default defineConfig({
   manifest: {
     name: 'VocalStack',
     ...(process.env.VS_VERSION ? { version: process.env.VS_VERSION } : {}),
-    description: 'Transcribe what a page plays, caption and dub any video, record tabs and meetings, run broadcasts and train voices.',
+    description: 'Transcribe what a page plays, caption and dub any video, record tabs and meetings, run broadcasts and save speakers.',
     ...(STORE ? {} : { key: KEY }),
     minimum_chrome_version: '116',
     permissions: ['storage', 'identity', 'sidePanel', 'tabCapture', 'offscreen', 'contextMenus', 'activeTab', 'scripting', 'tabs', 'notifications', 'webNavigation'],

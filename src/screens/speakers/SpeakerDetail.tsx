@@ -1,20 +1,22 @@
-/** One voice: hear it speak the fixed preview line in any language, hear
- *  the sample it was made from, rename, recolour, switch off, delete. A
- *  draft (a sample uploaded from the dashboard but not created yet) is
+/** One saved speaker: hear their cloned voice speak the fixed preview
+ *  line in any language, hear the sample they were saved from, rename,
+ *  recolour, switch their voice off, delete. A speaker saved without a
+ *  clone (no consent) is recognised only: no preview, no voice to switch.
+ *  A draft (a sample uploaded from the dashboard but not saved yet) is
  *  finished here with a name and the speaker's permission. */
 
 import { useEffect, useState } from 'react';
-import { client } from '../../lib/client';
+import { deleteSpeaker, getSpeaker, updateSpeaker } from '../../lib/speakers';
 import { Btn, Field, IconBtn, LanguageSelect, Note, Section, Seg, ago, openApp, useAction, useLanguages, useLoad } from '../../ui/kit';
 import { IconAudio, IconBack, IconExternal, IconPause, IconPlay, IconTrash } from '../../ui/icons';
 import {
-  COLOR_SLOTS, ConsentCheck, DELETE_NOTE, MAX_NAME, StateBadge, VoiceAvatar, previewBlob, sampleBlob, seconds, usePlayer, usePollWhile, voiceColor,
+  COLOR_SLOTS, ConsentCheck, DELETE_NOTE, MAX_NAME, SpeakerAvatar, StateBadge, previewBlob, sampleBlob, seconds, speakerColor, usePlayer, usePollWhile,
 } from './shared';
 
 type Sex = '' | 'male' | 'female';
 
-export function VoiceDetail({ id, onBack }: { id: string; onBack: () => void }) {
-  const { data: voice, error, loading, setData } = useLoad(async () => (await client()).voices.get(id), [id]);
+export function SpeakerDetail({ id, onBack }: { id: string; onBack: () => void }) {
+  const { data: voice, error, loading, setData } = useLoad(() => getSpeaker(id), [id]);
   const player = usePlayer();
   const save = useAction();
   const del = useAction();
@@ -35,14 +37,14 @@ export function VoiceDetail({ id, onBack }: { id: string; onBack: () => void }) 
   }, [voice?.id]);
 
   usePollWhile(voice?.state === 'training', async () => {
-    try { setData(await (await client()).voices.get(id)); } catch { /* the next poll may work */ }
+    try { setData(await getSpeaker(id)); } catch { /* the next poll may work */ }
   });
 
   const patch = async (body: { name?: string; color?: string; enabled?: boolean }) => {
     if (!voice) return;
     const was = voice;
     setData({ ...was, ...body });
-    const v = await save.run(async () => (await client()).voices.update(id, body));
+    const v = await save.run(() => updateSpeaker(id, body));
     if (v) setData(v);
     else { setData(was); setName(was.name); }
   };
@@ -55,22 +57,22 @@ export function VoiceDetail({ id, onBack }: { id: string; onBack: () => void }) 
   };
 
   const finishDraft = async () => {
-    const v = await save.run(async () => (await client()).voices.update(id, { name: name.trim(), consent: true, draft: false, gender: sex || undefined }));
+    const v = await save.run(() => updateSpeaker(id, { name: name.trim(), consent: true, draft: false, gender: sex || undefined }));
     if (v) setData(v);
   };
 
   const remove = async () => {
     player.stop();
-    const ok = await del.run(async () => { await (await client()).voices.delete(id); return true; });
+    const ok = await del.run(async () => { await deleteSpeaker(id); return true; });
     if (ok) onBack();
   };
 
   const header = (
     <div className="row">
       <IconBtn label="Back" onClick={() => { player.stop(); onBack(); }}><IconBack /></IconBtn>
-      {voice && <VoiceAvatar v={voice} large />}
+      {voice && <SpeakerAvatar v={voice} large />}
       <div className="grow">
-        <div className="item__title">{voice ? voice.name.trim() || 'Unnamed voice' : 'Voice'}</div>
+        <div className="item__title">{voice ? voice.name.trim() || 'Unnamed speaker' : 'Speaker'}</div>
         {voice && <div className="item__sub">{[voice.gender === 'male' ? 'Male' : voice.gender === 'female' ? 'Female' : null, `created ${ago(voice.createdAt)}`].filter(Boolean).join(' · ')}</div>}
       </div>
       {voice && <StateBadge v={voice} />}
@@ -87,7 +89,7 @@ export function VoiceDetail({ id, onBack }: { id: string; onBack: () => void }) 
     );
   }
 
-  const ready = voice.state === 'ready' && !voice.draft;
+  const ready = voice.cloned && voice.state === 'ready' && !voice.draft;
   const langInfo = langs?.languages.find((l) => l.code === lang);
   const pvKey = `pv:${id}:${lang}`;
   const pvOn = player.playing === pvKey;
@@ -114,16 +116,16 @@ export function VoiceDetail({ id, onBack }: { id: string; onBack: () => void }) 
   const deleteBlock = confirm ? (
     <div className="card">
       <div className="stack" style={{ gap: 8 }}>
-        <strong>Delete “{voice.name.trim() || 'this voice'}” permanently?</strong>
-        <p className="hint" style={{ margin: 0 }}>{voice.draft ? 'Removes the sample and this unfinished voice. Nothing is kept.' : DELETE_NOTE}</p>
+        <strong>Delete “{voice.name.trim() || 'this speaker'}” permanently?</strong>
+        <p className="hint" style={{ margin: 0 }}>{voice.draft ? 'Removes the sample and this unfinished speaker. Nothing is kept.' : DELETE_NOTE}</p>
         <div className="row">
-          <Btn size="sm" kind="danger" icon={<IconTrash />} busy={del.busy} onClick={() => void remove()}>{voice.draft ? 'Discard' : 'Delete voice'}</Btn>
+          <Btn size="sm" kind="danger" icon={<IconTrash />} busy={del.busy} onClick={() => void remove()}>{voice.draft ? 'Discard' : 'Delete speaker'}</Btn>
           <Btn size="sm" kind="ghost" onClick={() => setConfirm(false)}>Cancel</Btn>
         </div>
       </div>
     </div>
   ) : (
-    <Btn kind="danger" block icon={<IconTrash />} onClick={() => setConfirm(true)}>{voice.draft ? 'Discard sample' : 'Delete voice'}</Btn>
+    <Btn kind="danger" block icon={<IconTrash />} onClick={() => setConfirm(true)}>{voice.draft ? 'Discard sample' : 'Delete speaker'}</Btn>
   );
 
   return (
@@ -140,27 +142,27 @@ export function VoiceDetail({ id, onBack }: { id: string; onBack: () => void }) 
           <p className="hint" style={{ margin: 0 }}>{voice.progress}% · this page updates on its own.</p>
         </Section>
       )}
-      {voice.state === 'failed' && <Note kind="bad">{voice.error || 'This voice could not be built.'} Record a new sample to try again.</Note>}
+      {voice.state === 'failed' && <Note kind="bad">{voice.error || 'Their voice could not be built.'} Record a new sample to try again.</Note>}
 
       {voice.draft ? (
         <>
-          <Note kind="warn">This sample has not been made into a voice yet. Name it and confirm permission to create it.</Note>
+          <Note kind="warn">This speaker is not saved yet. Name them and confirm permission to save them.</Note>
           <Field label="Name">
-            <input className="input" value={name} maxLength={MAX_NAME} placeholder="Whose voice is this?" onChange={(e) => setName(e.target.value)} />
+            <input className="input" value={name} maxLength={MAX_NAME} placeholder="Who is this?" onChange={(e) => setName(e.target.value)} />
           </Field>
           <Field label="Voice" hint="Left on Detect, it is measured from the sample.">
             <Seg<Sex> label="Voice type" value={sex} onChange={setSex} options={[{ value: '', label: 'Detect' }, { value: 'male', label: 'Male' }, { value: 'female', label: 'Female' }]} />
           </Field>
           <ConsentCheck checked={consent} onChange={setConsent} />
           <Btn kind="primary" block busy={save.busy} disabled={!name.trim() || !consent || voice.state === 'failed'} onClick={() => void finishDraft()}
-            title={!consent ? 'Confirm you have permission to clone this voice' : !name.trim() ? 'Name the voice' : undefined}>
-            Create voice
+            title={!consent ? 'Confirm you have permission to clone this voice' : !name.trim() ? 'Name the speaker' : undefined}>
+            Save speaker
           </Btn>
           {sampleRow}
         </>
       ) : (
         <>
-          <Section title="Preview in any language">
+          {voice.cloned && <Section title="Preview in any language">
             <div className="row">
               <Btn kind="primary" disabled={!ready} icon={player.loading === pvKey ? undefined : pvOn ? <IconPause /> : <IconPlay />} busy={player.loading === pvKey}
                 onClick={() => void player.play(pvKey, (alive) => previewBlob(id, lang, langInfo?.name ?? lang, alive))}>
@@ -171,11 +173,11 @@ export function VoiceDetail({ id, onBack }: { id: string; onBack: () => void }) 
               </div>
             </div>
             {langInfo?.previewLine && <p className="vc-line">{langInfo.previewLine}</p>}
-            <p className="hint" style={{ margin: 0 }}>{ready ? 'The voice speaks a preset line in the language you pick.' : 'The preview plays once the voice is ready.'}</p>
-          </Section>
+            <p className="hint" style={{ margin: 0 }}>{ready ? 'Their voice speaks a preset line in the language you pick.' : 'The preview plays once their voice is ready.'}</p>
+          </Section>}
 
           <Section title="Name">
-            <input className="input" aria-label="Voice name" value={name} maxLength={MAX_NAME} placeholder="Whose voice is this?"
+            <input className="input" aria-label="Speaker name" value={name} maxLength={MAX_NAME} placeholder="Who is this?"
               onChange={(e) => setName(e.target.value)} onBlur={saveName}
               onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setName(voice.name); e.currentTarget.blur(); } }} />
           </Section>
@@ -185,12 +187,12 @@ export function VoiceDetail({ id, onBack }: { id: string; onBack: () => void }) 
             <div className="vc-swatches" role="group" aria-label="Colour">
               {COLOR_SLOTS.map((c) => (
                 <button key={c} type="button" className="vc-swatch" aria-label={`Colour ${c}`} aria-pressed={voice.color === c}
-                  style={{ '--vc': voiceColor(c) } as React.CSSProperties} onClick={() => void patch({ color: c })}><i /></button>
+                  style={{ '--vc': speakerColor(c) } as React.CSSProperties} onClick={() => void patch({ color: c })}><i /></button>
               ))}
             </div>
           </Section>
 
-          <Section title="Status">
+          {voice.cloned && <Section title="Cloned voice">
             <label className="check">
               <input type="checkbox" checked={voice.enabled} disabled={!ready} onChange={(e) => void patch({ enabled: e.target.checked })} />
               <span>
@@ -202,16 +204,16 @@ export function VoiceDetail({ id, onBack }: { id: string; onBack: () => void }) 
                 </span>
               </span>
             </label>
-          </Section>
+          </Section>}
 
           <Section title="Sample">
             {sampleRow}
-            <p className="hint" style={{ margin: 0 }}>{voice.uses} {voice.uses === 1 ? 'use' : 'uses'} so far.</p>
+            {voice.cloned && <p className="hint" style={{ margin: 0 }}>Their voice was used {voice.uses} {voice.uses === 1 ? 'time' : 'times'} so far.</p>}
           </Section>
         </>
       )}
 
-      <Btn size="sm" icon={<IconExternal />} onClick={() => openApp(`/voices/${id}`)}>Open in the dashboard</Btn>
+      <Btn size="sm" icon={<IconExternal />} onClick={() => openApp(`/speakers/${id}`)}>Open in the dashboard</Btn>
       {deleteBlock}
     </div>
   );

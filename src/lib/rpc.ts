@@ -140,10 +140,10 @@ export type LiveEvent =
   /** Read ahead (lib/ahead.ts): `startS`, `endS` and the words' `s`, `e`
    *  are on video `vid`'s clock, not the session's. */
   | { type: 'committed'; seq: number; text: string; startS: number; endS: number; speaker?: string | null; lang?: string | null; words?: { s: number; e: number; t: string }[]; vid?: string }
-  /** A speaker's name: typed by a person (`person`), or recognised from a
-   *  voice the account holds (`voice`). An empty `name` takes it back. A
+  /** A speaker's name: typed by a person (`person`), or recognised as a
+   *  speaker the account saved (`saved`). An empty `name` takes it back. A
    *  typed name outranks a recognised one, as the server ranks them. */
-  | { type: 'speaker'; speaker: string; name: string; by: 'person' | 'voice' }
+  | { type: 'speaker'; speaker: string; name: string; by: 'person' | 'saved' }
   | { type: 'draft'; text: string }
   /** A translation: of one line (`seq`), or of a whole sentence (`seqs`,
    *  `sentenceId`), which is how live sessions translate. */

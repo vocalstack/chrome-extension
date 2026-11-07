@@ -8,9 +8,10 @@ import { client } from '../../lib/client';
 import { Field, Note, useLoad } from '../../ui/kit';
 import { MIN_SAMPLE_S, SAMPLE_TOLERANCE_S, seconds } from './shared';
 
-export interface SpeakerPick { recordingId: string; speaker: number; name: string; seconds: number }
+/** `appearance`: the speaker's number in the transcript (its `speaker` index). */
+export interface AppearancePick { transcriptionId: string; recordingId: string; appearance: number; name: string; seconds: number }
 
-interface Cand { speaker: number; name: string; seconds: number; hasVoice: boolean }
+interface Cand { speaker: number; name: string; seconds: number; saved: boolean }
 
 function candidates(t: TranscriptSnapshot): Cand[] {
   const secs = new Map<number, number>();
@@ -20,10 +21,10 @@ function candidates(t: TranscriptSnapshot): Cand[] {
   }
   return [...secs.entries()]
     .map(([speaker, lines]) => {
-      const info = t.speakers.find((x) => x.speaker === speaker) as (TranscriptSnapshot['speakers'][number] & { speechS?: number | null }) | undefined;
+      const info = t.speakers.find((x) => x.speaker === speaker) as (TranscriptSnapshot['speakers'][number] & { speechS?: number | null; speakerId?: string | null }) | undefined;
       // What the server counts (their diarized turns added up), else their lines' length.
       const seconds = info?.speechS ?? lines;
-      return { speaker, seconds, name: info?.name || `Speaker ${speaker + 1}`, hasVoice: !!info?.voiceId };
+      return { speaker, seconds, name: info?.name || `Speaker ${speaker + 1}`, saved: !!(info?.speakerId ?? info?.voiceId) };
     })
     .sort((a, b) => b.seconds - a.seconds);
 }
@@ -35,7 +36,7 @@ function usable(t: Transcription): string | null {
   return r.state === 'ended' || r.state === 'finalized' ? r.recordingId : null;
 }
 
-export function FromSpeaker({ value, onChange }: { value: SpeakerPick | null; onChange: (p: SpeakerPick | null) => void }) {
+export function FromAppearance({ value, onChange }: { value: AppearancePick | null; onChange: (p: AppearancePick | null) => void }) {
   const list = useLoad(async () => {
     const page = await (await client()).transcriptions.listPage({ limit: 30 });
     return page.transcriptions.filter((t) => usable(t));
@@ -66,15 +67,15 @@ export function FromSpeaker({ value, onChange }: { value: SpeakerPick | null; on
             <div className="list" role="radiogroup" aria-label="Speaker">
               {cands.map((c) => {
                 const short = c.seconds < MIN_SAMPLE_S - SAMPLE_TOLERANCE_S;
-                const on = value?.speaker === c.speaker && value.recordingId === recordingId;
+                const on = value?.appearance === c.speaker && value.recordingId === recordingId;
                 return (
                   <label key={c.speaker} className={`item${short ? '' : ' item--click'}`} style={short ? { opacity: 0.55 } : undefined}>
                     <input type="radio" name="vc-speaker" checked={on} disabled={short}
-                      onChange={() => onChange({ recordingId: recordingId!, speaker: c.speaker, name: /^Speaker \d+$/.test(c.name) ? '' : c.name, seconds: c.seconds })} />
+                      onChange={() => onChange({ transcriptionId: tx!.id, recordingId: recordingId!, appearance: c.speaker, name: /^Speaker \d+$/.test(c.name) ? '' : c.name, seconds: c.seconds })} />
                     <div className="item__main">
                       <div className="item__title">{c.name}</div>
                       <div className="item__sub">
-                        {seconds(c.seconds)} of speech{short ? ` · needs ${MIN_SAMPLE_S} s` : ''}{c.hasVoice ? ' · already has a voice' : ''}
+                        {seconds(c.seconds)} of speech{short ? ` · needs ${MIN_SAMPLE_S} s` : ''}{c.saved ? ' · already saved' : ''}
                       </div>
                     </div>
                   </label>

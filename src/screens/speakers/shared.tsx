@@ -1,4 +1,4 @@
-/** What the voice screens share: the backend's sample limits, the
+/** What the speaker screens share: the backend's sample limits, the
  *  dashboard's consent wording and reading passage, the state badge, the
  *  colour avatar, and one audio player for previews and samples.
  *
@@ -9,8 +9,7 @@
  *  speaks text a caller provides. */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Voice } from '@vocalstack/js-sdk';
-import { client } from '../../lib/client';
+import { speakerPreview, speakerSample, type SavedSpeaker } from '../../lib/speakers';
 import { Badge, errorText } from '../../ui/kit';
 
 /** The shortest sample the server builds from (`MIN_SAMPLE_S`: 20 s of
@@ -20,7 +19,7 @@ export const MIN_SAMPLE_S = 20;
 export const SAMPLE_TOLERANCE_S = 1.5;
 /** The largest sample upload (`MAX_SAMPLE_BYTES`). */
 export const MAX_SAMPLE_BYTES = 40 * 1024 * 1024;
-/** A voice name is 1–60 characters. */
+/** A speaker's name is 1–60 characters. */
 export const MAX_NAME = 60;
 /** The panel's recorder stops itself here. The server has no length cap
  *  (only the 40 MB one); two minutes of Opus is well under it. */
@@ -42,12 +41,12 @@ export const CONSENT_LABEL = 'I have this person’s permission to clone their v
 export const CONSENT_INFO = 'A cloned voice reads transcriptions out loud in that person’s voice, in any language. If they speak in a future recording, they are recognised and labelled by name automatically.';
 /** The dashboard's note under the voice list. */
 export const CONSENT_FOOTER = 'A cloned voice speaks your translations aloud to your listeners. Only record people who have agreed to it.';
-export const DELETE_NOTE = 'Live transcriptions that speak with this voice fall back to a synthetic one. This cannot be undone.';
+export const DELETE_NOTE = 'They are no longer recognised in new transcriptions, and live transcriptions that speak with their cloned voice fall back to a synthetic one. This cannot be undone.';
 
 export const COLOR_SLOTS = ['1', '2', '3', '4', '5', '6'] as const;
 
-/** A voice colour ("1"–"6" or "#rrggbb") as a CSS colour. */
-export function voiceColor(c: string | null | undefined): string | undefined {
+/** A speaker's colour ("1"–"6" or "#rrggbb") as a CSS colour. */
+export function speakerColor(c: string | null | undefined): string | undefined {
   if (!c) return undefined;
   if (/^#[0-9a-f]{6}$/i.test(c)) return c;
   if (/^[1-6]$/.test(c)) return `var(--vx-${c})`;
@@ -58,8 +57,8 @@ export function initials(name: string): string {
   return name.replace(/[^\p{L} ]/gu, ' ').trim().split(/\s+/).map((w) => w[0]).filter(Boolean).join('').slice(0, 2).toUpperCase() || '?';
 }
 
-export function VoiceAvatar({ v, large }: { v: Pick<Voice, 'name' | 'color' | 'state' | 'draft'>; large?: boolean }) {
-  const c = v.state === 'ready' && !v.draft ? voiceColor(v.color) : undefined;
+export function SpeakerAvatar({ v, large }: { v: Pick<SavedSpeaker, 'name' | 'color' | 'state' | 'draft'>; large?: boolean }) {
+  const c = !v.draft && v.state !== 'training' && v.state !== 'failed' ? speakerColor(v.color) : undefined;
   return (
     <span className={`vc-av${large ? ' vc-av--lg' : ''}`} style={c ? ({ '--vc': c } as React.CSSProperties) : undefined} aria-hidden="true">
       {v.name.trim() ? initials(v.name) : '—'}
@@ -67,8 +66,9 @@ export function VoiceAvatar({ v, large }: { v: Pick<Voice, 'name' | 'color' | 's
   );
 }
 
-export function StateBadge({ v }: { v: Voice }) {
+export function StateBadge({ v }: { v: SavedSpeaker }) {
   if (v.draft) return <Badge kind="warn">Not complete</Badge>;
+  if (!v.cloned) return <Badge>Not cloned</Badge>;
   if (v.state === 'training') return <Badge kind="brand" dot="pulse">Building {v.progress}%</Badge>;
   if (v.state === 'failed') return <Badge kind="bad">Failed</Badge>;
   if (v.state === 'ready') return v.enabled ? <Badge kind="ok">Ready</Badge> : <Badge>Disabled</Badge>;
@@ -160,15 +160,14 @@ export function usePlayer() {
   return { playing, loading, error, setError, play, stop, forget };
 }
 
-/** A clone speaking the engine's fixed preview line in `lang`. The first
+/** Their clone speaking the engine's fixed preview line in `lang`. The first
  *  ask for a language starts a render (202), so it is asked again until
  *  the clip is there. */
 export async function previewBlob(id: string, lang: string, langName: string, alive: () => boolean): Promise<Blob> {
-  const vs = await client();
   for (let i = 0; i < 12; i++) {
     let res: Response | null = null;
     try {
-      res = await vs.voices.clonePreview(id, { lang });
+      res = await speakerPreview(id, lang);
     } catch (e) {
       const err = e as { code?: string; status?: number };
       if (err.code === 'language_unavailable') throw new Error(`No voice can speak ${langName} yet.`);
@@ -183,8 +182,7 @@ export async function previewBlob(id: string, lang: string, langName: string, al
 }
 
 export async function sampleBlob(id: string): Promise<Blob> {
-  const vs = await client();
-  return (await vs.voices.sample(id)).blob();
+  return (await speakerSample(id)).blob();
 }
 
 /** How long an audio file is, when the browser can tell (0 when it cannot). */
@@ -201,7 +199,7 @@ export function audioDuration(blob: Blob): Promise<number> {
   });
 }
 
-/** Keep a voice fresh while it is being built: every 3 s while `training`. */
+/** Keep a speaker fresh while their voice is being built: every 3 s while `training`. */
 export function usePollWhile(active: boolean, tick: () => Promise<void> | void, ms = 3000) {
   const fn = useRef(tick);
   fn.current = tick;

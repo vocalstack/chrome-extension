@@ -9,7 +9,7 @@ What it does, from the side panel (toolbar icon):
 - **This page** — finds the audio and video a page plays or links to (every frame, embedded players, media links), checks which ones VocalStack can fetch, and transcribes them. Live captions and dubbing for the page's video. Drop or pick a local file to upload it.
 - **Live** — record this tab, the microphone or both into a live transcription; record a meeting (Meet, Teams, Zoom and others on the web) with a summary at the end; live captions over the tab's video, translated if you like.
 - **Broadcasts** — create and manage broadcasts, share links, go live from the microphone.
-- **Voices** — train a voice from the microphone, a file or a speaker in a transcription; preview, rename, recolour.
+- **Speakers** — save a person from the microphone, a file or a speaker in a transcription, so they are recognised by name; with their consent, their cloned voice can read transcripts; preview, rename, recolour.
 - **Library** — search every transcript; recent transcriptions.
 
 Also: right-click "Transcribe this link / video / page", `vs <words>` in the address bar to search transcripts, Alt+Shift+R to record the tab, Alt+Shift+C for captions.

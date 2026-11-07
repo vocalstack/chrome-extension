@@ -137,9 +137,9 @@ export function startOverlay() {
   let draft = '';
   let draftTr = '';
   let trLang: string | null = null;
-  /** Speaker names: typed by a person (outranks) and recognised from voices. */
+  /** Speaker names: typed by a person (outranks) and saved speakers recognised. */
   let typed: Record<string, string> = {};
-  let voiced: Record<string, string> = {};
+  let recognised: Record<string, string> = {};
   /** A video's captions: its cues, and the one showing. */
   let cues: Cue[] | null = null;
   let cue = -1;
@@ -233,7 +233,7 @@ export function startOverlay() {
     draft = draftTr = '';
     trLang = null;
     typed = {};
-    voiced = {};
+    recognised = {};
     menu = null;
     shownKeys = [];
   }
@@ -471,7 +471,7 @@ export function startOverlay() {
       return cues.slice(Math.max(0, cue - depth() + 1), cue + 1).map((c, i, all) => ({ key: `q${c.s}`, who: '', color: '', text: c.t,
         ...(i === all.length - 1 ? { said: reached({ key: '', s: c.s, e: c.e, text: c.t, speaker: '', words: c.w, translated: c.tr }) } : {}) }));
     }
-    const names: Record<string, string> = { ...Object.fromEntries(Object.entries(voiced).filter(([, v]) => v)), ...Object.fromEntries(Object.entries(typed).filter(([, v]) => v)) };
+    const names: Record<string, string> = { ...Object.fromEntries(Object.entries(recognised).filter(([, v]) => v)), ...Object.fromEntries(Object.entries(typed).filter(([, v]) => v)) };
     const labels = status?.speakerLabels ?? 'auto';
     const voices = new Set((status?.ahead ? timed : lines).map((l) => l.speaker));
     const show = labels === 'on' || (labels !== 'off' && voices.size > 1) || (labels !== 'off' && Object.keys(names).length > 0);
@@ -722,7 +722,7 @@ export function startOverlay() {
       const key = ev.sentenceId ?? -1 - ev.seq;
       said = [...said.filter((x) => x.key !== key), { key, seq: ev.seq, tr: ev.text }].sort((a, b) => a.seq - b.seq).slice(-KEEP_SHOWN);
       draftTr = '';
-    } else if (ev.type === 'speaker') (ev.by === 'person' ? typed : voiced)[ev.speaker] = ev.name;
+    } else if (ev.type === 'speaker') (ev.by === 'person' ? typed : recognised)[ev.speaker] = ev.name;
     render();
     return false;
   });

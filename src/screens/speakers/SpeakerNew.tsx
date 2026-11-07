@@ -1,14 +1,14 @@
-/** A new voice: a name, the speaker's permission, and a sample — recorded
- *  here, uploaded, or taken from a speaker in a transcription. */
+/** A new saved speaker: a name, their permission to clone their voice,
+ *  and a sample — recorded here, uploaded, or taken from a speaker in a
+ *  transcription. */
 
 import { useEffect, useRef, useState } from 'react';
-import type { Voice } from '@vocalstack/js-sdk';
-import { client } from '../../lib/client';
+import { createFromAppearance, createSpeaker, type SavedSpeaker } from '../../lib/speakers';
 import { rpc } from '../../lib/rpc';
 import { Btn, Field, IconBtn, Note, Section, Seg, clock, useAction } from '../../ui/kit';
 import { IconBack, IconClose, IconFile, IconMic, IconPause, IconPlay, IconRestore, IconStop, IconUpload } from '../../ui/icons';
 import { useRecorder } from './recorder';
-import { FromSpeaker, type SpeakerPick } from './FromSpeaker';
+import { FromAppearance, type AppearancePick } from './FromAppearance';
 import {
   ConsentCheck, MAX_NAME, MAX_RECORD_S, MAX_SAMPLE_BYTES, MIN_SAMPLE_S, PASSAGE, SAMPLE_TOLERANCE_S, audioDuration, usePlayer,
 } from './shared';
@@ -20,14 +20,14 @@ function size(n: number): string {
   return n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function VoiceNew({ onBack, onCreated }: { onBack: () => void; onCreated: (v: Voice) => void }) {
+export function SpeakerNew({ onBack, onCreated }: { onBack: () => void; onCreated: (v: SavedSpeaker) => void }) {
   const [name, setName] = useState('');
   const [src, setSrc] = useState<Src>('mic');
   const [sex, setSex] = useState<Sex>('');
   const [consent, setConsent] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [fileErr, setFileErr] = useState('');
-  const [pick, setPick] = useState<SpeakerPick | null>(null);
+  const [pick, setPick] = useState<AppearancePick | null>(null);
   const mic = useRecorder(MAX_RECORD_S);
   const player = usePlayer();
   const ask = useAction();
@@ -58,18 +58,17 @@ export function VoiceNew({ onBack, onCreated }: { onBack: () => void; onCreated:
   const ok = nameOk && consent && sampleOk && !make.busy && mic.state !== 'recording';
   const why = !sampleOk
     ? (src === 'speaker' ? 'Choose a speaker' : 'Add a sample')
-    : !consent ? 'Confirm you have permission to clone this voice' : !nameOk ? 'Name the voice' : undefined;
+    : !consent ? 'Confirm you have permission to clone this voice' : !nameOk ? 'Name the speaker' : undefined;
 
   const create = async () => {
     if (!ok) return;
     player.stop();
     const v = await make.run(async () => {
-      const vs = await client();
       const n = name.trim();
       const gender = sex || undefined;
-      if (src === 'speaker' && pick) return vs.voices.createFromSpeaker({ recordingId: pick.recordingId, speaker: pick.speaker, name: n });
-      if (src === 'file' && file) return vs.voices.create({ name: n, sample: file, fileName: file.name, gender });
-      if (mic.blob) return vs.voices.create({ name: n, sample: mic.blob, fileName: 'sample.webm', gender });
+      if (src === 'speaker' && pick) return createFromAppearance({ transcriptionId: pick.transcriptionId, recordingId: pick.recordingId, appearance: pick.appearance, name: n });
+      if (src === 'file' && file) return createSpeaker({ name: n, sample: file, fileName: file.name, gender });
+      if (mic.blob) return createSpeaker({ name: n, sample: mic.blob, fileName: 'sample.webm', gender });
       throw new Error('Add a sample first.');
     });
     if (v) onCreated(v);
@@ -157,11 +156,11 @@ export function VoiceNew({ onBack, onCreated }: { onBack: () => void; onCreated:
     <div className="stack">
       <div className="row">
         <IconBtn label="Back" onClick={() => { player.stop(); mic.reset(); onBack(); }}><IconBack /></IconBtn>
-        <strong className="grow">{name.trim() || 'New voice'}</strong>
+        <strong className="grow">{name.trim() || 'New speaker'}</strong>
       </div>
 
       <Field label="Name">
-        <input className="input" value={name} maxLength={MAX_NAME} placeholder="Whose voice is this?" onChange={(e) => setName(e.target.value)} />
+        <input className="input" value={name} maxLength={MAX_NAME} placeholder="Who is this?" onChange={(e) => setName(e.target.value)} />
       </Field>
 
       <Section title="Sample">
@@ -170,7 +169,7 @@ export function VoiceNew({ onBack, onCreated }: { onBack: () => void; onCreated:
           options={[{ value: 'mic', label: 'Record' }, { value: 'file', label: 'Upload' }, { value: 'speaker', label: 'Transcription' }]} />
         {src === 'mic' && recorder}
         {src === 'file' && upload}
-        {src === 'speaker' && <FromSpeaker value={pick} onChange={(p) => { setPick(p); if (p?.name && !name.trim()) setName(p.name.slice(0, MAX_NAME)); }} />}
+        {src === 'speaker' && <FromAppearance value={pick} onChange={(p) => { setPick(p); if (p?.name && !name.trim()) setName(p.name.slice(0, MAX_NAME)); }} />}
       </Section>
 
       {src !== 'speaker' && (
@@ -185,7 +184,7 @@ export function VoiceNew({ onBack, onCreated }: { onBack: () => void; onCreated:
 
       {make.error && <Note kind="bad">{make.error}</Note>}
       {player.error && <Note kind="bad">{player.error}</Note>}
-      <Btn kind="primary" size="lg" block busy={make.busy} disabled={!ok} title={why} onClick={() => void create()}>Create voice</Btn>
+      <Btn kind="primary" size="lg" block busy={make.busy} disabled={!ok} title={why} onClick={() => void create()}>Save speaker</Btn>
       {why && !make.busy && <p className="hint" style={{ margin: 0, textAlign: 'center' }}>{why}.</p>}
     </div>
   );

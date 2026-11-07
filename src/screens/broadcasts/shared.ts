@@ -18,7 +18,7 @@ const RESERVED = new Set([
   'session', 'recordings', 'recording', 'search', 'join', 'new', 'about', 'pricing',
   'support', 'help', 'terms', 'privacy', 'app', 'mobile', 'ios', 'android', 'live',
   'vocalstack', 'null', 'undefined', 'root', 'system', 'status', 'metrics',
-  'broadcasts', 'transcriptions', 'voices', 'developers', 'billing',
+  'broadcasts', 'transcriptions', 'voices', 'speakers', 'developers', 'billing',
   'notifications', 'profile', 'dashboard', 'connect',
 ]);
 

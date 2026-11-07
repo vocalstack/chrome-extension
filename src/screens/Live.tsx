@@ -208,9 +208,9 @@ function useTranscript(id: string) {
   const [lines, setLines] = useState<Line[]>([]);
   const [draft, setDraft] = useState('');
   const [draftTr, setDraftTr] = useState('');
-  /** Names typed by a person, and names recognised from voices. */
+  /** Names typed by a person, and names of saved speakers recognised. */
   const [typed, setTyped] = useState<Record<string, string>>({});
-  const [voiced, setVoiced] = useState<Record<string, string>>({});
+  const [recognised, setRecognised] = useState<Record<string, string>>({});
   useEffect(() => {
     const apply = (e: LiveEvent) => {
       if (e.type === 'committed') {
@@ -223,14 +223,14 @@ function useTranscript(id: string) {
       } else if (e.type === 'draft') setDraft(e.text);
       else if (e.type === 'draftTranslated') setDraftTr(e.text);
       else if (e.type === 'translated') setLines((l) => l.map((x) => (x.seq === e.seq ? { ...x, tr: e.text } : e.seqs?.includes(x.seq) ? { ...x, tr: undefined } : x)));
-      else if (e.type === 'speaker') (e.by === 'person' ? setTyped : setVoiced)((n) => ({ ...n, [e.speaker]: e.name }));
+      else if (e.type === 'speaker') (e.by === 'person' ? setTyped : setRecognised)((n) => ({ ...n, [e.speaker]: e.name }));
     };
     rpc('live.history', { id }).then((h) => h.forEach(apply), () => {});
     return onPush((p) => { if (p.push === 'live.event' && p.id === id) apply(p.event); });
   }, [id]);
   // A typed name outranks a recognised one; a recognition taken back
   // leaves the typed name, if any.
-  const names: Record<string, string> = { ...Object.fromEntries(Object.entries(voiced).filter(([, v]) => v)), ...Object.fromEntries(Object.entries(typed).filter(([, v]) => v)) };
+  const names: Record<string, string> = { ...Object.fromEntries(Object.entries(recognised).filter(([, v]) => v)), ...Object.fromEntries(Object.entries(typed).filter(([, v]) => v)) };
   return { lines, draft, draftTr, names };
 }
 

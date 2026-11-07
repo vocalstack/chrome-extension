@@ -181,7 +181,7 @@ button:focus-visible,a:focus-visible,[role="tab"]:focus-visible,input:focus-visi
 .bc-count svg{width:13px;height:13px}
 .bc-chev{width:14px;height:14px;color:var(--ink-30)}
 
-/* ── Voices (voices agent) ── */
+/* ── Speakers ── */
 /* A voice's own colour: the dashboard's six voice slots (transcribe:
    assets/speaker-palette.json, `voices`), the colour its speaker wears in
    every transcript. */
@@ -665,8 +665,8 @@ label.item--click{cursor:pointer}
 .search2 input::-webkit-search-cancel-button{display:none}
 .search2:focus-within{box-shadow:0 0 0 1.5px var(--brand)}
 .lib-row .lrow{border-bottom:1px solid var(--hair)}
-/* A list card's eyebrow (Library, Your Voices) sits on a full text line
+/* A list card's eyebrow (Library, Your Speakers) sits on a full text line
    in the design: 8px above the 10px label, 2px below. */
 .ey--line{padding:8px 0 2px;line-height:10px}
 /* The design's lists keep the hairline under their last row too. */
-[data-screen-label="Library"] .lrow:last-child,[data-screen-label="Broadcasts"] .lrow:last-child,[data-screen-label="Voices"] .lrow:last-child,[data-screen-label="Settings"] .pref:last-child{border-bottom:1px solid var(--hair)}
+[data-screen-label="Library"] .lrow:last-child,[data-screen-label="Broadcasts"] .lrow:last-child,[data-screen-label="Speakers"] .lrow:last-child,[data-screen-label="Settings"] .pref:last-child{border-bottom:1px solid var(--hair)}

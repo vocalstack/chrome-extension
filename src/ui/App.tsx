@@ -13,7 +13,7 @@ import { useActiveTab } from './useTab';
 import { useInvoked } from '../screens/Live';
 import type { View } from '../background/panel';
 import { usePanelIntent } from './intent';
-import { HiBack, HiBroadcast, HiCursor, HiDoc, HiExternal, HiGear, HiMic, HiUpload, HiVoices } from './icons';
+import { HiBack, HiBroadcast, HiCursor, HiDoc, HiExternal, HiGear, HiMic, HiUpload, HiSpeakers } from './icons';
 import { LangBar } from './langs';
 import { TipRow, useTip } from './tip';
 import { SignIn } from '../screens/SignIn';
@@ -22,7 +22,7 @@ import { PageScreen } from '../screens/Page';
 import { LiveScreen } from '../screens/Live';
 import { UploadScreen } from '../screens/Upload';
 import { BroadcastsScreen } from '../screens/Broadcasts';
-import { VoicesScreen } from '../screens/Voices';
+import { SpeakersScreen } from '../screens/Speakers';
 import { LibraryScreen } from '../screens/Library';
 import { FileDrop } from '../screens/FileDrop';
 import { UpdateBanner, UpdateBlock, useUpdate } from './update';
@@ -34,7 +34,7 @@ const TABS: { view: Area; label: string; tip: string; Icon: typeof HiCursor }[] 
   { view: 'live', label: 'Live', tip: 'Record or caption this tab as it plays.', Icon: HiMic },
   { view: 'upload', label: 'Upload', tip: 'Transcribe audio and video files.', Icon: HiUpload },
   { view: 'broadcasts', label: 'Broadcasts', tip: 'Live sessions read on each listener’s device.', Icon: HiBroadcast },
-  { view: 'voices', label: 'Voices', tip: 'Voices for dubbing.', Icon: HiVoices },
+  { view: 'speakers', label: 'Speakers', tip: 'People VocalStack recognises by their voice.', Icon: HiSpeakers },
   { view: 'library', label: 'Library', tip: 'Every transcript, synced to your account.', Icon: HiDoc },
 ];
 
@@ -106,7 +106,7 @@ function Panel({ account, env, view, setView, lastArea, live, rec, intent, clear
         {view === 'live' && <LiveScreen account={account} live={live} intent={intent?.view === 'live' ? intent : null} onIntentDone={clearIntent} onSettings={() => setView('settings')} />}
         {view === 'upload' && <UploadScreen account={account} onSettings={() => setView('settings')} onLibrary={() => setView('library')} />}
         {view === 'broadcasts' && <BroadcastsScreen account={account} onSettings={() => setView('settings')} />}
-        {view === 'voices' && <VoicesScreen />}
+        {view === 'speakers' && <SpeakersScreen />}
         {view === 'library' && <LibraryScreen account={account} intent={intent?.view === 'library' ? intent : null} onIntentDone={clearIntent} />}
         {view === 'settings' && <Settings account={account} env={env} update={update} onBack={() => setView(lastArea)} />}
       </main>
