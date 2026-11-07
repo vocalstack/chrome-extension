@@ -83,7 +83,7 @@ async function call(path: string, old: string, init: Init = {}, oldInit: Init = 
   let r = await once(path, init);
   if (r.status === 404) r = await once(old, oldInit);
   if (r.ok) return r;
-  const b = (await r.json().catch(() => null)) as { code?: string; message?: string } | null;
+  const b = (await r.json().catch(() => null)) as { code?: ConstructorParameters<typeof VocalStackError>[0]; message?: string } | null;
   throw new VocalStackError(b?.code ?? 'internal', b?.message ?? `unexpected error (status ${r.status})`, { status: r.status });
 }
 
