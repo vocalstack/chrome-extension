@@ -189,9 +189,12 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   const ownOther = isOwn(pageUrl) && !own;
   /** YouTube, but not a video (home, search, a channel): pick one first. */
   const ytBrowse = !own && isYouTube(pageUrl) && !MEDIA_PAGE.test(pageUrl);
+  /** A meeting: its sound is the tab's, recorded live (Record This
+   *  Meeting). What its page plays itself (a join chime) is never listed. */
+  const meetingTab = !!meetingHost(pageUrl);
   const base: Row[] = [];
-  if (own || ownOther || ytBrowse) { /* nothing listed */ } else if (pinned) base.push({ ...(scan?.media.find((m) => m.url === pinned.url) ?? pinned), from: 'click' });
-  if (!own && !ownOther && !ytBrowse) for (const m of scan?.media ?? []) if (m.url !== pinned?.url) base.push(m);
+  if (own || ownOther || ytBrowse || meetingTab) { /* nothing listed */ } else if (pinned) base.push({ ...(scan?.media.find((m) => m.url === pinned.url) ?? pinned), from: 'click' });
+  if (!own && !ownOther && !ytBrowse && !meetingTab) for (const m of scan?.media ?? []) if (m.url !== pinned?.url) base.push(m);
   const rows: Row[] = [];
   for (const r of base) {
     rows.push(r);

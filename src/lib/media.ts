@@ -31,13 +31,19 @@ const SEGMENT = /(?:^|[/_.-])(?:seg(?:ment)?|chunk|frag(?:ment)?|init|part)[-_]?
 /** Ads and trackers: never what the person watches. */
 const AD_HOST = /(?:^|\.)(?:doubleclick\.net|googlesyndication\.com|googleadservices\.com|imasdk\.googleapis\.com|adnxs\.com|moatads\.com|springserve\.com|spotxchange\.com|innovid\.com|teads\.tv)$/i;
 
+/** A page's own sound effects (a call's join and leave chimes), never a recording. */
+const UI_SOUND = /^https:\/\/(?:www\.|ssl\.)?gstatic\.com\/(?:meet|chat|hangouts)\/sounds?\//i;
+export const isPageSound = (url: string) => UI_SOUND.test(url);
+/** An <audio> shorter than this is a page sound (a chime, a click), not a recording. */
+const MIN_AUDIO_S = 5;
+
 /** An address worth handing over as a recording: media by its extension,
  *  not a segment, not an ad. */
 export function isRecordingUrl(u: string): boolean {
   let x: URL;
   try { x = new URL(u); } catch { return false; }
   if (x.protocol !== 'https:' && x.protocol !== 'http:') return false;
-  if (AD_HOST.test(x.hostname) || /\/ads?\//i.test(x.pathname)) return false;
+  if (AD_HOST.test(x.hostname) || /\/ads?\//i.test(x.pathname) || isPageSound(u)) return false;
   return MEDIA_EXT.test(x.pathname) && !SEGMENT.test(x.pathname.split('/').pop() + x.search);
 }
 
@@ -142,6 +148,7 @@ function abs(u: string | null | undefined, base: string): string | null {
   }
 }
 
+
 function labelFor(el: Element): string | undefined {
   const t = el.getAttribute('title') || el.getAttribute('aria-label') || (el as HTMLElement).dataset?.title;
   if (t) return t.trim().slice(0, 140);
@@ -157,6 +164,7 @@ export function scanDocument(doc: Document = document): FoundMedia[] {
   const out: FoundMedia[] = [];
   const seen = new Set<string>();
   const add = (m: FoundMedia) => {
+    if (isPageSound(m.url)) return;
     const k = `${m.kind}:${m.url}`;
     if (seen.has(k)) return;
     seen.add(k);
@@ -178,6 +186,7 @@ export function scanDocument(doc: Document = document): FoundMedia[] {
     const duration = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : undefined;
     // A tiny muted autoplaying loop is decoration, not content.
     if (kind === 'video' && el.muted && el.loop && (duration ?? 0) < 30) return;
+    if (kind === 'audio' && duration !== undefined && duration < MIN_AUDIO_S) return;
     if (direct) {
       add({ url: direct, kind, title: labelFor(el), durationS: duration, playing: !el.paused, evidence: 'element' });
     } else if (sources.length || el.readyState > 0) {

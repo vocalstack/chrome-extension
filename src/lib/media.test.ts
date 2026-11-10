@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { MEDIA_PAGE, embedOf, isRecordingUrl, loadedMedia, mediaInPage } from './media.ts';
+import { MEDIA_PAGE, embedOf, isPageSound, isRecordingUrl, loadedMedia, mediaInPage } from './media.ts';
 
 test('a recording by its address: media, not a segment, not an ad', () => {
   assert.equal(isRecordingUrl('https://cdn.example.com/talk.mp4'), true);
@@ -88,4 +88,12 @@ test('a known player’s page for an embed’s address', () => {
   assert.deepEqual(embedOf('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0'), { url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', name: 'YouTube' });
   assert.deepEqual(embedOf('https://player.vimeo.com/video/76979871?h=1'), { url: 'https://vimeo.com/76979871', name: 'Vimeo' });
   assert.equal(embedOf('https://example.com/player'), null);
+});
+
+test('a page sound effect (Meet’s join chime) is never a recording', () => {
+  const chime = 'https://www.gstatic.com/meet/sounds/join_call_6a6a67d6bcc7a4e373ed40fdeff42950.ogg';
+  assert.equal(isPageSound(chime), true);
+  assert.equal(isRecordingUrl(chime), false);
+  assert.deepEqual(loadedMedia([chime]), []);
+  assert.equal(isPageSound('https://cdn.example.com/talk.ogg'), false);
 });
