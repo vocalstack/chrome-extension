@@ -133,22 +133,24 @@ export async function startLive(cmd: Extract<OffCmd, { off: 'live.start' }>): Pr
     alive();
     set(l, { state: 'warming' });
     const hooks = waits(l);
+    // Each step keyed to this start: a full fleet's 503 "busy" is tried
+    // again by the SDK (after its Retry-After) without making two.
     const lang = s.spokenLanguage ?? null;
     if (s.mode === 'captions') {
       l.session = await vs.realtime.connect({ spokenLanguage: lang, ...(s.translateTo ? { translate: [s.translateTo] } : {}), ...(s.ahead ? { sentences: { enabled: true } } : {}) }, hooks);
       alive();
     } else if (s.mode === 'broadcast') {
       if (!s.broadcastId) throw new Coded('No broadcast was chosen.', 'invalid_options');
-      const grant = await vs.broadcasts.startRecording(s.broadcastId, { takeover: s.takeover ?? false, ...(s.spokenLanguage !== undefined ? { settings: { spokenLanguage: lang } } : {}) });
+      const grant = await vs.broadcasts.startRecording(s.broadcastId, { takeover: s.takeover ?? false, ...(s.spokenLanguage !== undefined ? { settings: { spokenLanguage: lang } } : {}) }, { idempotencyKey: `${cmd.id}:take` });
       set(l, { recordingId: grant.recording.id });
       alive();
       l.session = await vs.recordings.publish(grant, hooks);
       alive();
     } else {
-      const tx = await vs.transcriptions.createLive({ name: cmd.name, settings: { spokenLanguage: lang, ...(s.speakerLabels ? { speakerLabels: s.speakerLabels } : {}) }, source: { kind: 'mic' } });
+      const tx = await vs.transcriptions.createLive({ name: cmd.name, settings: { spokenLanguage: lang, ...(s.speakerLabels ? { speakerLabels: s.speakerLabels } : {}) }, source: { kind: 'mic' } }, { idempotencyKey: `${cmd.id}:tx` });
       set(l, { transcriptionId: tx.id });
       alive();
-      const grant = await vs.transcriptions.startRecording(tx.id, {});
+      const grant = await vs.transcriptions.startRecording(tx.id, {}, { idempotencyKey: `${cmd.id}:rec` });
       set(l, { recordingId: grant.recording.id });
       alive();
       l.session = await vs.recordings.publish(grant, hooks);
