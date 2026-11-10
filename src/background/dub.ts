@@ -36,6 +36,9 @@ async function set(s: DubStatus, run: number) {
   if (ok) push({ push: 'dub.status', status: s });
 }
 
+/** "en" and "en-GB" are the one language here. */
+const sameLang = (a: string | null | undefined, b: string) => !!a && a.split('-')[0]!.toLowerCase() === b.split('-')[0]!.toLowerCase();
+
 async function run(req: DubStart, run: number) {
   const { tabId, lang } = req;
   const base: DubStatus = { tabId, lang, title: req.title, url: req.url, state: 'transcribing', progress: 0 };
@@ -48,7 +51,7 @@ async function run(req: DubStart, run: number) {
   await set({ ...withIds, state: 'translating', progress: undefined }, run);
   if (req.voice) await vs.recordings.settings(ids.recordingId, { voiceByLang: { [lang]: req.voice } }).catch(() => {});
   const snap = await vs.recordings.transcript(ids.recordingId, { lang });
-  const sentences = snap.sentences.filter((s) => !s.suppressed && s.text.trim()).map((s) => ({ id: s.sentenceId, start: s.start, end: s.end }));
+  const sentences = snap.sentences.filter((s) => !s.suppressed && s.text.trim()).map((s) => ({ id: s.sentenceId, start: s.start, end: s.end, ...(sameLang(s.language, lang) ? { original: true } : {}) }));
   if (!sentences.length) throw new RpcError('No speech was found in this video.');
   await set({ ...withIds, state: 'voicing' }, run);
   const env = await currentEnv();
@@ -58,7 +61,8 @@ async function run(req: DubStart, run: number) {
   // turns the video down and reports its clock.
   const frameId = await videoFrame(tabId);
   await store.update(tabId, (d) => [d && d.run === run ? { ...d, frameId } : d, undefined]);
-  await chrome.tabs.sendMessage(tabId, { dub: 'on' }, { frameId }).catch(() => {});
+  const keep = sentences.filter((s) => s.original).map((s) => [s.start, s.end]);
+  await chrome.tabs.sendMessage(tabId, { dub: 'on', keep }, { frameId }).catch(() => {});
   await set({ ...withIds, state: 'playing' }, run);
 }
 

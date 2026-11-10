@@ -10,6 +10,9 @@ export interface DubSentence {
   id: number;
   start: number;
   end: number;
+  /** Spoken in the dub's own language: never voiced, the video's own
+   *  sound plays it (the server's `VoiceTrack.original`). */
+  original?: boolean;
 }
 
 export type OffCmd =

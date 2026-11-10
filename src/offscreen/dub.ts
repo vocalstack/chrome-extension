@@ -41,7 +41,7 @@ export async function dubLoad(cmd: Extract<OffCmd, { off: 'dub.load' }>) {
   const d: Dub = { vs, recordingId: cmd.recordingId, lang: cmd.lang, sentences: [...cmd.sentences].sort((a, b) => a.start - b.start), ctx, out, buffers: new Map(), playing: new Map(), done: new Set(), clock: null };
   dubs.set(cmd.tabId, d);
   // The first lines now, so playback can start at once.
-  await Promise.all(d.sentences.slice(0, 3).map((s) => clip(d, s.id)));
+  await Promise.all(d.sentences.filter((s) => !s.original).slice(0, 3).map((s) => clip(d, s.id)));
 }
 
 export function dubStop(tabId: number) {
@@ -79,13 +79,22 @@ function stopAll(d: Dub) {
   d.playing.clear();
 }
 
+/** A clip that failed for a moment (busy, offline) is asked again after this. */
+const RETRY_MS = 3000;
+
 function clip(d: Dub, id: number): Promise<AudioBuffer | null> {
   let p = d.buffers.get(id);
   if (!p) {
     p = d.vs.recordings.voiceClip(d.recordingId, id, d.lang, { format: 'ogg' })
       .then((r) => r.arrayBuffer())
       .then((b) => d.ctx.decodeAudioData(b))
-      .catch(() => null);
+      .catch((e: unknown) => {
+        // A refusal (400: spoken in this language, never voiced; 404) stays;
+        // a busy server or a dropped connection is tried again.
+        const status = (e as { status?: number }).status;
+        if (status === undefined || status === 429 || status >= 500) setTimeout(() => { if (d.buffers.get(id) === p) d.buffers.delete(id); }, RETRY_MS);
+        return null;
+      });
     d.buffers.set(id, p);
   }
   return p;
@@ -97,7 +106,7 @@ function schedule(d: Dub) {
   const t = mediaNow(c);
   for (const s of d.sentences) {
     if (s.start > t + AHEAD_S) break;
-    if (s.end < t || d.done.has(s.id) || d.playing.has(s.id)) continue;
+    if (s.original || s.end < t || d.done.has(s.id) || d.playing.has(s.id)) continue;
     void clip(d, s.id).then((buf) => {
       const cc = d.clock;
       if (!buf || !cc || cc !== c || cc.paused || d.done.has(s.id) || d.playing.has(s.id)) return;

@@ -24,6 +24,17 @@ const KNOWN = 'video.known';
 const OLD_KNOWN = 'dub.known';
 const TERMINAL = new Set(['done', 'failed', 'stopped', 'cropping']);
 
+/** VocalStack disabled the transcription (content moderation): every call
+ *  on it answers 403 with `details.blocked`, and it is never made again. */
+function blockedText(b: { reason?: string; contact?: string }): string {
+  return `VocalStack disabled this video’s transcription: it may break the Terms of Service.${b.reason ? ` ${b.reason}` : ''} If you think this is a mistake, write to ${b.contact || 'support'}.`;
+}
+
+function blockedOf(e: unknown): { reason?: string; contact?: string } | null {
+  const d = (e as { status?: number; details?: { blocked?: boolean; reason?: string; contact?: string } }).details;
+  return (e as { status?: number }).status === 403 && d?.blocked ? d : null;
+}
+
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export async function vsClient(): Promise<VocalStack> {
@@ -80,6 +91,7 @@ async function onServer(vs: VocalStack, url: string, strict = false): Promise<Vi
   const key = ytId(url) ?? url;
   if ((misses.get(key) ?? 0) > Date.now()) return null;
   const t = await lookup(vs, url);
+  if (t?.blocked) throw new RpcError(blockedText(t.blocked));
   if (t === undefined && strict) throw new RpcError('VocalStack couldn’t check whether this video is transcribed already. Try again in a moment.');
   const rid = t?.job?.recordingId ?? t?.lastRecording?.recordingId;
   if (!t || !rid) {
@@ -101,7 +113,14 @@ function idsFor(vs: VocalStack, key: string, req: { url: string; title?: string 
   p = (async () => {
     let ids = (await known(key)) ?? (await onServer(vs, req.url, true));
     if (ids) {
-      const t = await vs.transcriptions.get(ids.transcriptionId).catch(() => null);
+      // Gone (404) is made again; blocked, or a server that couldn't say,
+      // is never taken for gone (that would make a second one).
+      const t = await vs.transcriptions.get(ids.transcriptionId).catch((e: unknown) => {
+        const b = blockedOf(e);
+        if (b) throw new RpcError(blockedText(b));
+        if ((e as { status?: number }).status === 404) return null;
+        throw e;
+      });
       if (!t || t.lifecycle !== 'active') {
         // Superseded (archived or purged meanwhile): a job still running
         // on it is stopped, then the video is transcribed again.
@@ -224,7 +243,14 @@ async function playerOf(url: string): Promise<PlayerState | null> {
       const ids = await videoIds(url);
       if (!ids) return null;
       const vs = await vsClient();
-      const t = await vs.transcriptions.get(ids.transcriptionId).catch(() => null);
+      // Gone (404) is made again; blocked, or a server that couldn't say,
+      // is never taken for gone (that would make a second one).
+      const t = await vs.transcriptions.get(ids.transcriptionId).catch((e: unknown) => {
+        const b = blockedOf(e);
+        if (b) throw new RpcError(blockedText(b));
+        if ((e as { status?: number }).status === 404) return null;
+        throw e;
+      });
       if (!t || t.lifecycle !== 'active') return null;
       const job = t.job ?? await vs.jobs.get(ids.recordingId).catch(() => null);
       return playerState('', job ?? null);
