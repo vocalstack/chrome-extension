@@ -35,9 +35,8 @@ export function SpeakerList({ onOpen, onNew }: { onOpen: (v: SavedSpeaker) => vo
   const rows = usePickLangs('voice');
   const info = useLang()(lang);
   const player = usePlayer();
-  // As the dashboard's Speakers lists them: not the ones VocalStack made
-  // and is waiting on consent for, nor one kept with one transcription only.
-  const people = (data ?? []).filter((v) => !v.auto && v.library);
+  // As the dashboard's Speakers lists them: not one kept with one transcription only.
+  const people = (data ?? []).filter((v) => v.library);
   const sorted = [...people].sort((a, b) => Number(b.draft) - Number(a.draft) || Date.parse(b.createdAt) - Date.parse(a.createdAt));
   usePollWhile(people.some((v) => v.state === 'training'), async () => {
     try { setData(await listSpeakers()); } catch { /* the next poll may work */ }
