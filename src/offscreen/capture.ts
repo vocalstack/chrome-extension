@@ -51,6 +51,18 @@ interface Live {
   history: LiveEvent[];
   /** Reading ahead: the video's buffered audio, in place of the inputs. */
   feed?: AheadFeed;
+  /** A connect (or reconnect) of ours is under way: only then do its
+   *  loading and queue notices count. The SDK's own reconnect after a
+   *  restart calls them too, and the session never leaves `live` for it. */
+  connecting: boolean;
+  /** Another device took the recording over (its publisher was demoted):
+   *  this one lets go, and leaves the recording running there. */
+  demoted?: boolean;
+  /** The transcript subscription's opens, newest last, and which one owns
+   *  `sub`, in what language. */
+  gen: number;
+  subGen?: number;
+  subLang?: string | null;
 }
 
 const lives = new Map<string, Live>();
@@ -68,8 +80,8 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  *  for a free one (the server queues a start for up to 15 minutes). */
 function waits(l: Live) {
   return {
-    onLoading: () => { if (l.status.state !== 'warming') set(l, { state: 'warming' }); },
-    onQueued: () => { if (l.status.waiting !== 'queued') set(l, { state: 'warming', waiting: 'queued' }); },
+    onLoading: () => { if (l.connecting && !l.stopping && l.status.state !== 'warming') set(l, { state: 'warming' }); },
+    onQueued: () => { if (l.connecting && !l.stopping && l.status.waiting !== 'queued') set(l, { state: 'warming', waiting: 'queued' }); },
   };
 }
 
@@ -111,7 +123,7 @@ export async function startLive(cmd: Extract<OffCmd, { off: 'live.start' }>): Pr
       spokenLanguage: s.spokenLanguage ?? null, overlay: !!s.overlay, speakerLabels: s.speakerLabels, meeting: s.meeting, host: s.host,
       ...(s.ahead ? { ahead: true } : {}),
     },
-    vs, streams: [], paused: false, stopping: false, buf: new Float32Array(CHUNK), fill: 0, sent: 0, peak: 0, levelAt: 0, history: [],
+    vs, streams: [], paused: false, stopping: false, buf: new Float32Array(CHUNK), fill: 0, sent: 0, peak: 0, levelAt: 0, history: [], connecting: true, gen: 0,
   };
   lives.set(cmd.id, l);
   set(l, {});
@@ -156,6 +168,7 @@ export async function startLive(cmd: Extract<OffCmd, { off: 'live.start' }>): Pr
       l.session = await vs.recordings.publish(grant, hooks);
       alive();
     }
+    l.connecting = false;
     set(l, { state: 'live', waiting: undefined });
     l.reading = read(l);
     if (l.status.recordingId) void follow(l, l.status.recordingId);
@@ -310,8 +323,10 @@ async function read(l: Live) {
     }
   } catch (e) {
     if (!l.stopping) {
-      report(e, 'live session');
-      set(l, { error: userText(e), errorCode: (e as { code?: string }).code });
+      // Recording here was taken over on another device (`conflict`).
+      if ((e as { code?: string }).code === 'conflict') l.demoted = true;
+      else report(e, 'live session');
+      set(l, { error: l.demoted ? 'This recording continued on another device.' : userText(e), errorCode: (e as { code?: string }).code });
     }
   }
   if (!l.stopping) {
@@ -320,7 +335,7 @@ async function read(l: Live) {
     // place, and the recording carries on. (Reading ahead keeps the video's
     // clock on the first socket: not that one.)
     const rid = l.status.recordingId;
-    if (rid && !l.feed && !l.session?.doneReason && (await reattach(l, rid))) {
+    if (rid && !l.feed && !l.demoted && !l.session?.doneReason && (await reattach(l, rid))) {
       l.reading = read(l);
       return;
     }
@@ -328,22 +343,22 @@ async function read(l: Live) {
     // The session ended on its own: the plan's time limit, or a dropped
     // connection. Close the recording properly all the same.
     const why = l.session?.doneReason === 'max_duration' ? 'The recording reached its maximum length.' : l.status.error || 'The connection to VocalStack ended.';
-    await finish(l, why);
+    // Taken over: done here, not failed (the note says where it went).
+    await finish(l, l.demoted ? null : why);
   }
 }
 
 /** Refusals no later try gets past: signed out, no credit or access,
- *  gone, or another device took the recording over (`conflict`). */
+ *  gone, or the recording no longer open. */
 function final(e: unknown): boolean {
   const { status, code } = e as { status?: number; code?: string };
-  return status === 401 || status === 402 || status === 403 || status === 404 || code === 'conflict' || code === 'invalid_state' || code === 'insufficient_credit';
+  return status === 401 || status === 402 || status === 403 || status === 404 || code === 'invalid_state' || code === 'insufficient_credit';
 }
 
 /** A recording's publisher socket dropped: a new grant and socket, tried
  *  as the dashboard tries them (lib/reconnect.ts). The audio said while it
  *  is away is not sent. False: it can't be (ended, refused, stopped). */
 async function reattach(l: Live, rid: string): Promise<boolean> {
-  const was = l.status.state;
   set(l, { state: 'warming', waiting: 'reconnecting', error: 'The connection to VocalStack dropped. Reconnecting…' });
   const r = await reconnect(Date.now(), {
     now: () => Date.now(),
@@ -351,8 +366,12 @@ async function reattach(l: Live, rid: string): Promise<boolean> {
     stopped: () => l.stopping,
     check: () => l.vs.recordings.get(rid),
     attempt: async () => {
-      const grant = await l.vs.recordings.publishToken(rid);
-      const session = await l.vs.recordings.publish(grant, waits(l));
+      // Takeover: after a crash or a network drop the server may still
+      // count the lost socket as attached (until its lease runs out), and
+      // would refuse anything else with `conflict`. The lost one was ours.
+      const grant = await l.vs.recordings.publishToken(rid, { takeover: true });
+      l.connecting = true;
+      const session = await l.vs.recordings.publish(grant, waits(l)).finally(() => { l.connecting = false; });
       if (l.stopping) { try { session.close(); } catch { /* closed */ } return false; }
       try { l.session?.close(); } catch { /* closed */ }
       l.session = session;
@@ -365,7 +384,7 @@ async function reattach(l: Live, rid: string): Promise<boolean> {
     if (!l.stopping) set(l, { waiting: undefined, error: r.last ? userText(r.last) : undefined });
     return false;
   }
-  set(l, { state: l.paused || was === 'paused' ? 'paused' : 'live', waiting: undefined, error: undefined, errorCode: undefined });
+  set(l, { state: l.paused ? 'paused' : 'live', waiting: undefined, error: undefined, errorCode: undefined });
   return true;
 }
 
@@ -396,39 +415,56 @@ function sentenceOf(l: Live, st: Sent) {
  *  dropping, for as long as the session runs. */
 async function follow(l: Live, rid: string, opened?: (e?: unknown) => void) {
   const lang = l.status.translateTo ?? null;
-  const ours = () => !l.stopping && isRunning(l.status) && (l.status.translateTo ?? null) === lang;
+  const gen = ++l.gen;
+  const running = () => !l.stopping && isRunning(l.status);
+  /** This open may still take over: no newer one was asked for. */
+  const newest = () => running() && l.gen === gen;
+  /** This one owns the subscription: a newer one hasn't opened yet. */
+  const owner = () => running() && l.subGen === gen;
   const seen = new Set<number>();
+  /** What was said already, so a reopen's snapshot doesn't say it again. */
+  const said = new Map<string, string>();
+  const once = (key: string, text: string, ev: LiveEvent) => { if (said.get(key) !== text) { said.set(key, text); emit(l, ev); } };
   const segment = (g: Seg) => {
     if (!seen.has(g.seq)) {
       seen.add(g.seq);
       emit(l, { type: 'committed', seq: g.seq, text: g.text, startS: g.start, endS: g.end, speaker: String(g.speaker), lang: g.language ?? null, ...words(l, g.words) });
     }
     const tr = lang ? g.translations?.[lang] : undefined;
-    if (tr) emit(l, { type: 'translated', seq: g.seq, lang: lang!, text: tr });
+    if (tr) once(`t${g.seq}`, tr, { type: 'translated', seq: g.seq, lang: lang!, text: tr });
   };
   const sentence = (st: Sent) => {
-    sentenceOf(l, st);
+    const k = `s${st.sentenceId}`;
+    const v = `${st.text}|${st.status ?? ''}|${st.suppressed ? 1 : 0}`;
+    if (said.get(k) !== v) { said.set(k, v); sentenceOf(l, st); }
     const tr = lang ? st.translations?.[lang] : undefined;
-    if (tr && st.seqs.length) emit(l, { type: 'translated', seq: Math.max(...st.seqs), seqs: st.seqs, sentenceId: st.sentenceId, lang: lang!, text: tr });
+    if (tr && st.seqs.length) once(`st${st.sentenceId}`, tr, { type: 'translated', seq: Math.max(...st.seqs), seqs: st.seqs, sentenceId: st.sentenceId, lang: lang!, text: tr });
   };
+  const speaker = (n: number, name: string, by: 'person' | 'saved') => once(`p${n}`, `${by}:${name}`, { type: 'speaker', speaker: String(n), name, by });
   let drops = 0;
   for (let first = true; ; first = false) {
     let sub: Subscription;
     try {
       sub = await l.vs.recordings.subscribe(rid, { ...(lang ? { lang } : {}) });
     } catch (e) {
-      // A language asked for that can't be added (`language_limit_reached`):
-      // the one before keeps going.
-      if (first && opened) { opened(e); return; }
+      if (first && opened) {
+        // A browser can't read why a socket was refused: ask over HTTP
+        // (one sentence), which says (a recording takes 10 languages at most).
+        const why = lang ? await l.vs.recordings.translation(rid, lang, [0]).then(() => e, (x: unknown) => ((x as { code?: string }).code === 'language_limit_reached' ? x : e)) : e;
+        opened(why);
+        return;
+      }
       if (final(e)) return;
       await sleep(resubscribeDelay(drops++));
-      if (!ours()) return;
+      if (first ? !newest() : !owner()) return;
       continue;
     }
     // Stopped, or the language changed again, while this one opened.
-    if (!ours()) { sub.close(); return; }
+    if (first ? !newest() : !owner()) { sub.close(); if (first) opened?.(); return; }
     try { l.sub?.close(); } catch { /* closed */ }
     l.sub = sub;
+    l.subGen = gen;
+    l.subLang = lang;
     if (first) opened?.();
     const since = Date.now();
     try {
@@ -438,11 +474,11 @@ async function follow(l: Live, rid: string, opened?: (e?: unknown) => void) {
           for (const g of ev.snapshot.segments) segment(g as Seg);
           for (const st of ev.snapshot.sentences ?? []) sentence(st as Sent);
           // Who each speaker turned out to be (a speaker the account saved).
-          for (const sp of (ev.snapshot.speakers ?? []) as { speaker: number; name?: string | null; identified?: boolean | null }[]) if (sp.name) emit(l, { type: 'speaker', speaker: String(sp.speaker), name: sp.name, by: sp.identified ? 'saved' : 'person' });
+          for (const sp of (ev.snapshot.speakers ?? []) as { speaker: number; name?: string | null; identified?: boolean | null }[]) if (sp.name) speaker(sp.speaker, sp.name, sp.identified ? 'saved' : 'person');
         } else if (ev.type === 'frame') {
           const f = ev.frame as { type: string; segment?: Seg; segments?: { text: string; translations?: Record<string, string> }[]; sentence?: Sent; seq?: number; translations?: Record<string, string>; speaker?: number; name?: string };
           if (f.type === 'transcript.committed' && f.segment) segment(f.segment);
-          else if ((f.type === 'transcript.speakerIdentified' || f.type === 'transcript.speakerNamed') && typeof f.speaker === 'number') emit(l, { type: 'speaker', speaker: String(f.speaker), name: f.name ?? '', by: f.type === 'transcript.speakerNamed' ? 'person' : 'saved' });
+          else if ((f.type === 'transcript.speakerIdentified' || f.type === 'transcript.speakerNamed') && typeof f.speaker === 'number') speaker(f.speaker, f.name ?? '', f.type === 'transcript.speakerNamed' ? 'person' : 'saved');
           else if (f.type === 'transcript.draft' && f.segments) {
             emit(l, { type: 'draft', text: f.segments.map((x) => x.text).join(' ').trim() });
             if (lang) {
@@ -452,17 +488,17 @@ async function follow(l: Live, rid: string, opened?: (e?: unknown) => void) {
           } else if (f.type === 'transcript.sentence' && f.sentence) sentence(f.sentence);
           else if (f.type === 'transcript.translated' && lang && typeof f.seq === 'number') {
             const tr = f.translations?.[lang];
-            if (tr) emit(l, { type: 'translated', seq: f.seq, lang, text: tr });
+            if (tr) once(`t${f.seq}`, tr, { type: 'translated', seq: f.seq, lang, text: tr });
           }
         } else if (ev.type === 'closed') break;
       }
     } catch { /* dropped: opened again below */ }
-    // Replaced (the language changed), or the session is over.
-    if (l.sub !== sub || !ours()) return;
+    // A newer language took over, or the session is over.
+    if (l.sub !== sub || !owner()) return;
     // A minute open counts as steady: the next drop starts quick again.
     if (Date.now() - since > 60_000) drops = 0;
     await sleep(resubscribeDelay(drops++));
-    if (l.sub !== sub || !ours()) return;
+    if (l.sub !== sub || !owner()) return;
   }
 }
 
@@ -496,11 +532,11 @@ export async function setLive(id: string, patch: { translateTo?: string | null; 
     // the new language (the old one closes once the new one is in). One
     // that can't open (a recording takes 10 languages at most) leaves the
     // old one, and its language, as they were.
-    const was = l.status.translateTo ?? null;
     set(l, { translateTo: lang });
     const err = await new Promise<unknown>((done) => void follow(l, l.status.recordingId!, done));
     if (err) {
-      if ((l.status.translateTo ?? null) === lang) set(l, { translateTo: was });
+      // Back to the language the running subscription reads.
+      if ((l.status.translateTo ?? null) === lang) set(l, { translateTo: l.subLang ?? null });
       throw err;
     }
   }
@@ -525,7 +561,8 @@ export async function pauseLive(id: string, paused: boolean) {
     else await l.vs.recordings.resume(l.status.recordingId);
   }
   l.paused = paused;
-  set(l, { state: paused ? 'paused' : 'live' });
+  // Reconnecting: the state follows `paused` once the socket is back.
+  if (l.status.waiting !== 'reconnecting') set(l, { state: paused ? 'paused' : 'live' });
 }
 
 export async function stopLive(id: string) {
@@ -542,7 +579,10 @@ async function finish(l: Live, error: string | null) {
   if (starting && !l.session) return;
   flush(l);
   const rid = l.status.recordingId;
-  if (rid) {
+  if (rid && l.demoted) {
+    // Another device records it now: let go, never stop it.
+    try { l.session?.close(); } catch { /* closed */ }
+  } else if (rid) {
     const stopErr = await endRecording(l.vs, rid, l.session).then(() => null, (e: unknown) => e);
     if (stopErr && !error) error = `The recording could not be stopped: ${(stopErr as Error).message ?? stopErr}. Stop it in the dashboard.`;
   } else {
@@ -551,7 +591,7 @@ async function finish(l: Live, error: string | null) {
   }
   await teardown(l);
   set(l, { state: error ? 'failed' : 'done', ...(error ? { error } : {}) });
-  if (l.status.mode === 'meeting' && rid && !error) void summarize(l, rid);
+  if (l.status.mode === 'meeting' && rid && !error && !l.demoted) void summarize(l, rid);
   else forgetLater(l);
 }
 

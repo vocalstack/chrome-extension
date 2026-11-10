@@ -243,13 +243,11 @@ async function playerOf(url: string): Promise<PlayerState | null> {
       const ids = await videoIds(url);
       if (!ids) return null;
       const vs = await vsClient();
-      // Gone (404) is made again; blocked, or a server that couldn't say,
-      // is never taken for gone (that would make a second one).
+      // Only read here (nothing is made): blocked is said, anything else unknown.
       const t = await vs.transcriptions.get(ids.transcriptionId).catch((e: unknown) => {
         const b = blockedOf(e);
         if (b) throw new RpcError(blockedText(b));
-        if ((e as { status?: number }).status === 404) return null;
-        throw e;
+        return null;
       });
       if (!t || t.lifecycle !== 'active') return null;
       const job = t.job ?? await vs.jobs.get(ids.recordingId).catch(() => null);
