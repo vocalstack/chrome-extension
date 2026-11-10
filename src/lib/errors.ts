@@ -38,7 +38,9 @@ const FIXED: Record<string, string> = {
   slow_consumer: 'The connection was too slow to keep up. Try again.',
   rate_limited: 'Too many requests. Wait a minute and try again.',
   invalid_token: 'Your sign-in has expired. Sign in again in Settings.',
-  session_expired: 'Your sign-in has expired. Sign in again in Settings.',
+  // A live socket's time to connect (or to reconnect) ran out: not the sign-in.
+  session_expired: 'The live connection to VocalStack timed out. Start again.',
+  language_limit_reached: 'A recording can be translated into 10 languages at most. Pick one it already has.',
   key_expired: 'This API key has expired. Sign in again with a new one.',
   key_revoked: 'This API key was revoked. Sign in again with a new one.',
   suspended: 'This account is suspended. Contact support from the dashboard.',

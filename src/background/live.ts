@@ -172,7 +172,7 @@ async function overlay(s: LiveStatus, on: boolean) {
 /** What the floating captions show of a session: its state, languages,
  *  speaker labels and host. */
 function tellTarget(t: Target, s: LiveStatus) {
-  const status = { state: s.state, mode: s.mode, spokenLanguage: s.spokenLanguage ?? null, translateTo: s.translateTo ?? null, speakerLabels: s.speakerLabels ?? 'auto', host: s.host, ahead: !!s.ahead };
+  const status = { state: s.state, mode: s.mode, spokenLanguage: s.spokenLanguage ?? null, translateTo: s.translateTo ?? null, speakerLabels: s.speakerLabels ?? 'auto', host: s.host, ahead: !!s.ahead, waiting: s.waiting };
   chrome.tabs.sendMessage(t.tabId, { captionStatus: status, id: s.id, hide: t.hide }, { frameId: t.frameId }).catch(() => {});
 }
 

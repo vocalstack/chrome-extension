@@ -299,7 +299,7 @@ function RecordingCard({ s, account, onSettings, only }: { s: LiveStatus; accoun
       <div className={`card2 txcard${only ? ' txcard--grow' : ''}`}>
         <Eyebrow side={recLang}>TRANSCRIPT</Eyebrow>
         <div className="txcard__lines">
-          {!lines.length && !draft && <p className="hint" style={{ margin: 0 }}>{s.state === 'live' ? 'Listening…' : s.state === 'paused' ? 'Paused.' : 'Getting ready…'}</p>}
+          {!lines.length && !draft && <p className="hint" style={{ margin: 0 }}>{s.state === 'live' ? 'Listening…' : s.state === 'paused' ? 'Paused.' : s.waiting === 'queued' ? 'Waiting for a free transcriber. It starts on its own.' : s.waiting === 'reconnecting' ? 'Reconnecting…' : 'Getting ready…'}</p>}
           {lines.slice(-60).map((l) => (
             <div key={l.seq}>
               {showWho && <div className="txl__who"><span style={{ color: LANES[Number(l.speaker ?? 0) % 3] }}>{who(l.speaker)}</span><span className="txl__at">{mmss(l.startS)}</span></div>}

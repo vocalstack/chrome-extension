@@ -22,7 +22,7 @@ const esc = (t: string) => t.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
 interface Line { seq: number; text: string; speaker: string }
 interface Said { key: number; seq: number; tr: string }
 interface Cue { s: number; e: number; t: string; o?: string; tr?: boolean; w?: { s: number; e: number; t: string }[] }
-interface Status { state: string; mode: string; spokenLanguage: string | null; translateTo: string | null; speakerLabels: Labels; host?: string; ahead?: boolean }
+interface Status { state: string; mode: string; spokenLanguage: string | null; translateTo: string | null; speakerLabels: Labels; host?: string; ahead?: boolean; waiting?: 'queued' | 'reconnecting' }
 /** A line read ahead: its times (and its words') on video `vid`'s clock. */
 interface Timed { seq: number; s: number; e: number; text: string; speaker: string; vid?: string; words?: { s: number; e: number; t: string }[] }
 /** What can show read ahead: a line, or a sentence's translation. */
@@ -588,7 +588,7 @@ export function startOverlay() {
     if (!items.length) {
       const w = document.createElement('div');
       w.className = 'wait';
-      w.textContent = cues ? '' : status?.state === 'paused' ? 'Paused.' : status && status.state !== 'live' ? 'Getting ready…' : status?.ahead ? (timed.length ? '' : 'Reading ahead…') : 'Listening…';
+      w.textContent = cues ? '' : status?.state === 'paused' ? 'Paused.' : status?.waiting === 'reconnecting' ? 'Reconnecting…' : status?.waiting === 'queued' ? 'Waiting for a free transcriber…' : status && status.state !== 'live' ? 'Getting ready…' : status?.ahead ? (timed.length ? '' : 'Reading ahead…') : 'Listening…';
       inner.appendChild(w);
     }
     items.forEach((it, i) => {

@@ -77,6 +77,9 @@ export interface LiveStatus {
   level?: number;
   /** Fed the video's buffered audio ahead of playback (LiveStart.ahead). */
   ahead?: boolean;
+  /** While `warming`: waiting in line for a free transcriber, or
+   *  connecting again after the connection dropped. */
+  waiting?: 'queued' | 'reconnecting';
 }
 
 export interface CaptionStyle {
