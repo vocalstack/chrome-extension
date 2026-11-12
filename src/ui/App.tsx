@@ -3,8 +3,9 @@
  *  strip, whose Live tab turns red while a session runs. Header controls
  *  and tabs explain themselves in tooltips. */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Account } from '../lib/auth';
+import { movedWorkspace } from '../lib/workspace';
 import type { UpdateState } from '../lib/version';
 import { onPush, rpc } from '../lib/rpc';
 import { currentEnv, type Env } from '../lib/env';
@@ -42,6 +43,9 @@ const on = (s: LiveStatus) => s.state === 'live' || s.state === 'warming' || s.s
 
 export function App() {
   const [account, setAccount] = useState<Account | null | undefined>(undefined);
+  /** Counts workspace changes: each one loads every screen again. */
+  const [epoch, setEpoch] = useState(0);
+  const shown = useRef<Account | null>(null);
   const [env, setEnvState] = useState<Env | null>(null);
   const [view, setViewState] = useState<View>('page');
   /** Where Settings goes back to. */
@@ -52,11 +56,17 @@ export function App() {
   const update = useUpdate();
 
   useEffect(() => {
-    rpc('auth.account').then(setAccount, () => setAccount(null));
+    rpc('auth.account').then((a) => { shown.current = a; setAccount(a); }, () => setAccount(null));
     currentEnv().then(setEnvState);
     rpc('live.list').then(setLive, () => {});
     return onPush((p) => {
-      if (p.push === 'auth.changed') { setAccount(p.account); currentEnv().then(setEnvState); }
+      if (p.push === 'auth.changed') {
+        // Another workspace: nothing loaded for the old one stays on screen.
+        if (movedWorkspace(shown.current, p.account)) setEpoch((n) => n + 1);
+        shown.current = p.account;
+        setAccount(p.account);
+        currentEnv().then(setEnvState);
+      }
       // Finished sessions stay until dismissed (live.gone), so how each ended,
       // and a meeting's summary, stay readable while others run.
       if (p.push === 'live.status') setLive((all) => [...all.filter((s) => s.id !== p.status.id), p.status]);
@@ -75,7 +85,7 @@ export function App() {
 
   /** A session running: the Live tab shows it. */
   const rec = live.some((s) => on(s) && isRunning(s));
-  return <Panel account={account} env={env} view={view} setView={setView} lastArea={lastArea} live={live} rec={rec} intent={intent} clearIntent={clearIntent} update={update} block={block} />;
+  return <Panel key={epoch} account={account} env={env} view={view} setView={setView} lastArea={lastArea} live={live} rec={rec} intent={intent} clearIntent={clearIntent} update={update} block={block} />;
 }
 
 /** The toolbar icon's "!" on the active tab while the extension still

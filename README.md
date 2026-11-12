@@ -46,6 +46,8 @@ All API calls go through the TypeScript SDK ([`@vocalstack/js-sdk`](https://www.
 - **Sign in with VocalStack** is One-click Connect (transcribe: `docs/connect.md`): OAuth 2.0 code + PKCE where the token is an API key. `chrome.identity.launchWebAuthFlow` opens the dashboard's `/connect` screen; it redirects to `https://<extension id>.chromiumapp.org/connect`, which the browser hands to the extension; the extension redeems the code at `POST /v1/connect/token`.
 - **Use an API key**: paste one from Developers → API keys.
 
+A key belongs to one workspace: what it creates lands there and is billed there. Settings shows that workspace (name and mark, from `workspace` on the Connect answer and `GET /v1/me`, `src/lib/workspace.ts`); **Change** runs Connect again, whose consent screen has the workspace picker, and swaps to the new workspace's key. A pasted key shows its workspace and has no Change.
+
 Either way the key stays in `chrome.storage.local`. It is never sent to `/v1`, which refuses keys from browsers. The extension exchanges it at `POST /docs/key-exchange` for 15-minute key tokens. The API trusts the extension's Origin for those two calls only (transcribe: `src/domain/auth.rs`, `EXTENSION_ORIGINS`).
 
 ### The extension id

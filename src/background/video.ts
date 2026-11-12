@@ -219,6 +219,13 @@ async function playerCode(url: string, key: string): Promise<string | null> {
 
 /** A video's place on the player, or null: never given one here, or its
  *  link revoked since (then forgotten). The job is read without sign-in. */
+/** The workspace changed: what was remembered about videos (the old
+ *  workspace's transcriptions and their player links) is forgotten. */
+export async function forgetVideos(): Promise<void> {
+  const keys = Object.keys(await chrome.storage.local.get(null)).filter((k) => k.startsWith(`${KNOWN}:`) || k.startsWith(`${PLAYER}:`) || k === OLD_KNOWN);
+  if (keys.length) await chrome.storage.local.remove(keys);
+}
+
 async function playerOf(url: string): Promise<PlayerState | null> {
   let api: string;
   let code: string | null;

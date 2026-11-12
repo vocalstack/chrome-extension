@@ -22,6 +22,7 @@ import { currentEnv, type Env } from './env';
 import { push } from './rpc';
 import { apiText } from './errors';
 import { report, reportState } from './sentry';
+import { iconVersion, readWorkspace, withWorkspace, type Workspace } from './workspace';
 
 export interface Account {
   /** The account's display name, as Connect or the key exchange named it. */
@@ -33,7 +34,18 @@ export interface Account {
   reach?: 'own' | 'account';
   /** A pasted key's last four characters, to tell keys apart (Settings). */
   keyTail?: string;
+  /** The workspace the key works in, once the API named it (lib/workspace.ts). */
+  workspace?: Workspace;
 }
+
+/** The workspace's own icon, kept as a data: link so Settings shows it at
+ *  once and offline; fetched again only when it changed (`version`). */
+export interface StoredIcon {
+  env: string;
+  version: string;
+  data: string;
+}
+export const WORKSPACE_ICON = 'workspaceIcon';
 
 interface Stored {
   key: string;
@@ -81,8 +93,15 @@ export async function account(): Promise<Account | null> {
   return (await stored())?.account ?? null;
 }
 
-/** Sign in with VocalStack (One-click Connect). */
-export async function signInWithConnect(): Promise<Account> {
+/** Sign in with VocalStack (One-click Connect).
+ *
+ *  Signed in already, this changes the workspace: a key belongs to one
+ *  workspace, so the consent screen (which has a workspace picker) answers
+ *  with a new key that replaces the one in use. `before` runs once the
+ *  person has answered, just before anything is replaced, and may refuse
+ *  by throwing; cancelling or any failure leaves the sign-in in use
+ *  untouched. */
+export async function signInWithConnect(before?: () => Promise<void>): Promise<Account> {
   const env = await currentEnv();
   const { verifier, challenge } = await pkce();
   const state = b64url(crypto.getRandomValues(new Uint8Array(16)));
@@ -133,11 +152,26 @@ export async function signInWithConnect(): Promise<Account> {
     // invalid_grant: the code expired or was used (a slow or doubled sign-in).
     throw new AuthError(body.error === 'invalid_grant' ? 'That sign-in expired. Sign in again.' : res.status >= 500 ? apiText('internal', '') : 'Sign-in didn’t finish. Try again.');
   }
-  const acct: Account = { name: body.account?.name ?? 'VocalStack', keyId: body.key_id ?? '', via: 'connect', scopes: String(body.scope ?? '').split(/\s+/).filter(Boolean), reach: body.reach === 'own' ? 'own' : 'account' };
+  const workspace = readWorkspace(body.workspace);
+  const acct: Account = { name: body.account?.name ?? 'VocalStack', keyId: body.key_id ?? '', via: 'connect', scopes: String(body.scope ?? '').split(/\s+/).filter(Boolean), reach: body.reach === 'own' ? 'own' : 'account', ...(workspace ? { workspace } : {}) };
+  await before?.();
+  const was = await stored();
+  // The old workspace's token must not serve one more call.
+  await chrome.storage.session.remove(TOKEN);
   await save(env, body.access_token, acct);
-  // Prove the key works now, and hold the first token.
-  await exchange(env, body.access_token);
-  return acct;
+  try {
+    // Prove the key works now, and hold the first token.
+    await exchange(env, body.access_token);
+  } catch (e) {
+    // A change that could not be proven: back to the sign-in in use.
+    if (was) {
+      await chrome.storage.session.remove(TOKEN);
+      await chrome.storage.local.set({ [CRED]: was });
+    }
+    throw e;
+  }
+  void keepIcon(env, workspace).catch(() => {});
+  return (await account()) ?? acct;
 }
 
 /** Sign in with a pasted API key. */
@@ -146,14 +180,72 @@ export async function signInWithKey(key: string): Promise<Account> {
   key = key.trim();
   if (!/^vs_key_/.test(key)) throw new AuthError('That is not a VocalStack API key: keys start with vs_key_.');
   const t = await exchange(env, key);
-  const acct: Account = { name: t.keyName || 'API key', keyId: t.apiKeyId, via: 'key', scopes: t.scopes, keyTail: key.slice(-4) };
+  const workspace = await askWorkspace(env, t.token);
+  const acct: Account = { name: t.keyName || 'API key', keyId: t.apiKeyId, via: 'key', scopes: t.scopes, keyTail: key.slice(-4), ...(workspace ? { workspace } : {}) };
   await save(env, key, acct);
+  void keepIcon(env, workspace).catch(() => {});
   return acct;
 }
 
 export async function signOut(): Promise<void> {
-  await chrome.storage.local.remove(CRED);
+  await chrome.storage.local.remove([CRED, WORKSPACE_ICON]);
   await chrome.storage.session.remove(TOKEN);
+}
+
+/** The workspace the token's key works in, as `GET /v1/me` names it.
+ *  Undefined: an older API that names none, or the call failed. */
+async function askWorkspace(env: Env, token: string): Promise<Workspace | undefined> {
+  try {
+    const res = await fetch(`${env.api}/v1/me`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return undefined;
+    return readWorkspace((await res.json())?.workspace);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Keep the stored account's workspace in step with the API (a rename, a
+ *  new icon), and tell the panel when it changed. */
+async function syncWorkspace(env: Env, key: string, token: string): Promise<void> {
+  const now = await askWorkspace(env, token);
+  if (!now) return;
+  const s = await stored();
+  if (!s || s.key !== key || s.env !== env.name) return;
+  const account = withWorkspace(s.account, now);
+  if (account) {
+    await save(env, key, account);
+    push({ push: 'auth.changed', account });
+  }
+  await keepIcon(env, now);
+}
+
+const ICON_MAX_BYTES = 2_000_000;
+
+/** Fetch the workspace's icon when it is not the one kept, and drop the
+ *  kept one when the workspace has none. No Authorization header: the
+ *  link is signed. */
+async function keepIcon(env: Env, w: Workspace | undefined): Promise<void> {
+  if (!w) return;
+  const version = iconVersion(w.iconUrl);
+  const kept = (await chrome.storage.local.get(WORKSPACE_ICON))[WORKSPACE_ICON] as StoredIcon | undefined;
+  if (!version || !w.iconUrl) {
+    if (kept) await chrome.storage.local.remove(WORKSPACE_ICON);
+    return;
+  }
+  if (kept && kept.env === env.name && kept.version === version) return;
+  if (kept) await chrome.storage.local.remove(WORKSPACE_ICON);
+  const res = await fetch(new URL(w.iconUrl, env.api), { credentials: 'omit', signal: AbortSignal.timeout(15_000) });
+  const type = (res.headers.get('content-type') ?? '').split(';')[0]!.trim();
+  if (!res.ok || !/^image\/(png|jpeg|webp|gif)$/.test(type)) return;
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (!bytes.length || bytes.length > ICON_MAX_BYTES) return;
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  // Another workspace was picked while this one's icon was on its way.
+  const s = await stored();
+  if (!s || s.env !== env.name || s.account.workspace?.id !== w.id || iconVersion(s.account.workspace.iconUrl) !== version) return;
+  const icon: StoredIcon = { env: env.name, version, data: `data:${type};base64,${btoa(bin)}` };
+  await chrome.storage.local.set({ [WORKSPACE_ICON]: icon });
 }
 
 async function save(env: Env, key: string, account: Account) {
@@ -186,6 +278,10 @@ async function exchange(env: Env, key: string): Promise<Exchanged> {
       : 'The key couldn’t be checked. Try again.';
     throw new AuthError(msg, res.status === 401 ? 'invalid_key' : 'auth');
   }
+  // An exchange of the key in use before a workspace change, answered
+  // after it: its token belongs to the old workspace and is not kept.
+  const cur = await stored();
+  if (cur && cur.key !== key) return body as Exchanged;
   const kt: KeyToken = { token: body.token, expiresAt: Date.parse(body.expiresAt), env: env.name };
   await chrome.storage.session.set({ [TOKEN]: kt });
   await refreshAccount(env, key, body as Exchanged);
@@ -212,12 +308,15 @@ export async function refresh(): Promise<Account | null> {
   const env = await currentEnv();
   const s = await stored();
   if (!s) return null;
+  let x: Exchanged;
   try {
-    await exchange(env, s.key);
+    x = await exchange(env, s.key);
   } catch (e) {
     if (e instanceof AuthError && e.code === 'invalid_key') await signOut();
     throw e;
   }
+  // The workspace's name and icon as they are now (a rename in the Dashboard).
+  await syncWorkspace(env, s.key, x.token).catch(() => {});
   return account();
 }
 
@@ -238,7 +337,11 @@ export async function accessToken(): Promise<string> {
       const s = await stored();
       if (!s) throw new AuthError('Sign in to VocalStack first.', 'signed_out');
       try {
-        return (await exchange(env, s.key)).token;
+        const { token } = await exchange(env, s.key);
+        // Each new token (a start, a panel opened after a while) also asks
+        // what the workspace is called now; the call it was for does not wait.
+        void syncWorkspace(env, s.key, token).catch(() => {});
+        return token;
       } catch (e) {
         // A revoked or deleted key: forget it, so the panel asks to sign in.
         if (e instanceof AuthError && e.code === 'invalid_key') await signOut();

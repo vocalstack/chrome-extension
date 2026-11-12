@@ -19,6 +19,9 @@ export interface Methods {
   'auth.connect': [void, Account];
   'auth.key': [{ key: string }, Account];
   'auth.signOut': [void, void];
+  /** Change the workspace: the consent screen again, whose answer is a new
+   *  key for the workspace picked there. Refused while anything records. */
+  'auth.workspace': [void, Account];
   'auth.token': [void, string];
   /** Exchange the key again now: the account's scopes as the API sees them. */
   'auth.refresh': [void, Account | null];

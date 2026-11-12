@@ -6,6 +6,8 @@ import { useEffect, useState } from 'react';
 import type { Account } from '../lib/auth';
 import { ENVS, type Env, type EnvName } from '../lib/env';
 import { rpc } from '../lib/rpc';
+import { workspaceName } from '../lib/workspace';
+import { WorkspaceMark } from '../ui/workspace';
 import { AUTO_CAPTIONS, OFFER_KEY } from '../lib/live';
 import { AHEAD_DEBUG } from '../lib/ahead';
 import { errorText, Field, Note, useAction } from '../ui/kit';
@@ -34,8 +36,9 @@ export function EnvPicker({ env, compact }: { env: Env; compact?: boolean }) {
   return <div className="stack"><Field label="Environment" hint="Each environment has its own sign-in.">{select}</Field>{note}</div>;
 }
 
-export function Settings({ account, update }: { account: Account; env: Env | null; update: UpdateState | null; onBack: () => void }) {
+export function Settings({ account, env, update }: { account: Account; env: Env | null; update: UpdateState | null; onBack: () => void }) {
   const out = useAction();
+  const change = useAction();
   const [offerMeetings, setOfferMeetings] = useState(true);
   const [autoCaptions, setAutoCaptions] = useState(false);
   const [aheadDebug, setAheadDebug] = useState(false);
@@ -56,6 +59,10 @@ export function Settings({ account, update }: { account: Account; env: Env | nul
   const initials = account.name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('') || 'VS';
   const isKey = account.via === 'key';
   const foot = versionFoot(update);
+  const ws = account.workspace;
+  const name = workspaceName(account);
+  // Closing the consent window is an answer, not an error.
+  const changeError = /cancelled/i.test(change.error) ? '' : change.error;
   const prefs: ({ label: string; sub: string; on: boolean; set: (v: boolean) => void } | false)[] = [
     { label: 'Captions on videos', sub: 'Turn captions on by themselves on every video you play with sound. Where Chrome asks first (live streams, TikTok, X and others), one click on the VocalStack icon turns them on. Uses credit.', on: autoCaptions, set: (v) => { setAutoCaptions(v); void chrome.storage.local.set({ [AUTO_CAPTIONS]: v }); } },
     import.meta.env.VS_AHEAD_DEBUG && { label: 'Read-ahead debug', sub: 'On YouTube, show over the video how far ahead of it the buffer, the audio sent and the transcript are, and how early each line came back.', on: aheadDebug, set: (v) => { setAheadDebug(v); void chrome.storage.local.set({ [AHEAD_DEBUG]: v }); } },
@@ -65,14 +72,19 @@ export function Settings({ account, update }: { account: Account; env: Env | nul
   return (
     <div className="screen" data-screen-label="Settings">
       <div className="card2 acct">
-        <span className="acct__av">{isKey ? <HiKey width={18} height={18} /> : initials}</span>
-        <div className="lrow__main">
-          <div className="lrow__title" style={{ fontWeight: 600 }}>{account.name}</div>
-          <div className="rec-head__src" style={{ marginTop: 3 }}>{isKey ? (account.keyTail ? `vs_••••${account.keyTail}` : 'API key') : 'Signed in with VocalStack'}</div>
+        {ws ? <WorkspaceMark w={ws} env={env?.name} size={40} /> : <span className="acct__av">{isKey ? <HiKey width={18} height={18} /> : initials}</span>}
+        <div className="lrow__main" role="group" aria-label={`Workspace: ${name}`}>
+          <div className="ey acct__ey">Workspace</div>
+          <div className="lrow__title" style={{ fontWeight: 600 }}>{name}</div>
+          <div className="rec-head__src" style={{ marginTop: 3 }}>{isKey ? (account.keyTail ? `vs_••••${account.keyTail}` : 'API key') : change.busy ? 'Choose a workspace in the window that opened…' : 'Signed in with VocalStack'}</div>
         </div>
-        {!isKey && plan && <span className="chip">{plan}</span>}
-        {isKey && <span className="chip chip--mute">API KEY</span>}
+        <div className="acct__end">
+          {!isKey && plan && <span className="chip">{plan}</span>}
+          {isKey && <span className="chip chip--mute">API KEY</span>}
+          {!isKey && <button type="button" className="btn btn--sm" aria-label="Change workspace" aria-busy={change.busy || undefined} disabled={change.busy || out.busy} onClick={() => change.run(() => rpc('auth.workspace'))}>{change.busy && <span className="spin" />}Change</button>}
+        </div>
       </div>
+      {changeError && <Note kind="bad">{changeError}</Note>}
 
       <div className="card2 card2--list">
         {prefs.filter((p) => p !== false).map((p) => (

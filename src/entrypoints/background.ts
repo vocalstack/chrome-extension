@@ -6,11 +6,11 @@ import { serve, push, RpcError, type Handlers } from '../lib/rpc';
 import * as auth from '../lib/auth';
 import { setEnv } from '../lib/env';
 import { registerPage } from '../background/page';
-import { anyRunning, markInvoked, registerLive } from '../background/live';
+import { anyRunning, listLive, markInvoked, registerLive } from '../background/live';
 import { registerDub } from '../background/dub';
 import { registerVcap } from '../background/vcap';
 import { registerTabCaptions, takeOffer } from '../background/tabCaptions';
-import { registerVideo } from '../background/video';
+import { forgetVideos, registerVideo } from '../background/video';
 import { registerMeetings } from '../background/meetings';
 import { registerUpdates } from '../background/updates';
 import { showInPanel } from '../background/panel';
@@ -40,6 +40,20 @@ export default defineBackground(() => {
     'auth.connect': async () => (await signedIn(await auth.signInWithConnect()))!,
     'auth.key': async ({ key }) => (await signedIn(await auth.signInWithKey(key)))!,
     'auth.signOut': async () => { await auth.signOut(); await signedIn(null); },
+    'auth.workspace': async () => {
+      const was = await auth.account();
+      if (!was) throw new auth.AuthError('Sign in to VocalStack first.', 'signed_out');
+      if (was.via !== 'connect') throw new RpcError('An API key works in one workspace. Sign out, then sign in with a key from the other workspace.');
+      // A running session keeps writing to the workspace it started in.
+      if (await anyRunning()) throw new RpcError('Stop the recording or captions first, then change the workspace.');
+      const now = await auth.signInWithConnect(async () => {
+        if (await anyRunning()) throw new RpcError('The workspace was not changed: a recording or captions started meanwhile. Stop them, then change the workspace.');
+      });
+      // Nothing of the old workspace stays: finished sessions, remembered videos.
+      for (const s of (await listLive().catch(() => [])).filter((x) => ['done', 'failed'].includes(x.state))) await handlers['live.forget']?.({ id: s.id }, {} as chrome.runtime.MessageSender);
+      await forgetVideos().catch(() => {});
+      return (await signedIn(now))!;
+    },
     'auth.token': () => auth.accessToken(),
     'auth.refresh': async () => {
       try {
