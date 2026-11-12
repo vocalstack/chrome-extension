@@ -3,9 +3,11 @@
  *  strip, whose Live tab turns red while a session runs. Header controls
  *  and tabs explain themselves in tooltips. */
 
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type { Account } from '../lib/auth';
-import { movedWorkspace } from '../lib/workspace';
+import { movedWorkspace, settingsMark } from '../lib/workspace';
+import type { PlayTarget } from '../lib/play';
+import { WorkspaceMark } from './workspace';
 import type { UpdateState } from '../lib/version';
 import { onPush, rpc } from '../lib/rpc';
 import { currentEnv, type Env } from '../lib/env';
@@ -28,6 +30,9 @@ import { LibraryScreen } from '../screens/Library';
 import { FileDrop } from '../screens/FileDrop';
 import { UpdateBanner, UpdateBlock, useUpdate } from './update';
 import { ENVS } from '../lib/env';
+
+/** The player and its styles come only when something is played. */
+const PlayerView = lazy(() => import('../screens/Player'));
 
 type Area = Exclude<View, 'settings'>;
 const TABS: { view: Area; label: string; tip: string; Icon: typeof HiCursor }[] = [
@@ -56,7 +61,15 @@ export function App() {
   const update = useUpdate();
 
   useEffect(() => {
-    rpc('auth.account').then((a) => { shown.current = a; setAccount(a); }, () => setAccount(null));
+    rpc('auth.account').then((a) => {
+      shown.current = a;
+      setAccount(a);
+      // A sign-in from before workspaces were named: ask now, so the corner
+      // shows the workspace without Settings being opened first (the answer
+      // comes as `auth.changed`). Later renames and icons come with each
+      // new token, as they do for Settings.
+      if (a && !a.workspace) void rpc('auth.refresh').catch(() => {});
+    }, () => setAccount(null));
     currentEnv().then(setEnvState);
     rpc('live.list').then(setLive, () => {});
     return onPush((p) => {
@@ -105,29 +118,44 @@ function Panel({ account, env, view, setView, lastArea, live, rec, intent, clear
   intent: ReturnType<typeof usePanelIntent>[0]; clearIntent: () => void; update: UpdateState | null; block: React.ReactNode;
 }) {
   useInvokeBadge(live);
+  /** The Library item being played, over the Library it came from. */
+  const [playing, setPlaying] = useState<PlayTarget | null>(null);
+  // A menu, the omnibox or a notification asked for a screen: show it.
+  useEffect(() => { if (intent) setPlaying(null); }, [intent]);
+  const play = view === 'library' ? playing : null;
   return (
     <div className="shell">
       {update && <UpdateBanner s={update} />}
-      <TipRow>
-        <Header view={view} env={env} rec={rec} onView={setView} onBack={() => setView(lastArea)} />
-      </TipRow>
-      <main className="body2">
-        {view === 'page' && <PageScreen account={account} live={live} intent={intent?.view === 'page' ? intent : null} onIntentDone={clearIntent} onSettings={() => setView('settings')} onLive={() => setView('live')} onLibrary={() => setView('library')} onUpload={() => setView('upload')} />}
-        {view === 'live' && <LiveScreen account={account} live={live} intent={intent?.view === 'live' ? intent : null} onIntentDone={clearIntent} onSettings={() => setView('settings')} />}
-        {view === 'upload' && <UploadScreen account={account} onSettings={() => setView('settings')} onLibrary={() => setView('library')} />}
-        {view === 'broadcasts' && <BroadcastsScreen account={account} onSettings={() => setView('settings')} />}
-        {view === 'speakers' && <SpeakersScreen />}
-        {view === 'library' && <LibraryScreen account={account} intent={intent?.view === 'library' ? intent : null} onIntentDone={clearIntent} />}
-        {view === 'settings' && <Settings account={account} env={env} update={update} onBack={() => setView(lastArea)} />}
-      </main>
-      <FileDrop account={account} onSettings={() => setView('settings')} onDropped={() => setView('upload')} quiet={view === 'upload'} />
+      {play && (
+        <Suspense fallback={<div className="empty"><span className="spin" style={{ margin: '0 auto' }} /></div>}>
+          <PlayerView target={play} env={env ?? ENVS.production} onBack={() => setPlaying(null)} />
+        </Suspense>
+      )}
+      {/* The Library stays as it was (its search, its list) under the player. */}
+      <div style={{ display: play ? 'none' : 'contents' }}>
+        <TipRow>
+          <Header view={view} env={env} rec={rec} account={account} onView={(v) => { setPlaying(null); setView(v); }} onBack={() => setView(lastArea)} />
+        </TipRow>
+        <main className="body2">
+          {view === 'page' && <PageScreen account={account} live={live} intent={intent?.view === 'page' ? intent : null} onIntentDone={clearIntent} onSettings={() => setView('settings')} onLive={() => setView('live')} onLibrary={() => setView('library')} onUpload={() => setView('upload')} />}
+          {view === 'live' && <LiveScreen account={account} live={live} intent={intent?.view === 'live' ? intent : null} onIntentDone={clearIntent} onSettings={() => setView('settings')} />}
+          {view === 'upload' && <UploadScreen account={account} onSettings={() => setView('settings')} onLibrary={() => setView('library')} />}
+          {view === 'broadcasts' && <BroadcastsScreen account={account} onSettings={() => setView('settings')} />}
+          {view === 'speakers' && <SpeakersScreen />}
+          {view === 'library' && <LibraryScreen account={account} intent={intent?.view === 'library' ? intent : null} onIntentDone={clearIntent} onPlay={setPlaying} />}
+          {view === 'settings' && <Settings account={account} env={env} update={update} onBack={() => setView(lastArea)} />}
+        </main>
+        <FileDrop account={account} onSettings={() => setView('settings')} onDropped={() => setView('upload')} quiet={view === 'upload'} />
+      </div>
       {block}
     </div>
   );
 }
 
-function Header({ view, env, rec, onView, onBack }: { view: View; env: Env | null; rec: boolean; onView: (v: View) => void; onBack: () => void }) {
+function Header({ view, env, rec, account, onView, onBack }: { view: View; env: Env | null; rec: boolean; account: Account; onView: (v: View) => void; onBack: () => void }) {
   const tip = useTip();
+  // The workspace the extension works in, once known; else the gear.
+  const mark = settingsMark(account);
   return (
     <>
       <div className="hd">
@@ -142,7 +170,9 @@ function Header({ view, env, rec, onView, onBack }: { view: View; env: Env | nul
             {env && env.name !== 'production' && <span className="env-pill" title={`Environment: ${env.label}`}>{env.name === 'local' ? 'Local' : env.label}</span>}
             <div className="hd__end">
               {env && <a className="hd__icon hd__icon--sm" href={env.app} target="_blank" rel="noopener" aria-label="Open Dashboard in a new tab" {...tip('Open Dashboard', `Opens ${new URL(env.app).host} in a new tab.`, { right: true })}><HiExternal /></a>}
-              <button type="button" className="hd__icon" aria-label="Settings" onClick={() => onView('settings')} {...tip('Settings', undefined, { right: true })}><HiGear /></button>
+              <button type="button" className={`hd__icon${mark.workspace ? ' hd__icon--ws' : ''}`} aria-label={mark.label} onClick={() => onView('settings')} {...tip('Settings', mark.workspace ? `Workspace: ${mark.workspace.name}` : undefined, { right: true })}>
+                {mark.workspace ? <WorkspaceMark w={mark.workspace} env={env?.name} size={24} /> : <HiGear />}
+              </button>
             </div>
           </>
         )}

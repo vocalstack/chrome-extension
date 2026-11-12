@@ -34,6 +34,7 @@ zipdir() { # zipdir <dir> <zip> <name inside>
 if [ "${VS_WEBSTORE:-}" = 1 ]; then
   npx wxt build
   npx wxt build -b edge
+  node scripts/no-remote-code.mjs output/store/chrome output/store/edge
   # The stores want manifest.json at the zip's root.
   rm -f output/vocalstack-webstore.zip output/vocalstack-edge-store.zip
   (cd output/store/chrome && zip -qr -X ../../vocalstack-webstore.zip .)
@@ -44,6 +45,7 @@ fi
 
 npx wxt build
 npx wxt build -b edge
+node scripts/no-remote-code.mjs output/chrome output/edge
 zipdir output/chrome output/vocalstack-chrome.zip vocalstack-chrome
 zipdir output/edge output/vocalstack-edge.zip vocalstack-edge
 echo "[package] output/vocalstack-chrome.zip output/vocalstack-edge.zip"

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { iconVersion, movedWorkspace, readWorkspace, sameWorkspace, withWorkspace, workspaceName, type Workspace } from './workspace.ts';
+import { iconVersion, movedWorkspace, readWorkspace, sameWorkspace, settingsMark, withWorkspace, workspaceName, type Workspace } from './workspace.ts';
 
 const ws = (over: Partial<Workspace> = {}): Workspace => ({ id: '0190a0c2-7d1e-7c55-9a41-5f3d2b6e8c10', name: 'Northside Radio', personal: false, iconUrl: null, ...over });
 
@@ -72,4 +72,12 @@ test('another key or another workspace means the old one’s data must go', () =
   assert.ok(!movedWorkspace({ keyId: 'k1', workspace: ws() }, { keyId: 'k1', workspace: ws({ name: 'Renamed' }) }));
   assert.ok(!movedWorkspace(null, { keyId: 'k1' }));
   assert.ok(!movedWorkspace({ keyId: 'k1' }, null));
+});
+
+test('the corner shows the workspace’s mark once it is known, else the gear', () => {
+  assert.deepEqual(settingsMark({ workspace: ws() }), { workspace: ws(), label: 'Settings, workspace Northside Radio' });
+  assert.deepEqual(settingsMark({ workspace: ws({ personal: true, name: 'Personal workspace' }) }).label, 'Settings, workspace Personal workspace');
+  assert.deepEqual(settingsMark({}), { workspace: null, label: 'Settings' });
+  assert.deepEqual(settingsMark(null), { workspace: null, label: 'Settings' });
+  assert.deepEqual(settingsMark(undefined), { workspace: null, label: 'Settings' });
 });

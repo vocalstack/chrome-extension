@@ -302,6 +302,10 @@ label.item--click{cursor:pointer}
 .langbar__chev{opacity:.6}
 .langbar__arrow{flex:none;color:var(--ink-45)}
 .hd__icon--sm svg{width:17px;height:17px}
+/* The corner's workspace mark, where the gear was (lib/workspace.ts, settingsMark). */
+.hd__icon--ws .wsmark svg{width:13px;height:13px}
+.hd__icon:active{background:var(--fill-10)}
+.hd__icon--ws:active .wsmark{transform:scale(.94)}
 .tiprow{flex:none;position:relative;z-index:40;display:flex;flex-direction:column}
 .tip{position:absolute;z-index:60;pointer-events:none;max-width:340px;width:max-content;box-sizing:border-box;padding:7px 10px;border:1px solid var(--vs-border-brand);border-radius:10px;background:var(--vs-surface-raised);box-shadow:var(--vs-shadow-tooltip);font-size:11.5px;font-weight:400;line-height:1.4;color:var(--ink-80);text-wrap:pretty}
 .tip--up{transform:translateY(-100%)}
@@ -676,3 +680,25 @@ label.item--click{cursor:pointer}
 .ey--line{padding:8px 0 2px;line-height:10px}
 /* The design's lists keep the hairline under their last row too. */
 [data-screen-label="Library"] .lrow:last-child,[data-screen-label="Broadcasts"] .lrow:last-child,[data-screen-label="Speakers"] .lrow:last-child,[data-screen-label="Settings"] .pref:last-child{border-bottom:1px solid var(--hair)}
+
+/* A Library item in the panel's player (screens/Player.tsx): the player
+   fills what is left under the bar, and scrolls inside itself. */
+.pv{flex:1;min-height:0;position:relative;overflow:hidden;display:flex;flex-direction:column;line-height:normal}
+.pv>.vsp{flex:1;min-height:0}
+/* A row's way to the Dashboard. */
+.lib-dash{align-self:center;margin-right:-4px;color:var(--ink-35,var(--ink-45))}
+.lib-dash:hover{color:var(--ink-96)}
+
+/* A YouTube link's picture is YouTube's own embed, and YouTube refuses to
+   play in a page that sends no http Referer, which an extension page
+   cannot send (its "Error 153"). The sound, the transcript and the
+   subtitles are VocalStack's and play; in place of the refused embed the
+   video's still picture stays up, and says where the moving one is.
+   (Class names of @vocalstack/player 1.2.14, pinned in package.json: look
+   again when it is updated.) */
+.pv .vsp .txyt iframe{visibility:hidden}
+.pv .vsp .txyt .txyt__paused{display:none}
+.pv .vsp .vsp-poster{opacity:1!important}
+.pv .vsp .vsp-poster .vsp-poster__img{inset:0;filter:none;transform:none}
+.pv .vsp .vsp-poster .txyt__pausedplay{display:none}
+.pv .vsp .vsp-poster::after{content:'Sound and transcript here · video in the Dashboard';inset:auto;top:46%;left:50%;transform:translate(-50%,-50%);width:max-content;max-width:calc(100% - 24px);padding:5px 10px;border-radius:999px;background:rgba(5,6,21,.72);color:rgba(238,240,248,.9);font:500 11px/1.3 var(--vs-font-sans,Inter,system-ui,sans-serif);text-align:center}

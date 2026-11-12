@@ -1,6 +1,9 @@
 /** Library (design 3): search every transcript, or the latest
- *  transcriptions by day, with their progress; a failed one can be tried
- *  again, one waiting to be trimmed opens in the dashboard. */
+ *  transcriptions by day, with their progress. A click on a finished one,
+ *  or on a line a search found, plays it here in the panel's player
+ *  (lib/play.ts, screens/Player.tsx); each row's small arrow opens it in
+ *  the Dashboard instead. A failed one can be tried again, one waiting to
+ *  be trimmed opens in the dashboard. */
 
 import { useEffect, useRef, useState } from 'react';
 import type { SearchHit, Transcription } from '@vocalstack/contract';
@@ -12,6 +15,7 @@ import { HiAudio, HiBroadcast, HiDoc, HiExternal, HiMic, HiSearch, HiVideo, HiX 
 import { MEETING_HOSTS } from '../lib/live';
 import { hitPath, txPath } from '../background/page/paths';
 import { jobPct, jobText } from './page/tracker';
+import { NO_PLAY_TEXT, hitPlay, playOf, type PlayTarget } from '../lib/play';
 import { mmss } from './Live';
 
 /** The ids of the person's broadcasts: a hit in one opens under /s/… */
@@ -40,7 +44,7 @@ function Marked({ text, q }: { text: string; q: string }) {
   return <>{out}</>;
 }
 
-export function LibraryScreen({ account, intent, onIntentDone }: { account: Account; intent: PanelIntent | null; onIntentDone: () => void }) {
+export function LibraryScreen({ account, intent, onIntentDone, onPlay }: { account: Account; intent: PanelIntent | null; onIntentDone: () => void; onPlay: (t: PlayTarget) => void }) {
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -73,7 +77,14 @@ export function LibraryScreen({ account, intent, onIntentDone }: { account: Acco
     return () => clearTimeout(t);
   }, [q]);
 
-  const openHit = async (h: SearchHit) => openApp(hitPath(h, await broadcastIds(), q));
+  /** A line plays from where it is said; one the player cannot open (a
+   *  recording still going, a broadcast's own) opens in the Dashboard. */
+  const openHit = async (h: SearchHit, dashboard = false) => {
+    const own = await broadcastIds();
+    const path = hitPath(h, own, q);
+    const target = dashboard ? null : hitPlay(h, own, q, path);
+    if (target) onPlay(target); else await openApp(path);
+  };
   const term = q.trim();
 
   return (
@@ -92,18 +103,19 @@ export function LibraryScreen({ account, intent, onIntentDone }: { account: Acco
             <div className="ey-row ey--line"><span className="ey">LINES</span><span className="ey">{hits.length}</span></div>
             <div style={{ marginTop: 4 }}>
               {hits.map((h) => (
-                <div key={`${h.recordingId}:${h.sentenceId}`} className="lrow lrow--click lib-hit" role="link" tabIndex={0} onClick={() => void openHit(h)} onKeyDown={(e) => { if (e.key === 'Enter') void openHit(h); }}>
+                <div key={`${h.recordingId}:${h.sentenceId}`} className="lrow lrow--click lib-hit" role="button" tabIndex={0} onClick={() => void openHit(h)} onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) void openHit(h); }}>
                   <div className="lrow__main">
                     <div className="lib-hit__text"><Marked text={h.rendered || h.text} q={term} /></div>
                     <div className="lrow__meta">{h.live ? 'LIVE · ' : ''}{h.linkName}{h.recordedAt ? ` · ${ago(h.recordedAt)}` : ''} · {clock(h.mediaStart)}</div>
                   </div>
+                  <DashButton name={h.linkName} onClick={() => void openHit(h, true)} />
                 </div>
               ))}
             </div>
           </div>
         ) : !searching && <p className="pref__sub" style={{ textAlign: 'center' }}>No line says “{term}”.</p>)
       ) : (
-        <Recent own={account.reach === 'own'} />
+        <Recent own={account.reach === 'own'} onPlay={onPlay} />
       )}
     </div>
   );
@@ -149,7 +161,12 @@ function dayOf(iso: string): 'TODAY' | 'THIS WEEK' | 'EARLIER' {
   return now.getTime() - d.getTime() < 7 * 86400_000 ? 'THIS WEEK' : 'EARLIER';
 }
 
-function Recent({ own }: { own: boolean }) {
+/** The row's way to its Dashboard page, in a new tab. */
+function DashButton({ name, onClick }: { name: string; onClick: () => void }) {
+  return <button type="button" className="file__x lib-dash" title="Open in Dashboard" aria-label={`Open ${name} in Dashboard`} onClick={(e) => { e.stopPropagation(); onClick(); }}><HiExternal width={14} height={14} /></button>;
+}
+
+function Recent({ own, onPlay }: { own: boolean; onPlay: (t: PlayTarget) => void }) {
   const { data, error, loading, reload } = useLoad(async () => (await (await client()).transcriptions.listPage({ limit: 30 })).transcriptions);
   const working = (data ?? []).some((t) => t.currentRecording?.state === 'live' || (t.job && ['queued', 'fetching', 'transcribing'].includes(t.job.state)));
   // Keep the progress current while something is in progress.
@@ -178,7 +195,7 @@ function Recent({ own }: { own: boolean }) {
       {groups.map((g) => (
         <div key={g.label} className="card2" style={{ padding: '12px 14px 2px' }}>
           <div className="ey-row ey--line"><span className="ey">{g.label}</span>{g === groups[0] && own && <span className="ey">MADE BY THE EXTENSION</span>}</div>
-          <div style={{ marginTop: 4 }}>{g.items.map((t) => <LibRow key={t.id} t={t} today={g.label === 'TODAY'} onChanged={() => void reload()} />)}</div>
+          <div style={{ marginTop: 4 }}>{g.items.map((t) => <LibRow key={t.id} t={t} today={g.label === 'TODAY'} onChanged={() => void reload()} onPlay={onPlay} />)}</div>
         </div>
       ))}
     </>
@@ -200,7 +217,7 @@ function useSummary(rid: string | null | undefined): boolean {
   return has;
 }
 
-function LibRow({ t, today, onChanged }: { t: Transcription; today: boolean; onChanged: () => void }) {
+function LibRow({ t, today, onChanged, onPlay }: { t: Transcription; today: boolean; onChanged: () => void; onPlay: (t: PlayTarget) => void }) {
   const retry = useAction();
   const { label, Icon } = sourceOf(t);
   // Known once the fetch has it; one that won't load, the source's icon.
@@ -222,9 +239,12 @@ function LibRow({ t, today, onChanged }: { t: Transcription; today: boolean; onC
     : failed ? <span className="chip chip--bad">FAILED</span>
     : today ? <span className="chip chip--ok">READY</span> : null;
   const open = () => void openApp(txPath(t));
+  // A finished one plays here; the rest say why not, and open in the Dashboard by the arrow.
+  const play = playOf(t);
+  const start = play.target ? () => onPlay(play.target) : undefined;
   return (
     <div className="lib-row">
-      <div className="lrow lrow--click" role="link" tabIndex={0} onClick={open} onKeyDown={(e) => { if (e.key === 'Enter') open(); }}>
+      <div className={`lrow${start ? ' lrow--click' : ''}`} {...(start ? { role: 'button', tabIndex: 0, 'aria-label': `Play ${t.name}`, onClick: start, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' && e.target === e.currentTarget) start(); } } : { title: NO_PLAY_TEXT[play.why!] })}>
         <span className={`round${pic ? ' round--pic' : ''}`}>{pic ? <img src={pic} alt="" referrerPolicy="no-referrer" onError={() => setBadPic(pic)} /> : <Icon />}</span>
         <div className="lrow__main">
           <div className="lrow__title" title={t.name}>{t.name}</div>
@@ -239,6 +259,7 @@ function LibRow({ t, today, onChanged }: { t: Transcription; today: boolean; onC
           )}
         </div>
         {chip}
+        <DashButton name={t.name} onClick={open} />
       </div>
     </div>
   );

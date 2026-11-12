@@ -19,6 +19,23 @@ const STORE = process.env.VS_WEBSTORE === '1';
 // VS_AHEAD_DEBUG=1 builds Settings → Read-ahead debug in; releases leave it out.
 const AHEAD_DEBUG = process.env.VS_AHEAD_DEBUG === '1';
 
+// The player (@vocalstack/player, the Library's player) loads four sites'
+// embed scripts from their own servers (Facebook, Dailymotion, Wistia,
+// Vidyard). An extension may not run remote code (Manifest V3; the stores
+// refuse a package that tries), so those addresses are taken out of the
+// build: the load fails at once, as the page's CSP would make it, and the
+// player goes on without that site's picture. scripts/no-remote-code.mjs
+// checks every build.
+const REMOTE_SCRIPT = /https?:\/\/[^"'`\s]+?\.js(?=["'`])/g;
+const noRemoteScripts = {
+  name: 'vs-no-remote-scripts',
+  enforce: 'pre' as const,
+  transform(code: string, id: string) {
+    if (!/[\\/]@vocalstack[\\/]player[\\/]dist[\\/]/.test(id) || !REMOTE_SCRIPT.test(code)) return null;
+    return { code: code.replace(REMOTE_SCRIPT, '/no-remote-script.js'), map: null };
+  },
+};
+
 export default defineConfig({
   srcDir: 'src',
   // Load unpacked from output/chrome or output/edge.
@@ -42,6 +59,7 @@ export default defineConfig({
     },
   },
   vite: () => ({
+    plugins: [noRemoteScripts],
     define: { 'import.meta.env.VS_AHEAD_DEBUG': JSON.stringify(AHEAD_DEBUG) },
     resolve: {
       alias: {

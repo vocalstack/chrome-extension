@@ -20,6 +20,7 @@
 
 import { currentEnv, type Env } from './env';
 import { push } from './rpc';
+import { connectUrl } from './connect';
 import { apiText } from './errors';
 import { report, reportState } from './sentry';
 import { iconVersion, readWorkspace, withWorkspace, type Workspace } from './workspace';
@@ -106,26 +107,12 @@ export async function signInWithConnect(before?: () => Promise<void>): Promise<A
   const { verifier, challenge } = await pkce();
   const state = b64url(crypto.getRandomValues(new Uint8Array(16)));
   const redirectUri = chrome.identity.getRedirectURL('connect');
-  const url = new URL('/connect', env.app);
-  url.search = new URLSearchParams({
-    response_type: 'code',
-    client_name: 'VocalStack extension',
-    redirect_uri: redirectUri,
-    state,
-    code_challenge: challenge,
-    code_challenge_method: 'S256',
-    // The widest the extension asks for; the person chooses on the consent
-    // screen (see, change and record; see and change; or see only; only
-    // what it creates, the default, or the whole account) and the token
-    // says what was granted. Recording needs recordings:publish, which
-    // Connect grants to this extension alone.
-    scope: 'read write recordings:publish',
-    reach: 'account',
-  }).toString();
+  // The workspace in use, when one is known: the picker starts on it.
+  const url = connectUrl(env.app, { redirectUri, state, challenge, workspaceId: (await stored())?.account.workspace?.id });
 
   let back: string | undefined;
   try {
-    back = await chrome.identity.launchWebAuthFlow({ url: url.toString(), interactive: true });
+    back = await chrome.identity.launchWebAuthFlow({ url, interactive: true });
   } catch (e) {
     // The window was closed, or the dashboard could not be reached.
     if (/did not approve|closed|canceled|cancelled/i.test(String(e))) throw new AuthError('Sign-in was cancelled.', 'cancelled');

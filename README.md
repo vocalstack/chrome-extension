@@ -10,7 +10,7 @@ What it does, from the side panel (toolbar icon):
 - **Live** — record this tab, the microphone or both into a live transcription; record a meeting (Meet, Teams, Zoom and others on the web) with a summary at the end; live captions over the tab's video, translated if you like.
 - **Broadcasts** — create and manage broadcasts, share links, go live from the microphone.
 - **Speakers** — save a person from the microphone, a file or a speaker in a transcription, so they are recognised by name; with their consent, their cloned voice can read transcripts; preview, rename, recolour.
-- **Library** — search every transcript; recent transcriptions.
+- **Library** — search every transcript; recent transcriptions. A finished one, or a line a search found, plays in the panel, in VocalStack's player.
 
 Also: right-click "Transcribe this link / video / page", `vs <words>` in the address bar to search transcripts, Alt+Shift+R to record the tab, Alt+Shift+C for captions.
 
@@ -41,12 +41,21 @@ Settings → Environment switches between production, e2e and this computer (`lo
 
 All API calls go through the TypeScript SDK ([`@vocalstack/js-sdk`](https://www.npmjs.com/package/@vocalstack/js-sdk) on npm).
 
+### The Library's player
+
+A click on a finished Library item plays it in the panel (`src/screens/Player.tsx`), in [`@vocalstack/player`](https://www.npmjs.com/package/@vocalstack/player)'s reading view: transcript, sound, subtitles, translations, summary, exports. It is signed in as the panel is: its `token` asks the background for the 15-minute key token on each call, so the API key stays in the background. `src/lib/play.ts` says what plays: one still being transcribed or recorded, a failed one, one waiting to be trimmed and a disabled one do not, and their row says why; every row's arrow opens the item in the Dashboard. The player's chunk loads only when something is played.
+
+Two limits of an extension page, both about a link's picture (the sound and the transcript are VocalStack's and always play):
+
+- YouTube's embed refuses a page that sends no http Referer ("Error 153"), and an extension page sends none. The video's still picture shows in its place (`src/styles/panel.css`, `.pv`).
+- An extension may not load code from another server, so the embed scripts the player would fetch for Facebook, Dailymotion, Wistia and Vidyard are taken out of the build (`wxt.config.ts`, `noRemoteScripts`); `scripts/no-remote-code.mjs` fails a build that would load one.
+
 ### Sign-in
 
 - **Sign in with VocalStack** is One-click Connect (transcribe: `docs/connect.md`): OAuth 2.0 code + PKCE where the token is an API key. `chrome.identity.launchWebAuthFlow` opens the dashboard's `/connect` screen; it redirects to `https://<extension id>.chromiumapp.org/connect`, which the browser hands to the extension; the extension redeems the code at `POST /v1/connect/token`.
 - **Use an API key**: paste one from Developers → API keys.
 
-A key belongs to one workspace: what it creates lands there and is billed there. Settings shows that workspace (name and mark, from `workspace` on the Connect answer and `GET /v1/me`, `src/lib/workspace.ts`); **Change** runs Connect again, whose consent screen has the workspace picker, and swaps to the new workspace's key. A pasted key shows its workspace and has no Change.
+A key belongs to one workspace: what it creates lands there and is billed there. Settings shows that workspace (name and mark, from `workspace` on the Connect answer and `GET /v1/me`, `src/lib/workspace.ts`); **Change** runs Connect again, whose consent screen has the workspace picker (told which workspace is in use by `workspace=<id>`, `src/lib/connect.ts`), and swaps to the new workspace's key. The panel's top corner shows the workspace's mark on the control that opens Settings, and the gear while no workspace is known. A pasted key shows its workspace and has no Change.
 
 Either way the key stays in `chrome.storage.local`. It is never sent to `/v1`, which refuses keys from browsers. The extension exchanges it at `POST /docs/key-exchange` for 15-minute key tokens. The API trusts the extension's Origin for those two calls only (transcribe: `src/domain/auth.rs`, `EXTENSION_ORIGINS`).
 

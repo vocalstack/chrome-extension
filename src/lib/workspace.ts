@@ -55,6 +55,14 @@ export function workspaceName(account: { name: string; workspace?: Workspace }):
   return account.workspace?.name || account.name;
 }
 
+/** What the panel's top corner shows on the control that opens Settings:
+ *  the workspace's mark once the workspace is known, else the gear (an
+ *  older API, signed out, not loaded yet), so the corner is never empty. */
+export function settingsMark(account: { workspace?: Workspace } | null | undefined): { workspace: Workspace | null; label: string } {
+  const w = account?.workspace;
+  return w ? { workspace: w, label: `Settings, workspace ${w.name}` } : { workspace: null, label: 'Settings' };
+}
+
 /** Whether the sign-in moved to another key or workspace, so everything
  *  loaded for the old one must go. */
 export function movedWorkspace(a: { keyId: string; workspace?: Workspace } | null | undefined, b: { keyId: string; workspace?: Workspace } | null | undefined): boolean {
