@@ -9,9 +9,9 @@ import type { SearchHit, Transcription } from '@vocalstack/contract';
  *  `#s=` is the sentence the reader scrolls to, `?q=` marks the words. */
 export function hitPath(h: Pick<SearchHit, 'transcriptionId' | 'recordingId' | 'sentenceId' | 'live'>, ownBroadcasts: Set<string>, q?: string): string {
   const own = ownBroadcasts.has(h.transcriptionId);
-  if (h.live) return own ? `/s/${h.transcriptionId}/live` : `/transcriptions/${h.transcriptionId}/live`;
+  if (h.live) return own ? `/broadcasts/${h.transcriptionId}/live` : `/transcriptions/${h.transcriptionId}/live`;
   const query = q?.trim() ? `?q=${encodeURIComponent(q.trim())}` : '';
-  return `${own ? `/s/${h.transcriptionId}` : `/transcriptions/${h.transcriptionId}`}/r/${h.recordingId}${query}#s=${encodeURIComponent(String(h.sentenceId))}`;
+  return `${own ? `/broadcasts/${h.transcriptionId}` : `/transcriptions/${h.transcriptionId}`}/r/${h.recordingId}${query}#s=${encodeURIComponent(String(h.sentenceId))}`;
 }
 
 /** A transcription: a live one opens on its live screen. */

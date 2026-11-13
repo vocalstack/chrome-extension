@@ -75,7 +75,7 @@ export function BroadcastDetail({ initial, account, onSettings, live, onLive, on
 
       <Section title="Manage">
         <div className="row row--wrap">
-          <Btn size="sm" icon={<IconExternal />} onClick={() => openApp(`/s/${id}`)}>Open in dashboard</Btn>
+          <Btn size="sm" icon={<IconExternal />} onClick={() => openApp(`/broadcasts/${id}`)}>Open in dashboard</Btn>
           {archived
             ? <Btn size="sm" icon={<IconRestore />} busy={life.busy} onClick={() => setLifecycle(false)}>Restore</Btn>
             : <Btn size="sm" kind="danger" icon={<IconArchive />} busy={life.busy} disabled={!!here} title={here ? 'Stop recording first' : undefined} onClick={() => setLifecycle(true)}>Archive</Btn>}
@@ -254,7 +254,7 @@ function Recordings({ b, refreshKey }: { b: Broadcast; refreshKey: string }) {
   const page = useLoad(async () => (await client()).broadcasts.listRecordingsPage(b.id, { limit: 5 }), [b.id, refreshKey]);
   const recs = page.data?.recordings ?? [];
   return (
-    <Section title="Recent recordings" side={b.recordingCount > recs.length && <Btn size="sm" kind="ghost" onClick={() => openApp(`/s/${b.id}`)}>All {b.recordingCount}</Btn>}>
+    <Section title="Recent recordings" side={b.recordingCount > recs.length && <Btn size="sm" kind="ghost" onClick={() => openApp(`/broadcasts/${b.id}`)}>All {b.recordingCount}</Btn>}>
       {page.error && <Note kind="bad">{page.error}</Note>}
       {page.data && recs.length === 0 && <Empty>No recordings yet.</Empty>}
       {recs.length > 0 && (
@@ -264,7 +264,7 @@ function Recordings({ b, refreshKey }: { b: Broadcast; refreshKey: string }) {
             const when = r.startedAt ?? r.createdAt;
             const onAir = r.state === 'live' || r.state === 'paused';
             return (
-              <div key={r.id} className="item item--click" role="button" tabIndex={0} title="Open in dashboard" onClick={() => void openApp(`/s/${b.id}/r/${r.id}`)} onKeyDown={(e) => { if (e.key === 'Enter') void openApp(`/s/${b.id}/r/${r.id}`); }}>
+              <div key={r.id} className="item item--click" role="button" tabIndex={0} title="Open in dashboard" onClick={() => void openApp(`/broadcasts/${b.id}/r/${r.id}`)} onKeyDown={(e) => { if (e.key === 'Enter') void openApp(`/broadcasts/${b.id}/r/${r.id}`); }}>
                 <div className="item__main">
                   <div className="item__title">{r.title || new Date(when).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
                   <div className="item__sub">{ago(when)}{dur ? ` · ${clock(dur)}` : ''}{r.peakListeners ? ` · ${r.peakListeners} listening at peak` : ''}</div>
