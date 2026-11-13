@@ -694,7 +694,7 @@ label.item--click{cursor:pointer}
    cannot send (its "Error 153"). The sound, the transcript and the
    subtitles are VocalStack's and play; in place of the refused embed the
    video's still picture stays up, and says where the moving one is.
-   (Class names of @vocalstack/player 1.2.14, pinned in package.json: look
+   (Class names of @vocalstack/player 1.3.0, as in package.json: look
    again when it is updated.) */
 .pv .vsp .txyt iframe{visibility:hidden}
 .pv .vsp .txyt .txyt__paused{display:none}

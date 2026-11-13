@@ -22,7 +22,7 @@
     "@sentry/browser": "^11.9.0",
     "@vocalstack/contract": "1.0.0-alpha.13",
     "@vocalstack/js-sdk": "2.0.0-alpha.15",
-    "@vocalstack/player": "1.2.14",
+    "@vocalstack/player": "^1.3.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
