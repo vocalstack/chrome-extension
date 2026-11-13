@@ -1,7 +1,7 @@
 {
   "name": "vocalstack-extension",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "VocalStack for Chrome and Edge: transcribe what a page plays, record tabs and meetings, run broadcasts, save speakers.",
   "scripts": {
