@@ -58,8 +58,8 @@ async function run(req: VcapStart, runId: number) {
   const vs = await vsClient();
   const ids = await transcribeVideo(vs, { url: req.url, title: req.title }, (p) => set({ ...base, ...p }, runId), () => current(tabId, runId));
   if (!ids) return;
-  const withIds = { ...base, transcriptionId: ids.transcriptionId, recordingId: ids.recordingId };
-  const snap = await vs.recordings.transcript(ids.recordingId, lang ? { lang } : {});
+  const withIds = { ...base, transcriptionId: ids.transcriptionId };
+  const snap = await vs.transcriptions.transcript(ids.transcriptionId, lang ? { lang } : {});
   const sentences = snap.sentences.filter((x) => !x.suppressed && x.text.trim());
   if (!sentences.length) throw new RpcError('No speech was found in this video.');
   const tr: Record<number, string> = {};
@@ -69,7 +69,7 @@ async function run(req: VcapStart, runId: number) {
     const missing = sentences.filter((x) => !tr[x.sentenceId]).map((x) => x.sentenceId);
     for (let i = 0; i < missing.length; i += 40) {
       if (!(await current(tabId, runId))) return;
-      const got = await vs.recordings.translation(ids.recordingId, lang, missing.slice(i, i + 40));
+      const got = await vs.transcriptions.translation(ids.transcriptionId, lang, missing.slice(i, i + 40));
       for (const [k, v] of Object.entries(got.translations)) tr[Number(k)] = v;
       await set({ ...withIds, state: 'translating', progress: Math.min(1, (i + 40) / missing.length) }, runId);
       await sleep(50);

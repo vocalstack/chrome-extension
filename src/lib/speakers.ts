@@ -74,7 +74,7 @@ export async function createSpeaker(req: { name: string; sample: Blob; fileName:
 
 /** A saved speaker from one person in a finished transcription
  *  (`consent` as for `createSpeaker`). */
-export async function createFromAppearance(req: { transcriptionId: string; recordingId: string; appearance: number; name: string; consent: boolean }): Promise<SavedSpeaker> {
+export async function createFromAppearance(req: { transcriptionId: string; appearance: number; name: string; consent: boolean }): Promise<SavedSpeaker> {
   return flat(await (await client()).speakers.createFromAppearance(req));
 }
 

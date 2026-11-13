@@ -1,6 +1,6 @@
 /** The account's broadcasts (design 3): New Broadcast, then one row each —
  *  a date tile, the name, what it is doing (live now, or its last
- *  recording's peak audience and length), a LIVE chip. Archived ones are
+ *  transcription's peak audience and length), a LIVE chip. Archived ones are
  *  in the dashboard. */
 
 import { useEffect, useState } from 'react';
@@ -14,13 +14,13 @@ import { Note } from '../../ui/kit';
 import { HiBroadcast, HiChevronRight, HiPlus } from '../../ui/icons';
 import { isActive, sessionOf } from './shared';
 
-/* Each last recording's peak audience, once per panel. */
+/* Each last transcription's peak audience, once per panel. */
 const peaks = new Map<string, Promise<number | null>>();
-function peakOf(rid: string): Promise<number | null> {
-  let p = peaks.get(rid);
+function peakOf(tid: string): Promise<number | null> {
+  let p = peaks.get(tid);
   if (!p) {
-    p = client().then((vs) => vs.recordings.get(rid)).then((r) => (r as { peakListeners?: number | null }).peakListeners ?? null, () => null);
-    peaks.set(rid, p);
+    p = client().then((vs) => vs.transcriptions.get(tid)).then((t) => t.peakListeners ?? null, () => null);
+    peaks.set(tid, p);
   }
   return p;
 }
@@ -41,8 +41,8 @@ export function BroadcastList({ account, onSettings, items, loading, error, live
   const [peak, setPeak] = useState<Record<string, number | null>>({});
   useEffect(() => {
     for (const b of (items ?? []).slice(0, 20)) {
-      const rid = b.lastRecording?.recordingId;
-      if (rid && b.lastRecording?.state === 'ended' && !(rid in peak)) void peakOf(rid).then((n) => setPeak((p) => ({ ...p, [rid]: n })));
+      const tid = b.lastTranscription?.transcriptionId;
+      if (tid && (b.lastTranscription?.state === 'ended' || b.lastTranscription?.state === 'finalized') && !(tid in peak)) void peakOf(tid).then((n) => setPeak((p) => ({ ...p, [tid]: n })));
     }
   }, [items]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -63,17 +63,17 @@ export function BroadcastList({ account, onSettings, items, loading, error, live
         <div className="card2 card2--list">
           {items.map((b) => {
             const here = isActive(sessionOf(live, b.id));
-            const onAir = here || b.currentRecording?.state === 'live';
-            const paused = !onAir && b.currentRecording?.state === 'paused';
-            const whenIso = b.currentRecording?.startedAt ?? b.lastRecordedAt ?? b.lastRecording?.startedAt ?? b.createdAt;
+            const onAir = here || b.currentTranscription?.state === 'live';
+            const paused = !onAir && b.currentTranscription?.state === 'paused';
+            const whenIso = b.currentTranscription?.startedAt ?? b.lastRecordedAt ?? b.lastTranscription?.startedAt ?? b.createdAt;
             const when = new Date(whenIso);
-            const last = b.lastRecording;
-            const p = last ? peak[last.recordingId] : null;
+            const last = b.lastTranscription;
+            const p = last ? peak[last.transcriptionId] : null;
             const meta = onAir || paused
               ? [when.toDateString() === new Date().toDateString() ? 'Today' : when.toLocaleDateString(undefined, { weekday: 'short' }), when.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })].join(' · ')
               : last
                 ? [p ? `${p} at peak` : '', last.durationS ? dur(last.durationS) : '', !p && !last.durationS ? `/${b.code}` : ''].filter(Boolean).join(' · ')
-                : b.recordingCount === 0 ? 'Not recorded yet' : `/${b.code}`;
+                : b.transcriptionCount === 0 ? 'Not recorded yet' : `/${b.code}`;
             return (
               <div key={b.id} className="lrow lrow--click" role="button" tabIndex={0} onClick={() => onOpen(b)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(b); } }}>
                 <div className="dtile"><div className="dtile__mon">{MON[when.getMonth()]}</div><div className="dtile__day">{String(when.getDate()).padStart(2, '0')}</div></div>

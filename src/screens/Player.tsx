@@ -54,9 +54,8 @@ export default function PlayerView({ target, env, onBack }: { target: PlayTarget
       </div>
       <div className="pv" data-screen-label="Player">
         <VocalStackPlayer
-          key={`${target.transcriptionId}:${target.recordingId}`}
+          key={target.transcriptionId}
           id={target.transcriptionId}
-          recording={target.recordingId}
           token={token}
           baseUrl={env.api}
           appUrl={env.app}

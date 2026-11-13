@@ -34,7 +34,7 @@ export function BroadcastDetail({ initial, account, onSettings, live, onLive, on
 
   const session = sessionOf(live, id);
   const here = isActive(session) ? session : undefined;
-  // A take ending here adds a recording: re-read the broadcast and its recordings.
+  // A take ending here adds a transcription: re-read the broadcast and its transcriptions.
   const takeKey = `${session?.id ?? ''}:${here ? 'on' : 'off'}`;
   useEffect(() => { if (session && !here) void bc.reload(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [takeKey]);
 
@@ -69,7 +69,7 @@ export function BroadcastDetail({ initial, account, onSettings, live, onLive, on
             : <GoLive b={b} account={account} onSettings={onSettings} here={here} last={session} onLive={onLive} />}
           {!archived && <ListenerLink b={b} />}
           {!archived && <ShareLinks id={id} />}
-          <Recordings b={b} refreshKey={takeKey} />
+          <Transcriptions b={b} refreshKey={takeKey} />
         </>
       )}
 
@@ -145,10 +145,10 @@ function GoLive({ b, account, onSettings, here, last, onLive }: { b: Broadcast; 
     );
   }
 
-  const elsewhere = b.currentRecording && (b.currentRecording.state === 'live' || b.currentRecording.state === 'paused');
+  const elsewhere = b.currentTranscription && (b.currentTranscription.state === 'live' || b.currentTranscription.state === 'paused');
   return (
     <Section title="Go live">
-      {elsewhere && <Note kind="warn">Recording on another device{b.currentRecording?.state === 'paused' ? ' (paused)' : ''}.</Note>}
+      {elsewhere && <Note kind="warn">Recording on another device{b.currentTranscription?.state === 'paused' ? ' (paused)' : ''}.</Note>}
       <Field label="Spoken language">
         <LanguageSelect label="Spoken language" list="transcription" auto value={lang} onChange={setLang} />
       </Field>
@@ -250,21 +250,23 @@ function ShareLinks({ id }: { id: string }) {
   );
 }
 
-function Recordings({ b, refreshKey }: { b: Broadcast; refreshKey: string }) {
-  const page = useLoad(async () => (await client()).broadcasts.listRecordingsPage(b.id, { limit: 5 }), [b.id, refreshKey]);
-  const recs = page.data?.recordings ?? [];
+function Transcriptions({ b, refreshKey }: { b: Broadcast; refreshKey: string }) {
+  const page = useLoad(async () => (await client()).transcriptions.listPage({ broadcast: b.id, limit: 5 }), [b.id, refreshKey]);
+  const recs = (page.data?.transcriptions ?? []).filter((t) => t.state && t.state !== 'idle');
+  const count = b.transcriptionCount ?? 0;
   return (
-    <Section title="Recent recordings" side={b.recordingCount > recs.length && <Btn size="sm" kind="ghost" onClick={() => openApp(`/broadcasts/${b.id}`)}>All {b.recordingCount}</Btn>}>
+    <Section title="Recent transcriptions" side={count > recs.length && <Btn size="sm" kind="ghost" onClick={() => openApp(`/broadcasts/${b.id}`)}>All {count}</Btn>}>
       {page.error && <Note kind="bad">{page.error}</Note>}
-      {page.data && recs.length === 0 && <Empty>No recordings yet.</Empty>}
+      {page.data && recs.length === 0 && <Empty>No transcriptions yet.</Empty>}
       {recs.length > 0 && (
         <div className="list">
           {recs.map((r) => {
-            const dur = r.mediaDurationS ?? r.wallDurationS;
+            const dur = r.durationS ?? r.wallDurationS;
             const when = r.startedAt ?? r.createdAt;
             const onAir = r.state === 'live' || r.state === 'paused';
+            const path = onAir ? `/broadcasts/${b.id}/live` : `/transcriptions/${r.id}`;
             return (
-              <div key={r.id} className="item item--click" role="button" tabIndex={0} title="Open in dashboard" onClick={() => void openApp(`/broadcasts/${b.id}/r/${r.id}`)} onKeyDown={(e) => { if (e.key === 'Enter') void openApp(`/broadcasts/${b.id}/r/${r.id}`); }}>
+              <div key={r.id} className="item item--click" role="button" tabIndex={0} title="Open in dashboard" onClick={() => void openApp(path)} onKeyDown={(e) => { if (e.key === 'Enter') void openApp(path); }}>
                 <div className="item__main">
                   <div className="item__title">{r.title || new Date(when).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
                   <div className="item__sub">{ago(when)}{dur ? ` · ${clock(dur)}` : ''}{r.peakListeners ? ` · ${r.peakListeners} listening at peak` : ''}</div>

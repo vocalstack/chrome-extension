@@ -4,14 +4,15 @@
 
 import type { SearchHit, Transcription } from '@vocalstack/contract';
 
-/** A search hit, at its line: a broadcast's own recording under /s/…, a
- *  transcription's under /transcriptions/…; a live one on its live screen.
+/** A search hit, at its line: a broadcast's own transcription under
+ *  /broadcasts/…, a transcription's under /transcriptions/…; a live one on
+ *  its live screen.
  *  `#s=` is the sentence the reader scrolls to, `?q=` marks the words. */
-export function hitPath(h: Pick<SearchHit, 'transcriptionId' | 'recordingId' | 'sentenceId' | 'live'>, ownBroadcasts: Set<string>, q?: string): string {
+export function hitPath(h: Pick<SearchHit, 'transcriptionId' | 'sentenceId' | 'live'>, ownBroadcasts: Set<string>, q?: string): string {
   const own = ownBroadcasts.has(h.transcriptionId);
   if (h.live) return own ? `/broadcasts/${h.transcriptionId}/live` : `/transcriptions/${h.transcriptionId}/live`;
   const query = q?.trim() ? `?q=${encodeURIComponent(q.trim())}` : '';
-  return `${own ? `/broadcasts/${h.transcriptionId}` : `/transcriptions/${h.transcriptionId}`}/r/${h.recordingId}${query}#s=${encodeURIComponent(String(h.sentenceId))}`;
+  return `${own ? `/broadcasts/${h.transcriptionId}` : `/transcriptions/${h.transcriptionId}`}${query}#s=${encodeURIComponent(String(h.sentenceId))}`;
 }
 
 /** A transcription: a live one opens on its live screen. */

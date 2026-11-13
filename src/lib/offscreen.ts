@@ -23,7 +23,7 @@ export type OffCmd =
   | { off: 'live.history'; id: string }
   | { off: 'live.set'; id: string; translateTo?: string | null; overlay?: boolean; spokenLanguage?: string | null; speakerLabels?: 'auto' | 'on' | 'off' }
   | { off: 'live.forget'; id: string }
-  | { off: 'dub.load'; tabId: number; api: string; recordingId: string; lang: string; voice?: string | null; sentences: DubSentence[] }
+  | { off: 'dub.load'; tabId: number; api: string; transcriptionId: string; lang: string; voice?: string | null; sentences: DubSentence[] }
   /** The page video's clock: `t` media seconds at `at` (ms since epoch). */
   | { off: 'dub.sync'; tabId: number; t: number; paused: boolean; rate: number; at: number }
   | { off: 'dub.stop'; tabId: number }

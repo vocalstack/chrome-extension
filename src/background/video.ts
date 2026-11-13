@@ -14,7 +14,7 @@ import { videoIdOf } from '../lib/ahead';
 import { advised, checkLink } from '../lib/linkCheck';
 import { envOfPage, isOwn, playerState, shareCode, sharedJob, type PlayerState } from '../lib/shared';
 
-export interface VideoIds { transcriptionId: string; recordingId: string }
+export interface VideoIds { transcriptionId: string }
 
 /** The link check refused the address: nothing was made from it. */
 export const LINK_REFUSED = 'link_refused';
@@ -93,12 +93,11 @@ async function onServer(vs: VocalStack, url: string, strict = false): Promise<Vi
   const t = await lookup(vs, url);
   if (t?.blocked) throw new RpcError(blockedText(t.blocked));
   if (t === undefined && strict) throw new RpcError('VocalStack couldn’t check whether this video is transcribed already. Try again in a moment.');
-  const rid = t?.job?.recordingId ?? t?.lastRecording?.recordingId;
-  if (!t || !rid) {
+  if (!t || (!t.job && (!t.state || t.state === 'idle'))) {
     if (t !== undefined) misses.set(key, Date.now() + 60_000);
     return null;
   }
-  const ids = { transcriptionId: t.id, recordingId: rid };
+  const ids = { transcriptionId: t.id };
   await remember(await keyOf(url), ids);
   return ids;
 }
@@ -124,11 +123,11 @@ function idsFor(vs: VocalStack, key: string, req: { url: string; title?: string 
       if (!t || t.lifecycle !== 'active') {
         // Superseded (archived or purged meanwhile): a job still running
         // on it is stopped, then the video is transcribed again.
-        if (t?.job && !TERMINAL.has(t.job.state)) await vs.recordings.stop(ids.recordingId).catch(() => {});
+        if (t?.job && !TERMINAL.has(t.job.state)) await vs.transcriptions.stop(ids.transcriptionId).catch(() => {});
         ids = null;
       } else if (t.job && (t.job.state === 'failed' || t.job.state === 'stopped')) {
         // The same transcription, its job run again: never a second one.
-        await vs.jobs.retry(ids.recordingId);
+        await vs.transcriptions.retryJob(ids.transcriptionId);
       }
     }
     if (!ids) {
@@ -139,9 +138,8 @@ function idsFor(vs: VocalStack, key: string, req: { url: string; title?: string 
       // fail (captions take the tab's sound instead, as for any refusal).
       if (c.live) throw new RpcError('This is a live stream. Use Live Transcription to transcribe it as it plays.', LINK_REFUSED);
       const t: Transcription = await vs.transcriptions.createFromUrl(req.url, { name: req.title || null });
-      const rid = t.job?.recordingId ?? t.currentRecording?.recordingId ?? t.lastRecording?.recordingId;
-      if (!rid) throw new RpcError('VocalStack did not start transcribing this video.');
-      ids = { transcriptionId: t.id, recordingId: rid };
+      if (!t.job) throw new RpcError('VocalStack did not start transcribing this video.');
+      ids = { transcriptionId: t.id };
     }
     // Registered before the job finishes: the other feature waits on it.
     await remember(key, ids);
@@ -161,7 +159,7 @@ export async function transcribeVideo(vs: VocalStack, req: { url: string; title?
   await onProgress({ progress: 0, ...ids });
   for (;;) {
     if (!(await current())) return null;
-    const job = await vs.jobs.get(ids.recordingId).catch(() => null);
+    const job = await vs.transcriptions.job(ids.transcriptionId).catch(() => null);
     if (!job || job.state === 'done') break;
     if (job.state === 'failed' || job.state === 'stopped') {
       inflight.delete(key);
@@ -257,7 +255,7 @@ async function playerOf(url: string): Promise<PlayerState | null> {
         return null;
       });
       if (!t || t.lifecycle !== 'active') return null;
-      const job = t.job ?? await vs.jobs.get(ids.recordingId).catch(() => null);
+      const job = t.job ?? await vs.transcriptions.job(ids.transcriptionId).catch(() => null);
       return playerState('', job ?? null);
     }
   }

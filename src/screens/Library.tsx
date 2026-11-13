@@ -103,7 +103,7 @@ export function LibraryScreen({ account, intent, onIntentDone, onPlay }: { accou
             <div className="ey-row ey--line"><span className="ey">LINES</span><span className="ey">{hits.length}</span></div>
             <div style={{ marginTop: 4 }}>
               {hits.map((h) => (
-                <div key={`${h.recordingId}:${h.sentenceId}`} className="lrow lrow--click lib-hit" role="button" tabIndex={0} onClick={() => void openHit(h)} onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) void openHit(h); }}>
+                <div key={`${h.transcriptionId}:${h.sentenceId}`} className="lrow lrow--click lib-hit" role="button" tabIndex={0} onClick={() => void openHit(h)} onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) void openHit(h); }}>
                   <div className="lrow__main">
                     <div className="lib-hit__text"><Marked text={h.rendered || h.text} q={term} /></div>
                     <div className="lrow__meta">{h.live ? 'LIVE · ' : ''}{h.linkName}{h.recordedAt ? ` · ${ago(h.recordedAt)}` : ''} · {clock(h.mediaStart)}</div>
@@ -168,7 +168,7 @@ function DashButton({ name, onClick }: { name: string; onClick: () => void }) {
 
 function Recent({ own, onPlay }: { own: boolean; onPlay: (t: PlayTarget) => void }) {
   const { data, error, loading, reload } = useLoad(async () => (await (await client()).transcriptions.listPage({ limit: 30 })).transcriptions);
-  const working = (data ?? []).some((t) => t.currentRecording?.state === 'live' || (t.job && ['queued', 'fetching', 'transcribing'].includes(t.job.state)));
+  const working = (data ?? []).some((t) => t.state === 'live' || (t.job && ['queued', 'fetching', 'transcribing'].includes(t.job.state)));
   // Keep the progress current while something is in progress.
   useEffect(() => {
     if (!working) return;
@@ -186,7 +186,7 @@ function Recent({ own, onPlay }: { own: boolean; onPlay: (t: PlayTarget) => void
   );
   const groups: { label: string; items: Transcription[] }[] = [];
   for (const t of data) {
-    const label = dayOf(t.lastRecordedAt ?? t.createdAt);
+    const label = dayOf(t.startedAt ?? t.createdAt);
     const g = groups.find((x) => x.label === label);
     if (g) g.items.push(t); else groups.push({ label, items: [t] });
   }
@@ -202,21 +202,6 @@ function Recent({ own, onPlay }: { own: boolean; onPlay: (t: PlayTarget) => void
   );
 }
 
-/* Whether a meeting's recording has its summary, once per panel. */
-const summaries = new Map<string, Promise<boolean>>();
-function useSummary(rid: string | null | undefined): boolean {
-  const [has, setHas] = useState(false);
-  useEffect(() => {
-    if (!rid) return;
-    let p = summaries.get(rid);
-    if (!p) { p = client().then((vs) => vs.recordings.get(rid)).then((r) => !!r.summary, () => false); summaries.set(rid, p); }
-    let on = true;
-    void p.then((v) => { if (on) setHas(v); });
-    return () => { on = false; };
-  }, [rid]);
-  return has;
-}
-
 function LibRow({ t, today, onChanged, onPlay }: { t: Transcription; today: boolean; onChanged: () => void; onPlay: (t: PlayTarget) => void }) {
   const retry = useAction();
   const { label, Icon } = sourceOf(t);
@@ -224,12 +209,12 @@ function LibRow({ t, today, onChanged, onPlay }: { t: Transcription; today: bool
   const [badPic, setBadPic] = useState<string | null>(null);
   const pic = pictureOf(t) !== badPic ? pictureOf(t) : null;
   const job = t.job;
-  const cur = t.currentRecording?.state;
-  const dur = t.lastRecording?.durationS ?? job?.source?.durationS;
+  const cur = t.state;
+  const dur = t.durationS ?? job?.source?.durationS;
   const pct = job ? jobPct(job) : null;
   const working = !!job && ['fetching', 'transcribing'].includes(job.state);
   const failed = job?.state === 'failed' || job?.state === 'stopped';
-  const summary = useSummary(t.live && meetingOfName(t.name) && cur !== 'live' && cur !== 'paused' ? t.lastRecording?.recordingId : null);
+  const summary = !!(t.live && meetingOfName(t.name) && cur !== 'live' && cur !== 'paused' && t.summary);
   const meta = failed ? (job?.error || jobText(job!)).toUpperCase() : [label, dur ? mmss(dur) : '', job?.state === 'queued' ? jobText(job).toUpperCase() : '', summary ? 'SUMMARY' : ''].filter(Boolean).join(' · ');
   const chip = cur === 'live' ? <span className="chip chip--live">LIVE</span>
     : cur === 'paused' ? <span className="chip chip--mute">PAUSED</span>
@@ -252,7 +237,7 @@ function LibRow({ t, today, onChanged, onPlay }: { t: Transcription; today: bool
           {working && <div className="lrow__bar"><i style={{ width: `${pct ?? 0}%` }} /></div>}
           {(failed || job?.state === 'cropping') && (
             <div className="lrow__acts" onClick={(e) => e.stopPropagation()}>
-              {failed && job && <button type="button" className="pg-link" disabled={retry.busy} onClick={() => void retry.run(async () => { await (await client()).jobs.retry(job.recordingId); onChanged(); })}>{retry.busy && <span className="spin" />}Try again</button>}
+              {failed && job && <button type="button" className="pg-link" disabled={retry.busy} onClick={() => void retry.run(async () => { await (await client()).transcriptions.retryJob(t.id); onChanged(); })}>{retry.busy && <span className="spin" />}Try again</button>}
               {job?.state === 'cropping' && <button type="button" className="pg-link" onClick={open}>Trim in the dashboard</button>}
               {retry.error && <span className="pg-bad">{retry.error}</span>}
             </div>

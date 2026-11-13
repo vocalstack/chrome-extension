@@ -61,7 +61,9 @@ export interface LiveStatus {
   errorCode?: string;
   transcriptionId?: string;
   broadcastId?: string;
-  recordingId?: string;
+  /** The transcription being recorded, once started (a broadcast's: the
+   *  new one its Record made). */
+  liveId?: string;
   translateTo?: string | null;
   /** The spoken language it was started with (null: detected), for Try again. */
   spokenLanguage?: string | null;
@@ -116,7 +118,6 @@ export interface DubStatus {
   progress?: number;
   error?: string;
   transcriptionId?: string;
-  recordingId?: string;
 }
 
 /** Captions on a page's video, from its transcription (background/vcap.ts). */
@@ -140,7 +141,6 @@ export interface VcapStatus {
   progress?: number;
   error?: string;
   transcriptionId?: string;
-  recordingId?: string;
   auto?: boolean;
 }
 

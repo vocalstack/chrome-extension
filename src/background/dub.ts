@@ -46,16 +46,16 @@ async function run(req: DubStart, run: number) {
   const vs = await vsClient();
   const ids = await transcribeVideo(vs, { url: req.url, title: req.title }, (p) => set({ ...base, ...p }, run), () => current(tabId, run));
   if (!ids) return;
-  const withIds = { ...base, transcriptionId: ids.transcriptionId, recordingId: ids.recordingId };
+  const withIds = { ...base, transcriptionId: ids.transcriptionId };
   if (!(await current(tabId, run))) return;
   await set({ ...withIds, state: 'translating', progress: undefined }, run);
-  if (req.voice) await vs.recordings.settings(ids.recordingId, { voiceByLang: { [lang]: req.voice } }).catch(() => {});
-  const snap = await vs.recordings.transcript(ids.recordingId, { lang });
+  if (req.voice) await vs.transcriptions.update(ids.transcriptionId, { settings: { voiceByLang: { [lang]: req.voice } } }).catch(() => {});
+  const snap = await vs.transcriptions.transcript(ids.transcriptionId, { lang });
   const sentences = snap.sentences.filter((s) => !s.suppressed && s.text.trim()).map((s) => ({ id: s.sentenceId, start: s.start, end: s.end, ...(sameLang(s.language, lang) ? { original: true } : {}) }));
   if (!sentences.length) throw new RpcError('No speech was found in this video.');
   await set({ ...withIds, state: 'voicing' }, run);
   const env = await currentEnv();
-  await off({ off: 'dub.load', tabId, api: env.api, recordingId: ids.recordingId, lang, voice: req.voice ?? null, sentences });
+  await off({ off: 'dub.load', tabId, api: env.api, transcriptionId: ids.transcriptionId, lang, voice: req.voice ?? null, sentences });
   if (!(await current(tabId, run))) { await off({ off: 'dub.stop', tabId }).catch(() => {}); return; }
   // One frame's video leads: the one with the largest visible video. It
   // turns the video down and reports its clock.

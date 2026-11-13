@@ -1,5 +1,5 @@
 /** Dub playback, in the offscreen document: each sentence's voice clip
- *  (`GET /v1/recordings/:id/voice/:sentence?lang=`, made on demand by the
+ *  (`GET /v1/transcriptions/:id/voice/:sentence?lang=`, made on demand by the
  *  server) is fetched a few seconds ahead and started when the page's video
  *  reaches the sentence. The content script reports the video's clock
  *  (`dub.sync`); a pause, a seek or a rate change stops what is playing and
@@ -18,7 +18,7 @@ interface Clock { t: number; at: number; paused: boolean; rate: number }
 
 interface Dub {
   vs: VocalStack;
-  recordingId: string;
+  transcriptionId: string;
   lang: string;
   sentences: DubSentence[];
   ctx: AudioContext;
@@ -38,7 +38,7 @@ export async function dubLoad(cmd: Extract<OffCmd, { off: 'dub.load' }>) {
   const ctx = new AudioContext();
   const out = ctx.createGain();
   out.connect(ctx.destination);
-  const d: Dub = { vs, recordingId: cmd.recordingId, lang: cmd.lang, sentences: [...cmd.sentences].sort((a, b) => a.start - b.start), ctx, out, buffers: new Map(), playing: new Map(), done: new Set(), clock: null };
+  const d: Dub = { vs, transcriptionId: cmd.transcriptionId, lang: cmd.lang, sentences: [...cmd.sentences].sort((a, b) => a.start - b.start), ctx, out, buffers: new Map(), playing: new Map(), done: new Set(), clock: null };
   dubs.set(cmd.tabId, d);
   // The first lines now, so playback can start at once.
   await Promise.all(d.sentences.filter((s) => !s.original).slice(0, 3).map((s) => clip(d, s.id)));
@@ -85,7 +85,7 @@ const RETRY_MS = 3000;
 function clip(d: Dub, id: number): Promise<AudioBuffer | null> {
   let p = d.buffers.get(id);
   if (!p) {
-    p = d.vs.recordings.voiceClip(d.recordingId, id, d.lang, { format: 'ogg' })
+    p = d.vs.transcriptions.voiceClip(d.transcriptionId, id, d.lang, { format: 'ogg' })
       .then((r) => r.arrayBuffer())
       .then((b) => d.ctx.decodeAudioData(b))
       .catch((e: unknown) => {

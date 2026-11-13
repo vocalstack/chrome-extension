@@ -22,7 +22,8 @@ export interface Tracked {
   sent?: number;
   total?: number;
   transcription?: Transcription;
-  recordingId?: string;
+  /** Set while there is a job to follow on it. */
+  followId?: string;
   job?: TranscriptionJob;
   problem?: Problem;
   /** The person closed it (toasts). */
@@ -50,9 +51,9 @@ export function patch(key: string, p: Partial<Tracked>): void {
 
 /** A transcription was made: follow its job, if it has one. */
 export function created(key: string, t: Transcription): void {
-  const recordingId = t.job?.recordingId ?? t.lastRecording?.recordingId ?? t.currentRecording?.recordingId ?? undefined;
+  const followId = t.job || (t.state && t.state !== 'idle') ? t.id : undefined;
   const job = t.job ?? undefined;
-  patch(key, { transcription: t, recordingId, job, phase: job ? phaseOf(job) : recordingId ? 'working' : 'done' });
+  patch(key, { transcription: t, followId, job, phase: job ? phaseOf(job) : followId ? 'working' : 'done' });
 }
 
 export function phaseOf(job: TranscriptionJob): Phase {
@@ -85,7 +86,7 @@ const ordinal = (k: number) => `${k}${k % 10 === 1 && k % 100 !== 11 ? 'st' : k 
 let timer: ReturnType<typeof setTimeout> | null = null;
 let polling = false;
 function schedule() {
-  if (timer || polling || !items.some((x) => x.phase === 'working' && x.recordingId)) return;
+  if (timer || polling || !items.some((x) => x.phase === 'working' && x.followId)) return;
   timer = setTimeout(poll, 3000);
 }
 async function poll() {
@@ -93,10 +94,10 @@ async function poll() {
   polling = true;
   try {
     const vs = await client();
-    const working = items.filter((x) => x.phase === 'working' && x.recordingId);
+    const working = items.filter((x) => x.phase === 'working' && x.followId);
     await Promise.all(working.map(async (x) => {
       try {
-        const job = await vs.jobs.get(x.recordingId!);
+        const job = await vs.transcriptions.job(x.followId!);
         patchQuiet(x.key, { job, phase: phaseOf(job) });
       } catch {
         // A blip: the next round asks again.

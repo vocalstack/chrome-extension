@@ -66,7 +66,7 @@ export function SpeakerNew({ onBack, onCreated }: { onBack: () => void; onCreate
     const v = await make.run(async () => {
       const n = name.trim();
       const gender = sex || undefined;
-      if (src === 'speaker' && pick) return createFromAppearance({ transcriptionId: pick.transcriptionId, recordingId: pick.recordingId, appearance: pick.appearance, name: n, consent });
+      if (src === 'speaker' && pick) return createFromAppearance({ transcriptionId: pick.transcriptionId, appearance: pick.appearance, name: n, consent });
       if (src === 'file' && file) return createSpeaker({ name: n, sample: file, fileName: file.name, gender, consent });
       if (mic.blob) return createSpeaker({ name: n, sample: mic.blob, fileName: 'sample.webm', gender, consent });
       throw new Error('Add a sample first.');

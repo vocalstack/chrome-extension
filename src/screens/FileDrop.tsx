@@ -115,7 +115,7 @@ export async function transcribeLinks(links: Link[], opts: UploadOptions = {}, o
         // once (the dashboard's New live transcription does the same).
         const t = await vs.transcriptions.createLive({ name: l.name, source: { kind: 'stream', url: l.url } });
         patch(key, { transcription: t });
-        await vs.transcriptions.startRecording(t.id);
+        await vs.transcriptions.start(t.id);
         patch(key, { phase: 'live' });
       } else created(key, await vs.transcriptions.createFromUrl(l.url, { name: l.name, crop: false, settings: opts.settings }));
     } catch (e) {

@@ -7,8 +7,6 @@ import type { SearchHit, Transcription } from '@vocalstack/contract';
 /** What the player is given. */
 export interface PlayTarget {
   transcriptionId: string;
-  /** Which of its recordings (a live transcription has one per take). */
-  recordingId: string;
   name: string;
   /** Start here, in seconds (a search hit's line). */
   startAt?: number;
@@ -29,36 +27,34 @@ export type Play = { target: PlayTarget; why?: undefined } | { target?: undefine
 
 type Item = Pick<Transcription, 'id' | 'name' | 'live'> & {
   blocked?: unknown;
-  job?: { state: string; recordingId: string } | null;
-  currentRecording?: { state: string; recordingId: string } | null;
-  lastRecording?: { state: string; recordingId: string } | null;
+  job?: { state: string } | null;
+  state?: string | null;
 };
 
 export function playOf(t: Item): Play {
   if (t.blocked) return { why: 'blocked' };
-  const cur = t.currentRecording?.state;
-  if (cur === 'pending' || cur === 'live' || cur === 'paused') return { why: 'live' };
+  const state = t.state;
+  if (state === 'pending' || state === 'live' || state === 'paused') return { why: 'live' };
   const job = t.job;
   if (job) {
     if (job.state === 'failed' || job.state === 'stopped') return { why: 'failed' };
     if (job.state === 'cropping') return { why: 'trim' };
     if (job.state !== 'done') return { why: 'working' };
-    return { target: { transcriptionId: t.id, recordingId: job.recordingId, name: t.name, path: `/transcriptions/${t.id}` } };
+    return { target: { transcriptionId: t.id, name: t.name, path: `/transcriptions/${t.id}` } };
   }
-  const last = t.lastRecording;
-  if (cur === 'processing' || last?.state === 'processing') return { why: 'working' };
-  if (!last || (last.state !== 'ended' && last.state !== 'finalized')) return { why: 'empty' };
-  // A finished take of a live transcription: its recording, not the live screen.
-  return { target: { transcriptionId: t.id, recordingId: last.recordingId, name: t.name, path: `/transcriptions/${t.id}/r/${last.recordingId}` } };
+  if (state === 'processing') return { why: 'working' };
+  if (state !== 'ended' && state !== 'finalized') return { why: 'empty' };
+  // A finished live transcription: its transcript, not the live screen.
+  return { target: { transcriptionId: t.id, name: t.name, path: `/transcriptions/${t.id}` } };
 }
 
-/** A search hit plays at its line. Not one in a recording still going, nor
- *  one of a broadcast's own recordings (the player opens transcriptions):
- *  those open in the Dashboard. `path` is the hit's Dashboard address. */
-export function hitPlay(h: Pick<SearchHit, 'transcriptionId' | 'recordingId' | 'mediaStart' | 'live' | 'linkName'>, ownBroadcasts: Set<string>, q: string, path: string): PlayTarget | null {
+/** A search hit plays at its line. Not one in a transcription still going,
+ *  nor one of a broadcast's own (the player opens transcriptions): those
+ *  open in the Dashboard. `path` is the hit's Dashboard address. */
+export function hitPlay(h: Pick<SearchHit, 'transcriptionId' | 'mediaStart' | 'live' | 'linkName'>, ownBroadcasts: Set<string>, q: string, path: string): PlayTarget | null {
   if (h.live || ownBroadcasts.has(h.transcriptionId)) return null;
   const find = q.trim();
-  return { transcriptionId: h.transcriptionId, recordingId: h.recordingId, name: h.linkName, startAt: Math.max(0, h.mediaStart), ...(find ? { find } : {}), path };
+  return { transcriptionId: h.transcriptionId, name: h.linkName, startAt: Math.max(0, h.mediaStart), ...(find ? { find } : {}), path };
 }
 
 /** What a row that cannot play says to a screen reader and on hover. */
