@@ -29,7 +29,7 @@ import { client } from '../lib/client';
 import { aboutOf, advised, checkLink, foundText, pageMedia, probeOnce, type About } from '../lib/linkCheck';
 import { playerFile } from '../lib/embedFiles';
 import { rpc, RpcError, type Answer } from '../lib/rpc';
-import { MEDIA_PAGE, type FoundMedia } from '../lib/media';
+import { MEDIA_PAGE, isSessionBound, type FoundMedia } from '../lib/media';
 import { siteOf } from '../lib/sites';
 import { Note, errorText, useAction } from '../ui/kit';
 import { Eyebrow, Switch, Toggle } from '../ui/ds';
@@ -210,7 +210,7 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   }
 
   const isPage = (r: Row) => r.url === pageUrl || r.kind === 'page' || isPlayer(r) || (!!r.streamOnly && !MEDIA_PAGE.test(r.url));
-  const autoProbe = (r: Row) => r.from === 'click' || !isPage(r) || MEDIA_PAGE.test(r.url);
+  const autoProbe = (r: Row) => !isSessionBound(r.url) && (r.from === 'click' || !isPage(r) || MEDIA_PAGE.test(r.url));
 
   // An embedded player is read by the browser, at once and for free; the
   // server searches it only when asked (Find recordings).
@@ -236,6 +236,7 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
   };
   const isLive = (r: Row) => !!r.live || verdict(r)?.kind === 'live';
   const selectable = (r: Row) => {
+    if (isSessionBound(r.url)) return false;
     const v = verdict(r);
     if (v) return v.ok || v.kind === 'live';
     return !isPage(r) && !r.streamOnly && probed[r.url]?.state !== 'error';
@@ -717,7 +718,8 @@ function FoundRow({ r, page, probe: p, player, selectable, ticked, started, onTo
     r.from === 'click' ? 'YOU PICKED THIS' : r.from === 'server' ? 'FOUND ON THE PAGE' : r.from === 'player' ? 'FOUND IN THE PLAYER' : r.playing ? 'MAIN PLAYER' : r.frameUrl ? 'IN A PLAYER' : '',
     started ? 'STARTED' : '',
   ].filter(Boolean).join(' · ');
-  const cantFetch = (r.streamOnly && (!v || !v.ok)) || (v && !v.ok && !v.media?.length && v.kind !== 'live');
+  const bound = isSessionBound(r.url);
+  const cantFetch = bound || (r.streamOnly && (!v || !v.ok)) || (v && !v.ok && !v.media?.length && v.kind !== 'live');
 
   let foot: React.ReactNode = null;
   if (p?.state === 'loading') foot = <><span className="spin" />Checking…</>;
@@ -745,8 +747,8 @@ function FoundRow({ r, page, probe: p, player, selectable, ticked, started, onTo
         <div className="found__foot">
           {foot}
           {cantFetch && (
-            <span className="pg-hint">Can’t be fetched. Play it and record the tab in Live.
-              {page && !p && <> <button type="button" className="pg-link" onClick={onProbe}>Look for recordings anyway</button></>}
+            <span className="pg-hint">{bound ? 'This site lets only your browser play it. Play it here and record the tab in Live.' : 'Can’t be fetched. Play it and record the tab in Live.'}
+              {page && !p && !bound && <> <button type="button" className="pg-link" onClick={onProbe}>Look for recordings anyway</button></>}
             </span>
           )}
         </div>

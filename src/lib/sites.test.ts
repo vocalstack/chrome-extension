@@ -140,3 +140,13 @@ test('a live stream survives the message as live', () => {
   // A message from an older content script: nothing to go on, nothing done.
   assert.deepEqual(captionPlan(playedOf({} as never, 'https://news.example.com/')), { path: 'none', why: 'small' });
 });
+
+test('a page file signed for the viewer takes the tab; the same file unsigned, or presigned on S3, the server', () => {
+  const page = 'https://player.hashtagtreinamentos.com/aula/42';
+  const signed = 'https://player.hashtagtreinamentos.com/0b6f2c1e/1080p/video.m3u8?e=1763218923&s=portal%3Aabc&f=1&g=9f8e7d';
+  assert.deepEqual(captionPlan(played({ pageUrl: page, src: signed, durationS: 1800 })), { path: 'tab', site: null });
+  const plain = 'https://cdn.example.com/1080p/video.m3u8';
+  assert.deepEqual(captionPlan(played({ pageUrl: page, src: plain, durationS: 1800 })), { path: 'server', url: plain, site: null });
+  const s3 = 'https://bucket.s3.amazonaws.com/talk.mp4?X-Amz-Expires=3600&X-Amz-Signature=abc';
+  assert.deepEqual(captionPlan(played({ pageUrl: page, src: s3, durationS: 1800 })), { path: 'server', url: s3, site: null });
+});

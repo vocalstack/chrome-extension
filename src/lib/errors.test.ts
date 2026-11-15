@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { GENERIC, OFFLINE, failure, isFault, userText } from './errors.ts';
+import { GENERIC, OFFLINE, failure, isFault, isRefusedAccess, userText } from './errors.ts';
 
 const api = (code: string, message: string) => Object.assign(new Error(message), { name: 'VocalStackError', code, status: 500 });
 const own = (message: string) => Object.assign(new Error(message), { name: 'RpcError' });
@@ -30,4 +30,12 @@ test('an error not named as the extension\'s own is worded generically, so worde
   const store = 'The browser’s extension store can’t be read. Open a web page with audio or video.';
   assert.equal(userText(new Error(store)), GENERIC);
   assert.equal(failure(own(store)).error, store);
+});
+
+test('a job the site refused is told apart from other failures', () => {
+  assert.equal(isRefusedAccess('This link refused access (error 403). It may be private or need a sign-in.'), true);
+  assert.equal(isRefusedAccess('This link refused access (error 401).'), true);
+  assert.equal(isRefusedAccess('No speech was found in this video.'), false);
+  assert.equal(isRefusedAccess(null), false);
+  assert.equal(isRefusedAccess(undefined), false);
 });

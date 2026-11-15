@@ -142,7 +142,7 @@ function Panel({ account, env, view, setView, lastArea, live, rec, intent, clear
           {view === 'upload' && <UploadScreen account={account} onSettings={() => setView('settings')} onLibrary={() => setView('library')} />}
           {view === 'broadcasts' && <BroadcastsScreen account={account} onSettings={() => setView('settings')} />}
           {view === 'speakers' && <SpeakersScreen />}
-          {view === 'library' && <LibraryScreen account={account} intent={intent?.view === 'library' ? intent : null} onIntentDone={clearIntent} onPlay={setPlaying} />}
+          {view === 'library' && <LibraryScreen account={account} intent={intent?.view === 'library' ? intent : null} onIntentDone={clearIntent} onPlay={setPlaying} onLive={() => setView('live')} />}
           {view === 'settings' && <Settings account={account} env={env} update={update} onBack={() => setView(lastArea)} />}
         </main>
         <FileDrop account={account} onSettings={() => setView('settings')} onDropped={() => setView('upload')} quiet={view === 'upload'} />

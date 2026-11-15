@@ -47,6 +47,26 @@ export function isRecordingUrl(u: string): boolean {
   return MEDIA_EXT.test(x.pathname) && !SEGMENT.test(x.pathname.split('/').pop() + x.search);
 }
 
+/** Query names that make a media address work only for the viewer who
+ *  loaded it (a CDN token, a signed policy): our server gets 403 there.
+ *  S3 and GCS presigned links are not among them: the server fetches those. */
+const VIEWER_TOKEN = new Set(['hdnts', 'hdntl', '__token__', 'token', 'sig', 'signature', 'hmac']);
+const EXPIRY = new Set(['e', 'exp', 'expires', 'expiry']);
+const SIGNED = new Set(['s', 'g', 'h', 'md5', 'hash', 'sig', 'signature']);
+
+/** A media file or playlist tied to the viewer's session: signed for, or
+ *  expiring with, the page that loaded it. Only the tab's sound can be
+ *  transcribed from it, never its address. */
+export function isSessionBound(u: string): boolean {
+  let x: URL;
+  try { x = new URL(u); } catch { return false; }
+  if ((x.protocol !== 'https:' && x.protocol !== 'http:') || !MEDIA_EXT.test(x.pathname)) return false;
+  const names = new Set([...x.searchParams.keys()].map((k) => k.toLowerCase()));
+  if ([...names].some((k) => VIEWER_TOKEN.has(k))) return true;
+  if (names.has('policy') && names.has('key-pair-id')) return true;
+  return [...names].some((k) => EXPIRY.has(k)) && [...names].some((k) => SIGNED.has(k));
+}
+
 const kindOfUrl = (u: string): 'audio' | 'video' => (AUDIO_EXT.test(new URL(u).pathname) ? 'audio' : 'video');
 
 /** The recordings a frame's players loaded (the browser's own list of

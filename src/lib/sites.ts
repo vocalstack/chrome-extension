@@ -18,7 +18,7 @@
  *  Pure: the content script measures the video (`Played`), the
  *  background decides here. */
 
-import { MEDIA_PAGE, embedOf } from './media.ts';
+import { MEDIA_PAGE, embedOf, isSessionBound } from './media.ts';
 
 /** A Twitch or Kick channel's own page: what plays there is its live
  *  stream (a player may give it a long finite length), never a whole video. */
@@ -191,9 +191,10 @@ export function captionPlan(p: Played): CaptionPlan {
   // Any other page: its own media file, transcribed whole, only when it is
   // long enough to be the page's video, not an ad.
   if (known && d! < MIN_FILE_S) return { path: 'none', why: 'short' };
-  if (known && isFileUrl(p.src)) return { path: 'server', url: p.src!, site: null };
-  // A stream with no file address (a blob: player), a live one, or an
-  // address the server would take for a web page: the tab's sound.
+  if (known && isFileUrl(p.src) && !isSessionBound(p.src!)) return { path: 'server', url: p.src!, site: null };
+  // A stream with no file address (a blob: player), a live one, a file
+  // signed for this viewer only, or an address the server would take for
+  // a web page: the tab's sound.
   return { path: 'tab', site: null };
 }
 

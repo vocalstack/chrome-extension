@@ -13,6 +13,8 @@ import { RpcError, type Handlers } from '../lib/rpc';
 import { videoIdOf } from '../lib/ahead';
 import { advised, checkLink } from '../lib/linkCheck';
 import { envOfPage, isOwn, playerState, shareCode, sharedJob, type PlayerState } from '../lib/shared';
+import { isSessionBound } from '../lib/media';
+import { BROWSER_ONLY, isRefusedAccess } from '../lib/errors';
 
 export interface VideoIds { transcriptionId: string }
 
@@ -125,12 +127,17 @@ function idsFor(vs: VocalStack, key: string, req: { url: string; title?: string 
         // on it is stopped, then the video is transcribed again.
         if (t?.job && !TERMINAL.has(t.job.state)) await vs.transcriptions.stop(ids.transcriptionId).catch(() => {});
         ids = null;
+      } else if (t.job && t.job.state === 'failed' && isRefusedAccess(t.job.error)) {
+        // The site let only the viewer have it: run again, it fails again.
+        throw new RpcError(BROWSER_ONLY, LINK_REFUSED);
       } else if (t.job && (t.job.state === 'failed' || t.job.state === 'stopped')) {
         // The same transcription, its job run again: never a second one.
         await vs.transcriptions.retryJob(ids.transcriptionId);
       }
     }
     if (!ids) {
+      // Signed for this viewer: never sent, the tab's sound instead.
+      if (isSessionBound(req.url)) throw new RpcError(BROWSER_ONLY, LINK_REFUSED);
       // Checked first, as any link (lib/linkCheck.ts): a page that isn't a recording is never sent.
       const c = await checkLink(vs, req.url);
       if (!c.go) throw new RpcError(advised(c), LINK_REFUSED);
@@ -163,6 +170,7 @@ export async function transcribeVideo(vs: VocalStack, req: { url: string; title?
     if (!job || job.state === 'done') break;
     if (job.state === 'failed' || job.state === 'stopped') {
       inflight.delete(key);
+      if (job.state === 'failed' && isRefusedAccess(job.error)) throw new RpcError(BROWSER_ONLY, LINK_REFUSED);
       throw new RpcError(job.error || 'VocalStack could not transcribe this video.');
     }
     await onProgress({ progress: (job.progress?.pct ?? 0) / 100, ...ids });

@@ -15,6 +15,13 @@
 export const OFFLINE = 'Can’t reach VocalStack. Check your connection.';
 export const GENERIC = 'Something went wrong. Try again.';
 
+/** A site that plays a video only for the person watching it: its
+ *  address can't be fetched, its sound in the tab can be recorded. */
+export const BROWSER_ONLY = 'This site plays this video only in your browser, so VocalStack can’t fetch it. Play it in its tab and record the tab with Live Transcription.';
+
+/** A job that failed because the site refused VocalStack's download (403, 401). */
+export const isRefusedAccess = (error: string | null | undefined) => !!error && /refused access/i.test(error);
+
 /** The extension's own error classes, by `name` (it survives bundling). */
 const OWN = new Set(['RpcError', 'Coded', 'AuthError']);
 

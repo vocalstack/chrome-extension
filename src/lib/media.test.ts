@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { MEDIA_PAGE, embedOf, isPageSound, isRecordingUrl, loadedMedia, mediaInPage } from './media.ts';
+import { MEDIA_PAGE, embedOf, isPageSound, isRecordingUrl, isSessionBound, loadedMedia, mediaInPage } from './media.ts';
 
 test('a recording by its address: media, not a segment, not an ad', () => {
   assert.equal(isRecordingUrl('https://cdn.example.com/talk.mp4'), true);
@@ -96,4 +96,36 @@ test('a page sound effect (Meet’s join chime) is never a recording', () => {
   assert.equal(isRecordingUrl(chime), false);
   assert.deepEqual(loadedMedia([chime]), []);
   assert.equal(isPageSound('https://cdn.example.com/talk.ogg'), false);
+});
+
+test('a media address signed for the viewer is session-bound', () => {
+  const bound = [
+    'https://player.hashtagtreinamentos.com/0b6f2c1e-8a3d-4f0e-9c1a-2d5e7f9a1b3c/1080p/video.m3u8?e=1763218923&s=portal%3Aabc123&f=1&g=9f8e7d6c5b4a',
+    'https://d111111abcdef8.cloudfront.net/v/master.m3u8?Policy=eyJ&Signature=abc&Key-Pair-Id=K2JCJMDEHXQW5F',
+    'https://d111111abcdef8.cloudfront.net/v/master.m3u8?Policy=eyJ&Key-Pair-Id=K2JCJMDEHXQW5F',
+    'https://example-vh.akamaihd.net/i/v/master.m3u8?hdnts=exp=1763218923~acl=/*~hmac=abc',
+    'https://cdn.example.com/v/talk.mp4?exp=1763218923&sig=abc',
+    'https://cdn.example.com/v/talk.mp4?expires=1763218923&md5=abc',
+    'https://cdn.example.com/hls/master.m3u8?token=abc',
+    'https://cdn.example.com/a/manifest.mpd?__token__=st=1~exp=2~hmac=3',
+  ];
+  for (const u of bound) assert.equal(isSessionBound(u), true, u);
+});
+
+test('public files stay links: no token, an expiry or a short name alone, presigned S3 and GCS', () => {
+  const open = [
+    'https://cdn.example.com/podcast.mp3',
+    'https://cdn.example.com/podcast.mp3?s=5',
+    'https://cdn.example.com/podcast.mp3?g=1',
+    'https://cdn.example.com/talk.mp4?e=1',
+    'https://cdn.example.com/talk.mp4?t=30',
+    'https://cdn.example.com/hls/master.m3u8?v=2',
+    'https://cdn.example.com/talk.mp4?utm_source=x&e=1',
+    'https://bucket.s3.amazonaws.com/talk.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA%2F20261115%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261115T150200Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=abc',
+    'https://storage.googleapis.com/bucket/talk.mp3?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Expires=900&X-Goog-Signature=abc',
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ&token=abc',
+    'https://example.com/page?e=1&s=2',
+    'not a url',
+  ];
+  for (const u of open) assert.equal(isSessionBound(u), false, u);
 });

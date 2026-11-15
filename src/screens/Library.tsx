@@ -10,6 +10,7 @@ import type { SearchHit, Transcription } from '@vocalstack/contract';
 import type { PanelIntent } from '../background/panel';
 import type { Account } from '../lib/auth';
 import { client } from '../lib/client';
+import { isRefusedAccess } from '../lib/errors';
 import { Note, ago, clock, errorText, openApp, useAction, useLoad } from '../ui/kit';
 import { HiAudio, HiBroadcast, HiDoc, HiExternal, HiMic, HiSearch, HiVideo, HiX } from '../ui/icons';
 import { MEETING_HOSTS } from '../lib/live';
@@ -44,7 +45,7 @@ function Marked({ text, q }: { text: string; q: string }) {
   return <>{out}</>;
 }
 
-export function LibraryScreen({ account, intent, onIntentDone, onPlay }: { account: Account; intent: PanelIntent | null; onIntentDone: () => void; onPlay: (t: PlayTarget) => void }) {
+export function LibraryScreen({ account, intent, onIntentDone, onPlay, onLive }: { account: Account; intent: PanelIntent | null; onIntentDone: () => void; onPlay: (t: PlayTarget) => void; onLive: () => void }) {
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -115,7 +116,7 @@ export function LibraryScreen({ account, intent, onIntentDone, onPlay }: { accou
           </div>
         ) : !searching && <p className="pref__sub" style={{ textAlign: 'center' }}>No line says “{term}”.</p>)
       ) : (
-        <Recent own={account.reach === 'own'} onPlay={onPlay} />
+        <Recent own={account.reach === 'own'} onPlay={onPlay} onLive={onLive} />
       )}
     </div>
   );
@@ -166,7 +167,7 @@ function DashButton({ name, onClick }: { name: string; onClick: () => void }) {
   return <button type="button" className="file__x lib-dash" title="Open in Dashboard" aria-label={`Open ${name} in Dashboard`} onClick={(e) => { e.stopPropagation(); onClick(); }}><HiExternal width={14} height={14} /></button>;
 }
 
-function Recent({ own, onPlay }: { own: boolean; onPlay: (t: PlayTarget) => void }) {
+function Recent({ own, onPlay, onLive }: { own: boolean; onPlay: (t: PlayTarget) => void; onLive: () => void }) {
   const { data, error, loading, reload } = useLoad(async () => (await (await client()).transcriptions.listPage({ limit: 30 })).transcriptions);
   const working = (data ?? []).some((t) => t.state === 'live' || (t.job && ['queued', 'fetching', 'transcribing'].includes(t.job.state)));
   // Keep the progress current while something is in progress.
@@ -195,14 +196,14 @@ function Recent({ own, onPlay }: { own: boolean; onPlay: (t: PlayTarget) => void
       {groups.map((g) => (
         <div key={g.label} className="card2" style={{ padding: '12px 14px 2px' }}>
           <div className="ey-row ey--line"><span className="ey">{g.label}</span>{g === groups[0] && own && <span className="ey">MADE BY THE EXTENSION</span>}</div>
-          <div style={{ marginTop: 4 }}>{g.items.map((t) => <LibRow key={t.id} t={t} today={g.label === 'TODAY'} onChanged={() => void reload()} onPlay={onPlay} />)}</div>
+          <div style={{ marginTop: 4 }}>{g.items.map((t) => <LibRow key={t.id} t={t} today={g.label === 'TODAY'} onChanged={() => void reload()} onPlay={onPlay} onLive={onLive} />)}</div>
         </div>
       ))}
     </>
   );
 }
 
-function LibRow({ t, today, onChanged, onPlay }: { t: Transcription; today: boolean; onChanged: () => void; onPlay: (t: PlayTarget) => void }) {
+function LibRow({ t, today, onChanged, onPlay, onLive }: { t: Transcription; today: boolean; onChanged: () => void; onPlay: (t: PlayTarget) => void; onLive: () => void }) {
   const retry = useAction();
   const { label, Icon } = sourceOf(t);
   // Known once the fetch has it; one that won't load, the source's icon.
@@ -214,6 +215,7 @@ function LibRow({ t, today, onChanged, onPlay }: { t: Transcription; today: bool
   const pct = job ? jobPct(job) : null;
   const working = !!job && ['fetching', 'transcribing'].includes(job.state);
   const failed = job?.state === 'failed' || job?.state === 'stopped';
+  const refused = job?.state === 'failed' && isRefusedAccess(job.error);
   const summary = !!(t.live && meetingOfName(t.name) && cur !== 'live' && cur !== 'paused' && t.summary);
   const meta = failed ? (job?.error || jobText(job!)).toUpperCase() : [label, dur ? mmss(dur) : '', job?.state === 'queued' ? jobText(job).toUpperCase() : '', summary ? 'SUMMARY' : ''].filter(Boolean).join(' · ');
   const chip = cur === 'live' ? <span className="chip chip--live">LIVE</span>
@@ -237,7 +239,8 @@ function LibRow({ t, today, onChanged, onPlay }: { t: Transcription; today: bool
           {working && <div className="lrow__bar"><i style={{ width: `${pct ?? 0}%` }} /></div>}
           {(failed || job?.state === 'cropping') && (
             <div className="lrow__acts" onClick={(e) => e.stopPropagation()}>
-              {failed && job && <button type="button" className="pg-link" disabled={retry.busy} onClick={() => void retry.run(async () => { await (await client()).transcriptions.retryJob(t.id); onChanged(); })}>{retry.busy && <span className="spin" />}Try again</button>}
+              {refused && <button type="button" className="pg-link" onClick={onLive}>Record the tab instead</button>}
+              {failed && job && !refused && <button type="button" className="pg-link" disabled={retry.busy} onClick={() => void retry.run(async () => { await (await client()).transcriptions.retryJob(t.id); onChanged(); })}>{retry.busy && <span className="spin" />}Try again</button>}
               {job?.state === 'cropping' && <button type="button" className="pg-link" onClick={open}>Trim in the dashboard</button>}
               {retry.error && <span className="pg-bad">{retry.error}</span>}
             </div>

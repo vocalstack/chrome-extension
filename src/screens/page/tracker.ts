@@ -6,6 +6,10 @@ import { useEffect, useState } from 'react';
 import type { Transcription, TranscriptionJob } from '@vocalstack/contract';
 import { client } from '../../lib/client';
 import type { Problem } from './errors';
+import { isRefusedAccess } from '../../lib/errors';
+
+/** After a site refused the download: what works instead. */
+export const TAB_INSTEAD = 'If it plays in a tab, record that tab with Live Transcription.';
 
 export type Phase = 'uploading' | 'sending' | 'working' | 'done' | 'failed' | 'live' | 'error';
 
@@ -73,7 +77,7 @@ export function jobText(job: TranscriptionJob | undefined): string {
     case 'done': return 'Done';
     case 'cropping': return 'Ready to trim in the dashboard';
     case 'stopped': return 'Stopped';
-    case 'failed': return job.error || 'It didn’t work.';
+    case 'failed': return isRefusedAccess(job.error) ? `${job.error} ${TAB_INSTEAD}` : job.error || 'It didn’t work.';
   }
   return job.state;
 }
