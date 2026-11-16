@@ -13,6 +13,7 @@ import { registerTabCaptions, takeOffer } from '../background/tabCaptions';
 import { forgetVideos, registerVideo } from '../background/video';
 import { registerMeetings } from '../background/meetings';
 import { registerUpdates } from '../background/updates';
+import { registerRate } from '../background/rate';
 import { showInPanel } from '../background/panel';
 import { initSentry } from '../lib/sentry';
 
@@ -29,6 +30,7 @@ export default defineBackground(() => {
     void markInvoked(tab).then(() => takeOffer(tab));
   });
   registerTabCaptions();
+  registerRate();
 
   const signedIn = async (a: auth.Account | null) => {
     push({ push: 'auth.changed', account: a });

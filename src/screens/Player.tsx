@@ -23,6 +23,7 @@ import type { Env } from '../lib/env';
 import type { PlayTarget } from '../lib/play';
 import { rpc } from '../lib/rpc';
 import { report } from '../lib/sentry';
+import { noteUsed } from '../lib/rate';
 import { HiBack, HiExternal } from '../ui/icons';
 
 setErrorReporter((e) => report(e, 'player'));
@@ -42,6 +43,8 @@ function useDark(): boolean {
 }
 
 export default function PlayerView({ target, env, onBack }: { target: PlayTarget; env: Env; onBack: () => void }) {
+  // A transcript played here: a result used (the rating card, lib/rate.ts).
+  useEffect(() => { void noteUsed(); }, [target.transcriptionId]);
   const dark = useDark();
   return (
     <>
@@ -49,7 +52,7 @@ export default function PlayerView({ target, env, onBack }: { target: PlayTarget
         <button type="button" className="hd__back" aria-label="Back to Library" onClick={onBack}><HiBack /></button>
         <div className="hd__title">Library</div>
         <div className="hd__end">
-          <a className="hd__link" href={new URL(target.path, env.app).toString()} target="_blank" rel="noopener" aria-label={`Open ${target.name} in Dashboard, in a new tab`}>Open in Dashboard<HiExternal /></a>
+          <a className="hd__link" href={new URL(target.path, env.app).toString()} target="_blank" rel="noopener" onClick={() => void noteUsed()} aria-label={`Open ${target.name} in Dashboard, in a new tab`}>Open in Dashboard<HiExternal /></a>
         </div>
       </div>
       <div className="pv" data-screen-label="Player">

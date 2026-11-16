@@ -8,6 +8,7 @@ import { client, currentEnv } from '../lib/client';
 import { IconAlert, IconInfo, IconCheck } from './icons';
 import { userText } from '../lib/errors';
 import { report } from '../lib/sentry';
+import { noteUsed } from '../lib/rate';
 
 export function Btn({ kind, size, block, busy, icon, children, ...rest }: {
   kind?: 'primary' | 'live' | 'danger' | 'ghost';
@@ -163,6 +164,8 @@ export function LanguageSelect({ value, onChange, list, auto, none, label, disab
 
 /** Open a dashboard page (`/transcriptions/…`, `/s/…`, `/speakers/…`) in a tab. */
 export async function openApp(path: string): Promise<void> {
+  // A transcript opened: a result used (the rating card, lib/rate.ts).
+  if (/^\/(transcriptions|s)\//.test(path)) void noteUsed();
   const env = await currentEnv();
   await chrome.tabs.create({ url: new URL(path, env.app).toString() });
 }
@@ -186,5 +189,6 @@ export function clock(seconds: number): string {
 }
 
 export function copy(text: string): Promise<void> {
+  void noteUsed();
   return navigator.clipboard.writeText(text);
 }

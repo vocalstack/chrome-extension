@@ -7,6 +7,7 @@ import type { Transcription, TranscriptionJob } from '@vocalstack/contract';
 import { client } from '../../lib/client';
 import type { Problem } from './errors';
 import { isRefusedAccess } from '../../lib/errors';
+import { noteDone, noteFailed } from '../../lib/rate';
 
 /** After a site refused the download: what works instead. */
 export const TAB_INSTEAD = 'If it plays in a tab, record that tab with Live Transcription.';
@@ -36,7 +37,20 @@ export interface Tracked {
 
 let items: Tracked[] = [];
 const subs = new Set<() => void>();
-const emit = () => { items = [...items]; subs.forEach((f) => f()); schedule(); };
+const emit = () => { items = [...items]; subs.forEach((f) => f()); schedule(); rateNotes(); };
+
+/** Finished ones, for the rating card (lib/rate.ts): a page's link counts
+ *  as a video, a local file as a file; a job that failed (not one stopped)
+ *  counts against asking. */
+const noted = new Set<string>();
+function rateNotes() {
+  for (const x of items) {
+    const id = x.transcription?.id;
+    if (!id || noted.has(id)) continue;
+    if (x.phase === 'done') { noted.add(id); void noteDone(id, x.origin === 'file' ? 'file' : 'video'); }
+    else if (x.phase === 'failed' && x.job?.state === 'failed') { noted.add(id); void noteFailed(id); }
+  }
+}
 
 let n = 0;
 export function track(t: Omit<Tracked, 'key'>): string {

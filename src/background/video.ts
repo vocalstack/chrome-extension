@@ -15,6 +15,7 @@ import { advised, checkLink } from '../lib/linkCheck';
 import { envOfPage, isOwn, playerState, shareCode, sharedJob, type PlayerState } from '../lib/shared';
 import { isSessionBound } from '../lib/media';
 import { BROWSER_ONLY, isRefusedAccess } from '../lib/errors';
+import { noteDone, noteFailed } from '../lib/rate';
 
 export interface VideoIds { transcriptionId: string }
 
@@ -162,13 +163,21 @@ function idsFor(vs: VocalStack, key: string, req: { url: string; title?: string 
  *  the Library and for the other feature. */
 export async function transcribeVideo(vs: VocalStack, req: { url: string; title?: string }, onProgress: (p: { progress: number } & VideoIds) => Promise<void>, current: () => Promise<boolean>): Promise<VideoIds | null> {
   const key = await keyOf(req.url);
+  const at = Date.now();
   const ids = await idsFor(vs, key, req);
   await onProgress({ progress: 0, ...ids });
+  /** The time to its first words (the rating card): measured only on a job seen working. */
+  let firstMs: number | undefined;
+  let working = false;
   for (;;) {
     if (!(await current())) return null;
     const job = await vs.transcriptions.job(ids.transcriptionId).catch(() => null);
+    if (job && job.state !== 'done' && job.state !== 'failed' && job.state !== 'stopped') working = true;
+    if (working && firstMs === undefined && (job?.state === 'done' || (job?.progress?.pct ?? 0) > 0)) firstMs = Date.now() - at;
+    if (job?.state === 'done') void noteDone(ids.transcriptionId, 'video', firstMs);
     if (!job || job.state === 'done') break;
     if (job.state === 'failed' || job.state === 'stopped') {
+      if (job.state === 'failed') void noteFailed(ids.transcriptionId);
       inflight.delete(key);
       if (job.state === 'failed' && isRefusedAccess(job.error)) throw new RpcError(BROWSER_ONLY, LINK_REFUSED);
       throw new RpcError(job.error || 'VocalStack could not transcribe this video.');

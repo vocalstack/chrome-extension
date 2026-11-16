@@ -40,6 +40,8 @@ import { InvokeNotice, MEETING_SHORT, mmss, useInvoked } from './Live';
 import { problemOf } from './page/errors';
 import { patch, useTracked } from './page/tracker';
 import { transcribeLinks } from './FileDrop';
+import { RateCard } from './page/RateCard';
+import { noteUsed } from '../lib/rate';
 import { queueLink } from './Upload';
 
 type Scan = Answer<'page.scan'>;
@@ -319,6 +321,10 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
         {meeting && !recording && <p className="site__call">Record it for a live transcript, and a summary when it ends. {MEETING_SHORT[meeting.key] ?? meeting.name} and your microphone are both recorded.</p>}
       </div>
 
+      {/* Asks for a store rating, now and then (lib/rate.ts): never over
+          something going on or wrong here. */}
+      <RateCard quiet={recording || live.some(isRunning) || tracked.some((t) => t.phase === 'uploading' || t.phase === 'sending' || t.phase === 'working') || !!scanError || failed.length > 0 || !mayRecord} />
+
       {/* As the design: wherever this tab could be recorded from here — a
           video page, or nothing to transcribe (Record This Tab). */}
       {tabOk && invoked === false && (empty || videoPage) && !recording && <InvokeNotice tabId={scan?.tabId} />}
@@ -585,6 +591,7 @@ function VideoPick({ account, live, tabId, url, title, durationS, stream, record
   const openPlayer = () => void player.run(async () => {
     // Watched there instead of here: Open in VocalStack takes this tab; the
     // first open (Video Player) a new one beside it.
+    void noteUsed();
     await rpc('video.player', { tabId, url, title: (title || '').replace(/ - YouTube$/, '').slice(0, 120) || undefined, here: onPlayer });
     if (!onPlayer) known.refresh();
   });
