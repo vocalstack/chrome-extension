@@ -35,6 +35,15 @@ test('an error not named as the extension\'s own is worded generically, so worde
 test('a job the site refused is told apart from other failures', () => {
   assert.equal(isRefusedAccess('This link refused access (error 403). It may be private or need a sign-in.'), true);
   assert.equal(isRefusedAccess('This link refused access (error 401).'), true);
+  assert.equal(isRefusedAccess('Vimeo asks for a sign-in to play that post. Only public posts can be transcribed.'), true);
+  assert.equal(isRefusedAccess('That Vimeo post is private. Only public posts can be transcribed.'), true);
+  assert.equal(isRefusedAccess('YouTube needs a sign-in to play this video. It may be private or age-restricted.'), true);
+  assert.equal(isRefusedAccess('This Loom video is private. Only its owner, or the people it is shared with, can watch it.'), true);
+  assert.equal(isRefusedAccess('Vimeo plays that video only on the websites its owner chose. Only public posts can be transcribed.'), true);
+  assert.equal(isRefusedAccess('Dailymotion does not offer that post in the region our servers are in.'), true);
+  assert.equal(isRefusedAccess('This Google Drive file isn’t shared publicly. In Drive, choose Share → General access → ‘Anyone with the link’, then try again.'), false);
+  assert.equal(isRefusedAccess("This Google Drive file isn't shared publicly. In Drive, choose Share → General access → 'Anyone with the link', then try again."), false);
+  assert.equal(isRefusedAccess('Vimeo is refusing requests from our servers for now. Try again later.'), false);
   assert.equal(isRefusedAccess('No speech was found in this video.'), false);
   assert.equal(isRefusedAccess(null), false);
   assert.equal(isRefusedAccess(undefined), false);

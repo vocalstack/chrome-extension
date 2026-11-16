@@ -293,11 +293,12 @@ export const MEDIA_PAGE = new RegExp([
   String.raw`^https?:\/\/(?:www\.|m\.|web\.)?facebook\.com\/(?:watch\/?\?(?:.*&)?v=\d|reel\/\d|(?:groups\/)?[^/?#]+\/videos\/(?:[^/?#]+\/)?\d)`,
   String.raw`^https?:\/\/fb\.watch\/\w`,
   // A Bandcamp track or album, a TED talk, a Streamable or Archive.org
-  // item, a Google Drive file.
+  // item, a Google Drive or Dropbox file (fetched as the file itself).
   String.raw`^https?:\/\/[\w-]+\.bandcamp\.com\/(?:track|album)\/[\w-]+`,
   String.raw`^https?:\/\/(?:www\.)?ted\.com\/talks\/\w`,
   String.raw`^https?:\/\/(?:www\.)?streamable\.com\/(?:e\/)?(?!(?:login|signup|settings|documentation|pricing|terms|privacy|about|blog|upload|videos|clipper|community|help|careers|features|api)\/?(?:[?#]|$))[a-z0-9]{4,10}\/?(?:[?#]|$)`,
   // An item, not a person's page (@name) or one of the site's collections.
   String.raw`^https?:\/\/(?:www\.)?archive\.org\/details\/(?!@|(?:movies|audio|texts|software|image|etree|opensource|opensource_movies|opensource_audio|feature_films|prelinger|tv|podcasts|radioprograms|oldtimeradio|librivoxaudio|audio_music|audio_bookspoetry|78rpm|georgeblood|internetarcade|softwarelibrary|classic_tv|ephemera|community|communityvideo|communityaudio)(?:[/?#]|$))[^/?#]+`,
-  String.raw`^https?:\/\/drive\.google\.com\/file\/d\/[\w-]+`,
+  String.raw`^https?:\/\/drive\.google\.com\/(?:file\/d\/[\w-]+|open\?(?:.*&)?id=[\w-])`,
+  String.raw`^https?:\/\/(?:www\.)?dropbox\.com\/(?:scl\/fi\/[\w-]+\/|s\/[\w-]+\/)[^/?#]`,
 ].join('|'), 'i');

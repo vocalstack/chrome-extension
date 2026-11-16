@@ -68,7 +68,7 @@ test('a page that is one recording, and the site pages that are not', () => {
     'https://www.loom.com/share/ce8ee1c8901649e1a79c421e9c3fcfc5', 'https://dai.ly/x5kesuj',
     'https://www.tiktok.com/@someone/video/6748451240264420610', 'https://x.com/NASA/status/1806408962516066450', 'https://twitter.com/NASA/status/1806408962516066450',
     'https://www.instagram.com/reel/C1a2b3c4d5/', 'https://www.instagram.com/p/C1a2b3c4d5/', 'https://www.facebook.com/watch/?v=274175099429670', 'https://www.facebook.com/somepage/videos/274175099429670/', 'https://www.facebook.com/reel/274175099429670', 'https://fb.watch/abc123/', 'https://www.facebook.com/groups/123/videos/456/',
-    'https://artist.bandcamp.com/track/song', 'https://artist.bandcamp.com/album/an-album', 'https://www.ted.com/talks/some_talk', 'https://streamable.com/abc12', 'https://archive.org/details/some-item', 'https://drive.google.com/file/d/1AbC_dEf/view',
+    'https://artist.bandcamp.com/track/song', 'https://artist.bandcamp.com/album/an-album', 'https://www.ted.com/talks/some_talk', 'https://streamable.com/abc12', 'https://archive.org/details/some-item', 'https://drive.google.com/file/d/1AbC_dEf/view', 'https://drive.google.com/open?id=1AbC_dEfGh', 'https://www.dropbox.com/scl/fi/abc123/Talk%20one.mp4?rlkey=xyz&st=q1&dl=0', 'https://dropbox.com/s/k3y/talk.mov?dl=0',
   ];
   const no = [
     'https://www.youtube.com/', 'https://music.youtube.com/', 'https://www.youtube.com/@channel', 'https://www.youtube.com/results?search_query=x', 'https://www.youtube.com/playlist?list=PL1',
@@ -78,7 +78,7 @@ test('a page that is one recording, and the site pages that are not', () => {
     'https://kick.com/', 'https://kick.com/browse', 'https://kick.com/categories/irl', 'https://kick.com/category/irl', 'https://kick.com/search?q=x', 'https://kick.com/following',
     'https://www.loom.com/', 'https://example.com/watch?v=1',
     'https://www.tiktok.com/', 'https://www.tiktok.com/@someone', 'https://www.tiktok.com/foryou', 'https://x.com/home', 'https://x.com/NASA', 'https://www.instagram.com/', 'https://www.instagram.com/someone/',
-    'https://www.facebook.com/', 'https://www.facebook.com/watch/', 'https://artist.bandcamp.com/', 'https://www.ted.com/talks', 'https://streamable.com/', 'https://streamable.com/login', 'https://streamable.com/documentation', 'https://archive.org/details/movies', 'https://archive.org/details/@someone', 'https://drive.google.com/drive/my-drive',
+    'https://www.facebook.com/', 'https://www.facebook.com/watch/', 'https://artist.bandcamp.com/', 'https://www.ted.com/talks', 'https://streamable.com/', 'https://streamable.com/login', 'https://streamable.com/documentation', 'https://archive.org/details/movies', 'https://archive.org/details/@someone', 'https://drive.google.com/drive/my-drive', 'https://drive.google.com/drive/folders/1AbC_dEf', 'https://www.dropbox.com/home', 'https://www.dropbox.com/scl/fo/abc123/xyz?rlkey=1', 'https://www.dropbox.com/sh/abc/def',
   ];
   for (const u of yes) assert.equal(MEDIA_PAGE.test(u), true, u);
   for (const u of no) assert.equal(MEDIA_PAGE.test(u), false, u);

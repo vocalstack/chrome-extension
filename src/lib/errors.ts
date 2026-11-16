@@ -19,8 +19,14 @@ export const GENERIC = 'Something went wrong. Try again.';
  *  address can't be fetched, its sound in the tab can be recorded. */
 export const BROWSER_ONLY = 'This site plays this video only in your browser, so VocalStack can’t fetch it. Play it in its tab and record the tab with Live Transcription.';
 
-/** A job that failed because the site refused VocalStack's download (403, 401). */
-export const isRefusedAccess = (error: string | null | undefined) => !!error && /refused access/i.test(error);
+/** A job that failed because the link plays only for a viewer it lets in,
+ *  not for VocalStack's download: a refusal (403, 401), a sign-in, a
+ *  private post, a player kept to its owner's sites, or another region
+ *  (the server's words, transcribe src/domain/public_error.rs and
+ *  src/stream_source/sites.rs `refusal`). A file host's "isn't shared
+ *  publicly" is not one: its own next step is to share it and try again. */
+const REFUSED_ACCESS = /refused access|asks for a sign-in|needs a sign-in|(?:post|video) is private|only on the websites its owner chose|does not offer that post in the region/i;
+export const isRefusedAccess = (error: string | null | undefined) => !!error && REFUSED_ACCESS.test(error);
 
 /** The extension's own error classes, by `name` (it survives bundling). */
 const OWN = new Set(['RpcError', 'Coded', 'AuthError']);
