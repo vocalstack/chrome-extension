@@ -209,3 +209,11 @@ export function meetingHost(url: string | undefined): { name: string; key: Meeti
   if (!url) return null;
   return MEETING_HOSTS.find((m) => m.re.test(url)) ?? null;
 }
+
+/** The captured tab as the API checks it before anything is recorded
+ *  (`page`: its address and title); none for a page that isn't the web. */
+export function pageOf(url?: string, title?: string): { url: string; title?: string } | undefined {
+  if (!url || !/^https?:\/\//i.test(url)) return undefined;
+  const t = title?.trim().slice(0, 300);
+  return { url: url.slice(0, 2000), ...(t ? { title: t } : {}) };
+}

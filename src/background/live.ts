@@ -244,7 +244,7 @@ export async function startLive(start: LiveStart, invokedTab?: chrome.tabs.Tab):
     setTarget(id, { tabId: tab.id, frameId: await videoFrame(tab.id), hide: start.mode !== 'captions' });
   }
   const where = tab?.url ? { meeting: meetingHost(tab.url)?.key, host: hostOf(tab.url) } : {};
-  const cmd: OffCmd = { off: 'live.start', id, api: env.api, start: { ...start, ...where, tabId: tab?.id ?? start.tabId }, name: defaultName(start, tab), streamId, tabTitle: tab?.title };
+  const cmd: OffCmd = { off: 'live.start', id, api: env.api, start: { ...start, ...where, tabId: tab?.id ?? start.tabId }, name: defaultName(start, tab), streamId, tabTitle: tab?.title, tabUrl: tab?.url };
   try {
     const status = (await off<LiveStatus>(cmd)).value!;
     if (feeder !== null) await chrome.tabs.sendMessage(tab!.id!, { ahead: 'start', id }, { frameId: feeder }).catch(() => {});

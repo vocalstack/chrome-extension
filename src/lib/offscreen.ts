@@ -16,7 +16,7 @@ export interface DubSentence {
 }
 
 export type OffCmd =
-  | { off: 'live.start'; id: string; api: string; start: LiveStart; name: string; streamId?: string; tabTitle?: string }
+  | { off: 'live.start'; id: string; api: string; start: LiveStart; name: string; streamId?: string; tabTitle?: string; tabUrl?: string }
   | { off: 'live.stop'; id: string }
   | { off: 'live.pause'; id: string; paused: boolean }
   | { off: 'live.list' }

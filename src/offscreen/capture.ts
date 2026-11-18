@@ -16,7 +16,7 @@
 
 import { VocalStack, type RealtimeSession, type Subscription } from '@vocalstack/js-sdk';
 import { push, rpc, type LiveEvent } from '../lib/rpc';
-import { isRunning, type LiveStatus } from '../lib/live';
+import { isRunning, pageOf, type LiveStatus } from '../lib/live';
 import type { OffCmd } from '../lib/offscreen';
 import { userText } from '../lib/errors';
 import { report } from '../lib/sentry';
@@ -148,18 +148,20 @@ export async function startLive(cmd: Extract<OffCmd, { off: 'live.start' }>): Pr
     // Each step keyed to this start: a full fleet's 503 "busy" is tried
     // again by the SDK (after its Retry-After) without making two.
     const lang = s.spokenLanguage ?? null;
+    const page = s.input.tab || s.mode === 'captions' ? pageOf(cmd.tabUrl, cmd.tabTitle) : undefined;
+    const onPage = page ? { page } : {};
     if (s.mode === 'captions') {
-      l.session = await vs.realtime.connect({ spokenLanguage: lang, ...(s.translateTo ? { translate: [s.translateTo] } : {}), ...(s.ahead ? { sentences: { enabled: true } } : {}) }, hooks);
+      l.session = await vs.realtime.connect({ ...onPage, spokenLanguage: lang, ...(s.translateTo ? { translate: [s.translateTo] } : {}), ...(s.ahead ? { sentences: { enabled: true } } : {}) }, hooks);
       alive();
     } else if (s.mode === 'broadcast') {
       if (!s.broadcastId) throw new Coded('No broadcast was chosen.', 'invalid_options');
-      const grant = await vs.broadcasts.record(s.broadcastId, { takeover: s.takeover ?? false, ...(s.spokenLanguage !== undefined ? { settings: { spokenLanguage: lang } } : {}) }, { idempotencyKey: `${cmd.id}:take` });
+      const grant = await vs.broadcasts.record(s.broadcastId, { ...onPage, takeover: s.takeover ?? false, ...(s.spokenLanguage !== undefined ? { settings: { spokenLanguage: lang } } : {}) }, { idempotencyKey: `${cmd.id}:take` });
       set(l, { liveId: grant.transcription.id });
       alive();
       l.session = await vs.transcriptions.publish(grant, hooks);
       alive();
     } else {
-      const tx = await vs.transcriptions.createLive({ name: cmd.name, settings: { spokenLanguage: lang, ...(s.speakerLabels ? { speakerLabels: s.speakerLabels } : {}) }, source: { kind: 'mic' } }, { idempotencyKey: `${cmd.id}:tx` });
+      const tx = await vs.transcriptions.createLive({ ...onPage, name: cmd.name, settings: { spokenLanguage: lang, ...(s.speakerLabels ? { speakerLabels: s.speakerLabels } : {}) }, source: { kind: 'mic' } }, { idempotencyKey: `${cmd.id}:tx` });
       set(l, { transcriptionId: tx.id });
       alive();
       const grant = await vs.transcriptions.start(tx.id, {}, { idempotencyKey: `${cmd.id}:rec` });

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { inMeeting, meetingOf } from './live.ts';
+import { inMeeting, meetingOf, pageOf } from './live.ts';
 
 test('meeting tabs are recognised by their address', () => {
   assert.equal(meetingOf('https://meet.google.com/abc-defg-hij'), 'Google Meet');
@@ -25,4 +25,11 @@ test('a meeting going on: not every page of a meeting app', () => {
   assert.equal(inMeeting('https://teams.microsoft.com/l/meetup-join/19%3ameeting_x/0', 'Microsoft Teams'), true);
   assert.equal(inMeeting('https://teams.live.com/meet/9381234567', ''), true);
   assert.equal(inMeeting('https://example.com/', 'x'), false);
+});
+
+test('the captured page is sent with its address and title, web pages only', () => {
+  assert.deepEqual(pageOf('https://example.com/v?x=1', '  A video  '), { url: 'https://example.com/v?x=1', title: 'A video' });
+  assert.deepEqual(pageOf('http://example.com', ''), { url: 'http://example.com' });
+  assert.equal(pageOf('chrome://newtab', 'New tab'), undefined);
+  assert.equal(pageOf(undefined, 'x'), undefined);
 });
