@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import type { Transcription, TranscriptionJob } from '@vocalstack/contract';
 import { client } from '../../lib/client';
 import type { Problem } from './errors';
-import { isRefusedAccess } from '../../lib/errors';
+import { jobWay } from '../../lib/fallback';
 import { noteDone, noteFailed } from '../../lib/rate';
 
 /** After a site refused the download: what works instead. */
@@ -91,7 +91,7 @@ export function jobText(job: TranscriptionJob | undefined): string {
     case 'done': return 'Done';
     case 'cropping': return 'Ready to trim in the dashboard';
     case 'stopped': return 'Stopped';
-    case 'failed': return isRefusedAccess(job.error) ? `${job.error} ${TAB_INSTEAD}` : job.error || 'It didn’t work.';
+    case 'failed': return jobWay(job) === 'tab' ? `${job.error || 'VocalStack couldn’t fetch it.'} ${TAB_INSTEAD}` : job.error || 'It didn’t work.';
   }
   return job.state;
 }

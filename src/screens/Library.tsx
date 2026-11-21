@@ -11,6 +11,7 @@ import type { PanelIntent } from '../background/panel';
 import type { Account } from '../lib/auth';
 import { client } from '../lib/client';
 import { isRefusedAccess } from '../lib/errors';
+import { jobWay } from '../lib/fallback';
 import { Note, ago, clock, errorText, openApp, useAction, useLoad } from '../ui/kit';
 import { HiAudio, HiBroadcast, HiDoc, HiExternal, HiMic, HiSearch, HiVideo, HiX } from '../ui/icons';
 import { MEETING_HOSTS } from '../lib/live';
@@ -215,7 +216,10 @@ function LibRow({ t, today, onChanged, onPlay, onLive }: { t: Transcription; tod
   const pct = job ? jobPct(job) : null;
   const working = !!job && ['fetching', 'transcribing'].includes(job.state);
   const failed = job?.state === 'failed' || job?.state === 'stopped';
-  const refused = job?.state === 'failed' && isRefusedAccess(job.error);
+  // The link's own failure that its tab plays past: record the tab; a
+  // refusal or a live stream fails again if retried, no answer may pass.
+  const tabInstead = jobWay(job) === 'tab';
+  const refused = tabInstead && (isRefusedAccess(job?.error) || ['link_refused', 'link_live', 'link_not_found'].includes(job?.errorCode ?? ''));
   const summary = !!(t.live && meetingOfName(t.name) && cur !== 'live' && cur !== 'paused' && t.summary);
   const meta = failed ? (job?.error || jobText(job!)).toUpperCase() : [label, dur ? mmss(dur) : '', job?.state === 'queued' ? jobText(job).toUpperCase() : '', summary ? 'SUMMARY' : ''].filter(Boolean).join(' · ');
   const chip = cur === 'live' ? <span className="chip chip--live">LIVE</span>
@@ -239,7 +243,7 @@ function LibRow({ t, today, onChanged, onPlay, onLive }: { t: Transcription; tod
           {working && <div className="lrow__bar"><i style={{ width: `${pct ?? 0}%` }} /></div>}
           {(failed || job?.state === 'cropping') && (
             <div className="lrow__acts" onClick={(e) => e.stopPropagation()}>
-              {refused && <button type="button" className="pg-link" onClick={onLive}>Record the tab instead</button>}
+              {tabInstead && <button type="button" className="pg-link" onClick={onLive}>Record the tab instead</button>}
               {failed && job && !refused && <button type="button" className="pg-link" disabled={retry.busy} onClick={() => void retry.run(async () => { await (await client()).transcriptions.retryJob(t.id); onChanged(); })}>{retry.busy && <span className="spin" />}Try again</button>}
               {job?.state === 'cropping' && <button type="button" className="pg-link" onClick={open}>Trim in the dashboard</button>}
               {retry.error && <span className="pg-bad">{retry.error}</span>}

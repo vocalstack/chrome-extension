@@ -15,7 +15,8 @@
  *  shows it) and a failure show on the page (content/captionsPrompt.ts). */
 
 import { push, RpcError, type Handlers } from '../lib/rpc';
-import { GENERIC, userText } from '../lib/errors';
+import { BROWSER_ONLY, GENERIC, userText } from '../lib/errors';
+import { emptyAudio } from '../lib/fallback';
 import { report } from '../lib/sentry';
 import { account } from '../lib/auth';
 import { AUTO_CAPTIONS, tabHolder, type VcapStart, type VcapStatus } from '../lib/live';
@@ -61,7 +62,13 @@ async function run(req: VcapStart, runId: number) {
   const withIds = { ...base, transcriptionId: ids.transcriptionId };
   const snap = await vs.transcriptions.transcript(ids.transcriptionId, lang ? { lang } : {});
   const sentences = snap.sentences.filter((x) => !x.suppressed && x.text.trim());
-  if (!sentences.length) throw new RpcError('No speech was found in this video.');
+  if (!sentences.length) {
+    // Next to no audio came (a region's slate, an empty stream), though the
+    // tab plays the video: its sound instead.
+    const job = await vs.transcriptions.job(ids.transcriptionId).catch(() => null);
+    if (job && emptyAudio(job)) throw new RpcError(BROWSER_ONLY, LINK_REFUSED);
+    throw new RpcError('No speech was found in this video.');
+  }
   const tr: Record<number, string> = {};
   if (lang) {
     await set({ ...withIds, state: 'translating', progress: 0 }, runId);
@@ -95,14 +102,18 @@ async function start(req: VcapStart): Promise<VcapStatus> {
   const first: VcapStatus = { tabId: req.tabId, lang: req.lang ?? null, url: req.url, title: req.title, state: 'transcribing', progress: 0, auto: req.auto };
   await put(req.tabId, { status: first, frameId: 0, run: runId });
   run(req, runId).catch(async (e) => {
-    // Started by itself, on an address the link check refused (nothing
-    // was made): the tab's sound instead.
-    if (req.auto && e instanceof RpcError && e.code === LINK_REFUSED && (await current(req.tabId, runId))) {
-      await put(req.tabId, null);
-      push({ push: 'vcap.gone', tabId: req.tabId });
+    // A link the server can't make audio of, but this tab plays (refused,
+    // another region, empty, live, no answer): the tab's sound instead, no
+    // error first. Asked for in the panel, the error shows only when the
+    // tab's sound can't be had either (declined here, already recorded).
+    if (e instanceof RpcError && e.code === LINK_REFUSED && (await current(req.tabId, runId))) {
       const tab = await chrome.tabs.get(req.tabId).catch(() => null);
-      if (tab) await autoTab(tab, null);
-      return;
+      const step = tab ? await autoTab(tab, null) : 'skip';
+      if (req.auto || step !== 'skip') {
+        await put(req.tabId, null);
+        push({ push: 'vcap.gone', tabId: req.tabId });
+        return;
+      }
     }
     report(e, 'video captions');
     await set({ ...first, state: 'failed', error: userText(e) }, runId);

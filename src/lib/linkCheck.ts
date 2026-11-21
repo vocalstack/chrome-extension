@@ -32,7 +32,7 @@ export type Checked =
   /** Not this address: why, in plain words, the recordings found on it (a
    *  web page's), and the server's reason, for the advice this extension
    *  gives (`advised`). */
-  | { go: false; problem: string; media: Found[]; streams: Found[]; reason?: Reason };
+  | { go: false; problem: string; media: Found[]; streams: Found[]; reason?: Reason; viewerOnly?: boolean };
 
 /** A web page's find: `media` its recordings (files), `streams` the live
  *  streams it plays, which never go in as files: transcribed, one would
@@ -57,7 +57,7 @@ export function foundText({ files, streams }: { files: unknown[]; streams: unkno
 /** Why the server refused a link (the probe's `reason`, read as optional
  *  until @vocalstack/contract has it). Its sentence says what is wrong;
  *  each client says what to do. */
-export type Reason = 'web_page' | 'site_not_fetched' | 'meeting' | 'not_found' | 'unreachable' | 'forbidden' | 'not_media' | 'copy_protected' | 'too_long' | 'unknown';
+export type Reason = 'web_page' | 'site_not_fetched' | 'meeting' | 'not_found' | 'unreachable' | 'forbidden' | 'not_media' | 'copy_protected' | 'too_long' | 'empty' | 'unknown';
 
 /** What to do instead, in this extension: what plays in the tab can be
  *  recorded from it; a meeting from Now; nothing for a link that is broken
@@ -67,6 +67,7 @@ const NEXT: Partial<Record<Reason, string>> = {
   site_not_fetched: 'Live Transcription can record it as it plays.',
   copy_protected: 'Live Transcription can record it as it plays.',
   forbidden: 'If it plays in this tab, Live Transcription can record it.',
+  empty: 'If it plays in this tab, Live Transcription can record it.',
   too_long: 'Live Transcription can record the part you need as it plays.',
   meeting: 'Record it with Record This Meeting on Now.',
 };
@@ -74,8 +75,8 @@ const NEXT: Partial<Record<Reason, string>> = {
 /** The refusal in full: the server's sentence and, by its reason, what to
  *  do here. An answer without a reason (an older server): the Live hint,
  *  unless the sentence already says how to record. */
-export function advised(c: { problem: string; reason?: Reason }): string {
-  const next = c.reason ? NEXT[c.reason] : /record/i.test(c.problem) ? undefined : 'Live Transcription can still record it as it plays.';
+export function advised(c: { problem: string; reason?: Reason; viewerOnly?: boolean }): string {
+  const next = c.viewerOnly ? NEXT.forbidden : c.reason ? NEXT[c.reason] : /record/i.test(c.problem) ? undefined : 'Live Transcription can still record it as it plays.';
   return next ? `${c.problem} ${next}` : c.problem;
 }
 
@@ -88,7 +89,7 @@ export function verdictOf(p: LinkProbe): Checked {
   if (p.ok ?? true) return { go: true, live: false, about: aboutOf(p) };
   const { files, streams } = pageMedia(p);
   const reason = (p as { reason?: Reason | null }).reason ?? undefined;
-  const why = reason ? { reason } : {};
+  const why = { ...(reason ? { reason } : {}), ...((p as { viewerOnly?: boolean | null }).viewerOnly ? { viewerOnly: true } : {}) };
   if (files.length || streams.length) {
     const found = foundText({ files, streams });
     return { go: false, problem: `This is a web page. ${found} ${files.length + streams.length === 1 ? 'was' : 'were'} found on it.`, media: files, streams, ...why };

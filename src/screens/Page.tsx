@@ -725,14 +725,16 @@ function FoundRow({ r, page, probe: p, player, selectable, ticked, started, onTo
     r.from === 'click' ? 'YOU PICKED THIS' : r.from === 'server' ? 'FOUND ON THE PAGE' : r.from === 'player' ? 'FOUND IN THE PLAYER' : r.playing ? 'MAIN PLAYER' : r.frameUrl ? 'IN A PLAYER' : '',
     started ? 'STARTED' : '',
   ].filter(Boolean).join(' · ');
-  const bound = isSessionBound(r.url);
+  // Signed for this viewer, or turned away from the server (the probe's
+  // viewerOnly): only the tab's sound, never an error.
+  const bound = isSessionBound(r.url) || !!(v as { viewerOnly?: boolean | null } | null)?.viewerOnly;
   const cantFetch = bound || (r.streamOnly && (!v || !v.ok)) || (v && !v.ok && !v.media?.length && v.kind !== 'live');
 
   let foot: React.ReactNode = null;
   if (p?.state === 'loading') foot = <><span className="spin" />Checking…</>;
   else if (p?.state === 'error') foot = <span className="pg-bad">{p.text}</span>;
   else if (v && !v.ok && v.media?.length) foot = <span>{foundText(pageMedia(v))} found on it, listed below.</span>;
-  else if (v && !v.ok && !r.streamOnly) foot = <><span className="pg-bad">{v.problem || 'VocalStack can’t fetch this.'}</span><button type="button" className="pg-link" onClick={onProbe}>Check again</button></>;
+  else if (v && !v.ok && !r.streamOnly && !bound) foot = <><span className="pg-bad">{v.problem || 'VocalStack can’t fetch this.'}</span><button type="button" className="pg-link" onClick={onProbe}>Check again</button></>;
   else if (!p && player === 'loading') foot = <><span className="spin" />Looking in the player…</>;
   else if (!p && player) foot = <span>Its recording is listed below.</span>;
   else if (!p && player === null) foot = <><span>VocalStack can search this player for its recording.</span><button type="button" className="pg-link" onClick={onProbe}>Find recordings</button></>;

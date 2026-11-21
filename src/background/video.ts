@@ -14,7 +14,8 @@ import { videoIdOf } from '../lib/ahead';
 import { advised, checkLink } from '../lib/linkCheck';
 import { envOfPage, isOwn, playerState, shareCode, sharedJob, type PlayerState } from '../lib/shared';
 import { isSessionBound } from '../lib/media';
-import { BROWSER_ONLY, isRefusedAccess } from '../lib/errors';
+import { BROWSER_ONLY } from '../lib/errors';
+import { browserManifest, jobWay, linkWay, stalled } from '../lib/fallback';
 import { noteDone, noteFailed } from '../lib/rate';
 
 export interface VideoIds { transcriptionId: string }
@@ -128,8 +129,8 @@ function idsFor(vs: VocalStack, key: string, req: { url: string; title?: string 
         // on it is stopped, then the video is transcribed again.
         if (t?.job && !TERMINAL.has(t.job.state)) await vs.transcriptions.stop(ids.transcriptionId).catch(() => {});
         ids = null;
-      } else if (t.job && t.job.state === 'failed' && isRefusedAccess(t.job.error)) {
-        // The site let only the viewer have it: run again, it fails again.
+      } else if (t.job && (jobWay(t.job) === 'tab' || stalled(t.job))) {
+        // The link plays only in the viewer's browser: run again, it fails again.
         throw new RpcError(BROWSER_ONLY, LINK_REFUSED);
       } else if (t.job && (t.job.state === 'failed' || t.job.state === 'stopped')) {
         // The same transcription, its job run again: never a second one.
@@ -139,12 +140,16 @@ function idsFor(vs: VocalStack, key: string, req: { url: string; title?: string 
     if (!ids) {
       // Signed for this viewer: never sent, the tab's sound instead.
       if (isSessionBound(req.url)) throw new RpcError(BROWSER_ONLY, LINK_REFUSED);
-      // Checked first, as any link (lib/linkCheck.ts): a page that isn't a recording is never sent.
-      const c = await checkLink(vs, req.url);
-      if (!c.go) throw new RpcError(advised(c), LINK_REFUSED);
+      // Checked first, as any link (lib/linkCheck.ts): a page that isn't a
+      // recording is never sent. A playlist is also read here, as this
+      // browser gets it: live, or refused to the server but not to the viewer.
+      const [c, browser] = await Promise.all([checkLink(vs, req.url), browserManifest(req.url)]);
+      const way = linkWay(req.url, c.go ? { go: true, live: c.live } : { go: false, reason: c.reason, viewerOnly: c.viewerOnly }, browser);
       // A live stream has no whole file to fetch: never a job that can only
       // fail (captions take the tab's sound instead, as for any refusal).
-      if (c.live) throw new RpcError('This is a live stream. Use Live Transcription to transcribe it as it plays.', LINK_REFUSED);
+      if ((c.go && c.live) || browser === 'live') throw new RpcError('This is a live stream. Use Live Transcription to transcribe it as it plays.', LINK_REFUSED);
+      if (!c.go) throw new RpcError(way === 'tab' && c.viewerOnly ? BROWSER_ONLY : advised(c), LINK_REFUSED);
+      if (way === 'tab') throw new RpcError(BROWSER_ONLY, LINK_REFUSED);
       const t: Transcription = await vs.transcriptions.createFromUrl(req.url, { name: req.title || null });
       if (!t.job) throw new RpcError('VocalStack did not start transcribing this video.');
       ids = { transcriptionId: t.id };
@@ -177,10 +182,18 @@ export async function transcribeVideo(vs: VocalStack, req: { url: string; title?
     if (job?.state === 'done') void noteDone(ids.transcriptionId, 'video', firstMs);
     if (!job || job.state === 'done') break;
     if (job.state === 'failed' || job.state === 'stopped') {
-      if (job.state === 'failed') void noteFailed(ids.transcriptionId);
       inflight.delete(key);
-      if (job.state === 'failed' && isRefusedAccess(job.error)) throw new RpcError(BROWSER_ONLY, LINK_REFUSED);
+      // The link's own failure, one the tab plays past: its sound instead, no error.
+      if (jobWay(job) === 'tab') throw new RpcError(BROWSER_ONLY, LINK_REFUSED);
+      if (job.state === 'failed') void noteFailed(ids.transcriptionId);
       throw new RpcError(job.error || 'VocalStack could not transcribe this video.');
+    }
+    // Tried again and again, nothing fetched: the tab plays it now. The
+    // job is stopped, so it never finishes later as a second copy.
+    if (stalled(job)) {
+      inflight.delete(key);
+      await vs.transcriptions.stop(ids.transcriptionId).catch(() => {});
+      throw new RpcError(BROWSER_ONLY, LINK_REFUSED);
     }
     await onProgress({ progress: (job.progress?.pct ?? 0) / 100, ...ids });
     await sleep(3000);

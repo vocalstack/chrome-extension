@@ -49,22 +49,92 @@ export function isRecordingUrl(u: string): boolean {
 
 /** Query names that make a media address work only for the viewer who
  *  loaded it (a CDN token, a signed policy): our server gets 403 there.
- *  S3 and GCS presigned links are not among them: the server fetches those. */
-const VIEWER_TOKEN = new Set(['hdnts', 'hdntl', '__token__', 'token', 'sig', 'signature', 'hmac']);
-const EXPIRY = new Set(['e', 'exp', 'expires', 'expiry']);
-const SIGNED = new Set(['s', 'g', 'h', 'md5', 'hash', 'sig', 'signature']);
+ *  S3, GCS and Azure presigned links are not among them: the server
+ *  fetches those. */
+const VIEWER_TOKEN = new Set([
+  'hdnts', 'hdntl', 'hdnea', '__token__', '__gda__', 'token', 'tok', 'sig', 'signature', 'hmac', 'jwt', 'access_token', 'auth_token', 'authtoken',
+  'bcdn_token', 'cdn_token', 'wowzatokenhash', 'wmsauthsign', 'bcov_auth', 'fastly_token', 'akamai_token', 'edgeauth', 'ks', 'cip', 'clientip',
+]);
+const EXPIRY = new Set(['e', 'exp', 'expires', 'expiry', 'expire', 'validto', 'ttl', 'nva']);
+const SIGNED = new Set(['s', 'g', 'h', 'md5', 'hash', 'sig', 'signature', 'st', 'nvb']);
+/** Presigned storage, made for anyone holding the link: fetched by the server. */
+const PRESIGNED = new Set(['x-amz-signature', 'x-amz-credential', 'awsaccesskeyid', 'x-goog-signature', 'x-goog-credential', 'googleaccessid']);
+/** File hosts the server fetches as the file itself (transcribe src/stream_source/file_hosts.rs). */
+const FILE_HOST = /(?:^|\.)(?:drive\.google\.com|drive\.usercontent\.google\.com|docs\.google\.com|dropbox\.com|dropboxusercontent\.com|onedrive\.live\.com|1drv\.ms|box\.com|mega\.nz|wetransfer\.com)$/i;
+/** A JSON Web Token: a viewer's signed claims (an IP address, an expiry). */
+const JWT = /^eyJ[\w-]{2,}\.[\w-]{2,}\.[\w-]*$/;
+/** A token written as a path part: Akamai's hdnea=/hdnts=, Bunny's bcdn_token=, Wowza's and Nimble's hashes. */
+const PATH_TOKEN = /^(?:hdnea|hdnts|__token__|bcdn_token|token|tok|wmsauthsign|wowzatokenhash|auth|authtoken|jwt)=|(?:^|[~&])(?:exp|expires)=\d+.*(?:[~&])(?:hmac|sig|signature|hash)=|(?:^|[~&])(?:hmac|sig)=[\w%-]+.*(?:[~&])(?:exp|expires)=\d+/i;
+/** Addresses a player streams that end in no media extension: Smooth Streaming and HLS/DASH by name. */
+const STREAM_PATH = /\.ism\/manifest|\/(?:manifest|playlist|master|index)(?:\.(?:m3u8|mpd))?$/i;
 
-/** A media file or playlist tied to the viewer's session: signed for, or
- *  expiring with, the page that loaded it. Only the tab's sound can be
- *  transcribed from it, never its address. */
-export function isSessionBound(u: string): boolean {
+const isJwt = (v: string) => JWT.test(v) && v.length >= 20;
+/** An opaque token of its own: long, base64url, mixed case and digits (a content hash is hex, an id short). */
+const isOpaqueToken = (v: string) => v.length >= 80 && /^[A-Za-z0-9_-]+$/.test(v) && /[a-z]/.test(v) && /[A-Z]/.test(v) && /\d/.test(v);
+
+/** Why a media address works only for the viewer who loaded it, or null:
+ *  a signed or expiring token in its query, its path (a JWT part, as a
+ *  live TV channel's SSAI playlist carries, a CDN's token path) or an
+ *  opaque token part. Only the tab's sound can be transcribed from it,
+ *  never its address. */
+export function viewerBound(u: string): 'query' | 'path' | null {
   let x: URL;
-  try { x = new URL(u); } catch { return false; }
-  if ((x.protocol !== 'https:' && x.protocol !== 'http:') || !MEDIA_EXT.test(x.pathname)) return false;
+  try { x = new URL(u); } catch { return null; }
+  if (x.protocol !== 'https:' && x.protocol !== 'http:') return null;
+  if (!MEDIA_EXT.test(x.pathname) && !STREAM_PATH.test(x.pathname)) return null;
+  if (FILE_HOST.test(x.hostname)) return null;
   const names = new Set([...x.searchParams.keys()].map((k) => k.toLowerCase()));
-  if ([...names].some((k) => VIEWER_TOKEN.has(k))) return true;
-  if (names.has('policy') && names.has('key-pair-id')) return true;
-  return [...names].some((k) => EXPIRY.has(k)) && [...names].some((k) => SIGNED.has(k));
+  if ([...names].some((k) => PRESIGNED.has(k))) return null;
+  if (/\.blob\.core\.windows\.net$/i.test(x.hostname) && names.has('sv') && names.has('sig')) return null;
+  if ([...names].some((k) => VIEWER_TOKEN.has(k))) return 'query';
+  if (names.has('policy') && names.has('key-pair-id')) return 'query';
+  if ([...names].some((k) => EXPIRY.has(k)) && [...names].some((k) => SIGNED.has(k))) return 'query';
+  if ([...x.searchParams.values()].some(isJwt)) return 'query';
+  const parts = x.pathname.split('/').filter(Boolean).map((p) => { try { return decodeURIComponent(p); } catch { return p; } });
+  if (parts.some((p) => isJwt(p) || PATH_TOKEN.test(p) || isOpaqueToken(p))) return 'path';
+  const ks = parts.findIndex((p) => p.toLowerCase() === 'ks');
+  if (ks >= 0 && (parts[ks + 1]?.length ?? 0) >= 24) return 'path';
+  return null;
+}
+
+/** A media file or playlist tied to the viewer's session (`viewerBound`). */
+export const isSessionBound = (u: string): boolean => viewerBound(u) !== null;
+
+/** A playlist or manifest by its address: HLS, DASH, Smooth Streaming. */
+export function isManifestUrl(u: string): boolean {
+  try {
+    const p = new URL(u).pathname;
+    return MANIFEST.test(p) || /\.ism\/manifest/i.test(p);
+  } catch { return false; }
+}
+
+/** What a playlist's text says it is: `live` (HLS with no end, DASH
+ *  `type="dynamic"`), `vod` (HLS `#EXT-X-ENDLIST` or `PLAYLIST-TYPE:VOD`,
+ *  DASH `static`), `master` (HLS naming its renditions only: its first
+ *  one says), or null (not a playlist, or empty). */
+export function manifestKind(text: string): 'live' | 'vod' | 'master' | null {
+  const t = text.replace(/^\uFEFF/, '').trimStart();
+  if (t.startsWith('#EXTM3U')) {
+    const u = t.toUpperCase();
+    if (u.includes('#EXT-X-ENDLIST') || u.includes('#EXT-X-PLAYLIST-TYPE:VOD')) return 'vod';
+    if (u.includes('#EXT-X-STREAM-INF') && !u.includes('#EXTINF')) return 'master';
+    return u.includes('#EXTINF') || u.includes('#EXT-X-TARGETDURATION') ? 'live' : null;
+  }
+  if (/<MPD[\s>]/i.test(t)) {
+    if (/\btype\s*=\s*["']dynamic["']/i.test(t)) return 'live';
+    return 'vod';
+  }
+  if (/<SmoothStreamingMedia[\s>]/i.test(t)) return /IsLive\s*=\s*["']true["']/i.test(t) ? 'live' : 'vod';
+  return null;
+}
+
+/** A master playlist's first rendition, by its address. */
+export function firstVariant(text: string, base: string): string | null {
+  const lines = text.split(/\r?\n/).map((l) => l.trim());
+  const at = lines.findIndex((l) => l.toUpperCase().startsWith('#EXT-X-STREAM-INF'));
+  const uri = at >= 0 ? lines.slice(at + 1).find((l) => l && !l.startsWith('#')) : undefined;
+  if (!uri) return null;
+  try { return new URL(uri, base).toString(); } catch { return null; }
 }
 
 const kindOfUrl = (u: string): 'audio' | 'video' => (AUDIO_EXT.test(new URL(u).pathname) ? 'audio' : 'video');
