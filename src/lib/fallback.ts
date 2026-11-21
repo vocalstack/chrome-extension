@@ -52,7 +52,28 @@ export function jobWay(job: JobLike | null | undefined): Way {
  *  show a spinner. */
 export function stalled(job: JobLike | null | undefined): boolean {
   if (!job || (job.state !== 'queued' && job.state !== 'fetching' && job.state !== 'stopped')) return false;
-  return (job.attempts ?? 0) >= 2 && !(job.progress?.fetchedBytes ?? 0) && !(job.progress?.pct ?? 0);
+  if ((job.attempts ?? 0) < 2 || (job.progress?.fetchedBytes ?? 0) || (job.progress?.pct ?? 0)) return false;
+  // Only the link's own words: a retry of ours (an engine, a restart) is not the link's.
+  return !!job.error && TAB_WORDS.test(job.error);
+}
+
+/** A link that didn't answer is asked again after a while (our side may
+ *  have been the one cut off); a refusal stays the tab's. */
+const ASK_AGAIN_MS = 10 * 60_000;
+export function askAgain(job: JobLike & { finishedAt?: string | null }, now = Date.now()): boolean {
+  if (job.state !== 'failed') return false;
+  const unreachable = job.errorCode ? job.errorCode === 'link_unreachable' : !!job.error && /could not be reached|did not answer in time|server had a problem|limiting requests|is refusing requests from our servers|is not serving this video to us/i.test(job.error);
+  const at = job.finishedAt ? Date.parse(job.finishedAt) : NaN;
+  return unreachable && Number.isFinite(at) && now - at > ASK_AGAIN_MS;
+}
+
+/** A failure worth offering the tab for in a list (Library, the page's
+ *  toasts), even for a link not playing anywhere now: refused, empty,
+ *  live, no answer. */
+export function tabOffered(job: JobLike | null | undefined): boolean {
+  if (jobWay(job) !== 'tab') return false;
+  const code = job?.errorCode;
+  return code ? ['link_refused', 'link_empty', 'link_live', 'link_unreachable'].includes(code) : true;
 }
 
 /** A finished job that got next to no audio from its link (none kept,
@@ -76,7 +97,7 @@ export function linkWay(url: string, probe: ProbeLike | null, browser: 'live' | 
   if (isSessionBound(url)) return 'tab';
   if (browser === 'live') return 'tab';
   if (!probe) return 'server';
-  if (probe.go) return probe.live ? 'tab' : 'server';
+  if (probe.go) return probe.live && browser !== 'vod' ? 'tab' : 'server';
   if (probe.viewerOnly) return 'tab';
   return probe.reason === undefined || TAB_REASONS.has(probe.reason) ? 'tab' : 'refuse';
 }

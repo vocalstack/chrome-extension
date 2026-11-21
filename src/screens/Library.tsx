@@ -11,7 +11,7 @@ import type { PanelIntent } from '../background/panel';
 import type { Account } from '../lib/auth';
 import { client } from '../lib/client';
 import { isRefusedAccess } from '../lib/errors';
-import { jobWay } from '../lib/fallback';
+import { tabOffered } from '../lib/fallback';
 import { Note, ago, clock, errorText, openApp, useAction, useLoad } from '../ui/kit';
 import { HiAudio, HiBroadcast, HiDoc, HiExternal, HiMic, HiSearch, HiVideo, HiX } from '../ui/icons';
 import { MEETING_HOSTS } from '../lib/live';
@@ -218,7 +218,7 @@ function LibRow({ t, today, onChanged, onPlay, onLive }: { t: Transcription; tod
   const failed = job?.state === 'failed' || job?.state === 'stopped';
   // The link's own failure that its tab plays past: record the tab; a
   // refusal or a live stream fails again if retried, no answer may pass.
-  const tabInstead = jobWay(job) === 'tab';
+  const tabInstead = tabOffered(job);
   const refused = tabInstead && (isRefusedAccess(job?.error) || ['link_refused', 'link_live', 'link_not_found'].includes(job?.errorCode ?? ''));
   const summary = !!(t.live && meetingOfName(t.name) && cur !== 'live' && cur !== 'paused' && t.summary);
   const meta = failed ? (job?.error || jobText(job!)).toUpperCase() : [label, dur ? mmss(dur) : '', job?.state === 'queued' ? jobText(job).toUpperCase() : '', summary ? 'SUMMARY' : ''].filter(Boolean).join(' · ');

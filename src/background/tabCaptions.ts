@@ -54,7 +54,7 @@ export function tellPage(tabId: number, m: PromptMsg) {
 
 /** A video started playing with its sound on, and its plan is the tab's
  *  sound (lib/sites.ts `captionPlan`). */
-export async function autoTab(tab: chrome.tabs.Tab, site: string | null): Promise<'skip' | 'start' | 'offer'> {
+export async function autoTab(tab: chrome.tabs.Tab, site: string | null): Promise<'skip' | 'busy' | 'start' | 'offer'> {
   if (tab.id === undefined || !capturable(tab.url)) return 'skip';
   const origin = originOf(tab.url);
   const busy = !!tabHolder(await listLive().catch(() => []), tab.id);
@@ -62,7 +62,7 @@ export async function autoTab(tab: chrome.tabs.Tab, site: string | null): Promis
   const step = tabStep({ busy, declined, invoked: await wasInvoked(tab.id) });
   if (step === 'start') await startFor(tab, site);
   else if (step === 'offer') await offer(tab, site);
-  return step;
+  return busy ? 'busy' : step;
 }
 
 async function offer(tab: chrome.tabs.Tab, site: string | null) {

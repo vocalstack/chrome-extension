@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { browserManifest, emptyAudio, jobWay, linkWay, stalled } from './fallback.ts';
+import { askAgain, browserManifest, emptyAudio, jobWay, linkWay, stalled, tabOffered } from './fallback.ts';
 import { firstVariant, isManifestUrl, manifestKind, viewerBound } from './media.ts';
 
 const TF1 = 'https://alive-tf1-hls-ssai.cdn-0.diff.tf1.fr/6a1f0c9e2b7d4e8fa3c5b1d9e7f20a4c/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjaXAiOiI5MC4xMi4zNC41NiIsImV4cCI6MTc2Mzc0NDAwMCwiaXNzIjoiZGVsaXZlcnkifQ.c2lnbmF0dXJl/out/v1/TF1.m3u8';
@@ -34,6 +34,10 @@ test('where a link is bound to its viewer: query, path, or not at all', () => {
     ['https://drive.usercontent.google.com/download/talk.mp4?id=1AbC&export=download&token=abc', null],
     ['https://dl.dropboxusercontent.com/scl/fi/abc/talk.mp4?rlkey=xyz&dl=1&token=abc', null],
     ['https://drive.google.com/file/d/1AbCdEf/view', null],
+    ['https://firebasestorage.googleapis.com/v0/b/app.appspot.com/o/talks%2Fa.mp4?alt=media&token=0b6f2c1e-8a3d-4f0e-9c1a-2d5e7f9a1b3c', null],
+    ['https://abcd.supabase.co/storage/v1/object/sign/media/talk.mp4?token=eyJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJtZWRpYS90YWxrLm1wNCJ9.c2ln', null],
+    ['https://abcd.supabase.co/functions/v1/stream/master.m3u8?token=eyJhbGciOiJIUzI1NiJ9.eyJpcCI6IjEuMi4zLjQifQ.c2ln', 'query'],
+    ['https://u.pcloud.link/publink/show/talk.mp4?code=XZabc&token=1', null],
     ['https://www.youtube.com/watch?v=dQw4w9WgXcQ&token=abc', null],
     ['https://news.example.com/video/eyJhbGciOiJIUzI1NiJ9.eyJpZCI6MX0.c2ln', null],
   ];
@@ -89,6 +93,8 @@ test('before anything is made: the server, the tab, or the probe says no', () =>
   assert.equal(linkWay(plain, { go: true, live: true }), 'tab', 'live');
   assert.equal(linkWay('https://cdn.example.com/hls/index.m3u8', { go: true, live: false }, 'live'), 'tab', 'the browser reads it live');
   assert.equal(linkWay('https://cdn.example.com/hls/index.m3u8', { go: true, live: false }, 'vod'), 'server');
+  assert.equal(linkWay('https://cdn.example.com/hls/master.m3u8', { go: true, live: true }, 'vod'), 'server', 'a finished video’s master playlist, read to its rendition here');
+  assert.equal(linkWay(plain, { go: false, viewerOnly: true, reason: 'not_media' }), 'tab', 'a media address answering a token error');
   assert.equal(linkWay(plain, { go: false, viewerOnly: true, reason: 'forbidden' }), 'tab');
   assert.equal(linkWay(plain, { go: false, reason: 'empty' }), 'tab');
   assert.equal(linkWay(plain, { go: false, reason: 'forbidden' }), 'tab');
@@ -135,15 +141,37 @@ test('after a job: each server outcome, the tab or the job as it is', () => {
 });
 
 test('a job that keeps trying with nothing fetched is the tab’s; one fetching is not', () => {
-  assert.equal(stalled({ state: 'queued', attempts: 2, progress: { pct: 0 } }), true);
-  assert.equal(stalled({ state: 'fetching', attempts: 3, progress: { pct: 0, fetchedBytes: 0 } }), true);
-  assert.equal(stalled({ state: 'stopped', attempts: 2, progress: { pct: 0 } }), true);
-  assert.equal(stalled({ state: 'queued', attempts: 1, progress: { pct: 0 } }), false);
-  assert.equal(stalled({ state: 'fetching', attempts: 2, progress: { pct: 0, fetchedBytes: 1024 } }), false);
+  const slow = 'The link could not be reached. Try again later.';
+  const ours = 'A problem on our side interrupted the transcription. It is being retried.';
+  assert.equal(stalled({ state: 'queued', attempts: 2, error: slow, progress: { pct: 0 } }), true);
+  assert.equal(stalled({ state: 'fetching', attempts: 3, error: 'This link’s server had a problem (error 503). Try again later.'.replace('’', "'"), progress: { pct: 0, fetchedBytes: 0 } }), true);
+  assert.equal(stalled({ state: 'stopped', attempts: 2, error: slow, progress: { pct: 0 } }), true);
+  assert.equal(stalled({ state: 'queued', attempts: 2, error: ours, progress: { pct: 0 } }), false, 'our retry (an engine closed early, a restart) is not the link’s');
+  assert.equal(stalled({ state: 'fetching', attempts: 2, progress: { pct: 0 } }), false, 'claimed again after a restart, no error');
+  assert.equal(stalled({ state: 'stopped', attempts: 2, errorCode: 'stopped', error: 'The transcription was stopped.', progress: { pct: 0 } }), false);
+  assert.equal(stalled({ state: 'queued', attempts: 1, error: slow, progress: { pct: 0 } }), false);
+  assert.equal(stalled({ state: 'fetching', attempts: 2, error: slow, progress: { pct: 0, fetchedBytes: 1024 } }), false);
   assert.equal(stalled({ state: 'transcribing', attempts: 2, progress: { pct: 10 } }), false);
   assert.equal(stalled({ state: 'failed', attempts: 3 }), false);
   assert.equal(emptyAudio({ state: 'done', hasAudio: true, source: { durationS: 0.4 } }), true);
   assert.equal(emptyAudio({ state: 'done', hasAudio: false }), true);
   assert.equal(emptyAudio({ state: 'done', hasAudio: true, source: { durationS: 6 } }), false);
   assert.equal(emptyAudio({ state: 'failed', hasAudio: false }), false);
+});
+
+test('a link that did not answer is asked again later; a refusal is not', () => {
+  const now = Date.parse('2026-11-21T12:00:00Z');
+  const at = (min: number) => new Date(now - min * 60_000).toISOString();
+  assert.equal(askAgain({ state: 'failed', errorCode: 'link_unreachable', finishedAt: at(11) }, now), true);
+  assert.equal(askAgain({ state: 'failed', errorCode: 'link_unreachable', finishedAt: at(2) }, now), false);
+  assert.equal(askAgain({ state: 'failed', errorCode: 'link_refused', finishedAt: at(60) }, now), false);
+  assert.equal(askAgain({ state: 'failed', error: 'The link could not be reached. Try again later.', finishedAt: at(30) }, now), true, 'an older server');
+  assert.equal(askAgain({ state: 'failed', errorCode: 'link_unreachable' }, now), false);
+});
+
+test('a list offers the tab only for a refusal, nothing, a live stream or no answer', () => {
+  for (const code of ['link_refused', 'link_empty', 'link_live', 'link_unreachable']) assert.equal(tabOffered({ state: 'failed', errorCode: code }), true, code);
+  for (const code of ['link_not_found', 'link_unreadable', 'link_too_long', 'link_not_shared', 'insufficient_credit']) assert.equal(tabOffered({ state: 'failed', errorCode: code }), false, code);
+  assert.equal(tabOffered({ state: 'failed', error: 'This link refused access (error 403). It may be private or need a sign-in.' }), true);
+  assert.equal(tabOffered({ state: 'done' }), false);
 });

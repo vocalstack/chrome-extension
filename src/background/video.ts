@@ -15,7 +15,7 @@ import { advised, checkLink } from '../lib/linkCheck';
 import { envOfPage, isOwn, playerState, shareCode, sharedJob, type PlayerState } from '../lib/shared';
 import { isSessionBound } from '../lib/media';
 import { BROWSER_ONLY } from '../lib/errors';
-import { browserManifest, jobWay, linkWay, stalled } from '../lib/fallback';
+import { askAgain, browserManifest, jobWay, linkWay, stalled } from '../lib/fallback';
 import { noteDone, noteFailed } from '../lib/rate';
 
 export interface VideoIds { transcriptionId: string }
@@ -129,7 +129,12 @@ function idsFor(vs: VocalStack, key: string, req: { url: string; title?: string 
         // on it is stopped, then the video is transcribed again.
         if (t?.job && !TERMINAL.has(t.job.state)) await vs.transcriptions.stop(ids.transcriptionId).catch(() => {});
         ids = null;
-      } else if (t.job && (jobWay(t.job) === 'tab' || stalled(t.job))) {
+      } else if (t.job && stalled(t.job)) {
+        // Retried and retried with nothing fetched: stopped, so it never
+        // finishes later as a second copy beside the tab's.
+        if (t.job.state !== 'stopped') await vs.transcriptions.stop(ids.transcriptionId).catch(() => {});
+        throw new RpcError(BROWSER_ONLY, LINK_REFUSED);
+      } else if (t.job && jobWay(t.job) === 'tab' && !askAgain(t.job)) {
         // The link plays only in the viewer's browser: run again, it fails again.
         throw new RpcError(BROWSER_ONLY, LINK_REFUSED);
       } else if (t.job && (t.job.state === 'failed' || t.job.state === 'stopped')) {
@@ -147,7 +152,7 @@ function idsFor(vs: VocalStack, key: string, req: { url: string; title?: string 
       const way = linkWay(req.url, c.go ? { go: true, live: c.live } : { go: false, reason: c.reason, viewerOnly: c.viewerOnly }, browser);
       // A live stream has no whole file to fetch: never a job that can only
       // fail (captions take the tab's sound instead, as for any refusal).
-      if ((c.go && c.live) || browser === 'live') throw new RpcError('This is a live stream. Use Live Transcription to transcribe it as it plays.', LINK_REFUSED);
+      if ((c.go && c.live && browser !== 'vod') || browser === 'live') throw new RpcError('This is a live stream. Use Live Transcription to transcribe it as it plays.', LINK_REFUSED);
       if (!c.go) throw new RpcError(way === 'tab' && c.viewerOnly ? BROWSER_ONLY : advised(c), LINK_REFUSED);
       if (way === 'tab') throw new RpcError(BROWSER_ONLY, LINK_REFUSED);
       const t: Transcription = await vs.transcriptions.createFromUrl(req.url, { name: req.title || null });

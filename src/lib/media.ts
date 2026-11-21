@@ -60,7 +60,9 @@ const SIGNED = new Set(['s', 'g', 'h', 'md5', 'hash', 'sig', 'signature', 'st', 
 /** Presigned storage, made for anyone holding the link: fetched by the server. */
 const PRESIGNED = new Set(['x-amz-signature', 'x-amz-credential', 'awsaccesskeyid', 'x-goog-signature', 'x-goog-credential', 'googleaccessid']);
 /** File hosts the server fetches as the file itself (transcribe src/stream_source/file_hosts.rs). */
-const FILE_HOST = /(?:^|\.)(?:drive\.google\.com|drive\.usercontent\.google\.com|docs\.google\.com|dropbox\.com|dropboxusercontent\.com|onedrive\.live\.com|1drv\.ms|box\.com|mega\.nz|wetransfer\.com)$/i;
+const FILE_HOST = /(?:^|\.)(?:drive\.google\.com|drive\.usercontent\.google\.com|docs\.google\.com|photos\.google\.com|photos\.app\.goo\.gl|dropbox\.com|dropboxusercontent\.com|onedrive\.live\.com|1drv\.ms|sharepoint\.com|box\.com|boxcloud\.com|mega\.nz|wetransfer\.com|we\.tl|pcloud\.com|pcloud\.link|zoom\.us|icloud\.com|frame\.io|f\.io|firebasestorage\.googleapis\.com|firebasestorage\.app)$/i;
+/** Storage links signed for anyone holding them (Supabase's signed URLs). */
+const SIGNED_STORAGE = /\.supabase\.co$/i;
 /** A JSON Web Token: a viewer's signed claims (an IP address, an expiry). */
 const JWT = /^eyJ[\w-]{2,}\.[\w-]{2,}\.[\w-]*$/;
 /** A token written as a path part: Akamai's hdnea=/hdnts=, Bunny's bcdn_token=, Wowza's and Nimble's hashes. */
@@ -83,6 +85,7 @@ export function viewerBound(u: string): 'query' | 'path' | null {
   if (x.protocol !== 'https:' && x.protocol !== 'http:') return null;
   if (!MEDIA_EXT.test(x.pathname) && !STREAM_PATH.test(x.pathname)) return null;
   if (FILE_HOST.test(x.hostname)) return null;
+  if (SIGNED_STORAGE.test(x.hostname) && /^\/storage\/v1\/object\/(?:sign|public)\//.test(x.pathname)) return null;
   const names = new Set([...x.searchParams.keys()].map((k) => k.toLowerCase()));
   if ([...names].some((k) => PRESIGNED.has(k))) return null;
   if (/\.blob\.core\.windows\.net$/i.test(x.hostname) && names.has('sv') && names.has('sig')) return null;

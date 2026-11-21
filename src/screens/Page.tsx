@@ -263,12 +263,20 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
     // The site's own title first: an embed's row has the page's.
     return { url: r.url, name: ((v?.ok ? aboutOf(v).title : undefined) || r.title || host(r.url) || 'From the web').slice(0, 120), live: isLive(r) };
   };
+  /** A live stream this tab itself plays (its player's, not one the server
+   *  found on the page): its sound is recorded from the tab, as only the
+   *  viewer may be let in to it (a TV channel's playlist bound to the
+   *  viewer's address or country). */
+  const playsHere = (r: Row) => isLive(r) && r.from !== 'server' && (!!r.playing || r.evidence === 'network' || r.evidence === 'element');
   const transcribe = async () => {
     if (!chosen.length || !mayRecord) return;
     setStarting(true);
     try {
-      await transcribeLinks(chosen.map(linkOf));
+      const here = chosen.filter(playsHere);
+      const links = chosen.filter((r) => !here.includes(r));
+      if (links.length) await transcribeLinks(links.map(linkOf));
       setSel(new Set());
+      if (here.length && !recording) { await startMeeting.run('video'); return; }
       onLibrary();
     } finally {
       setStarting(false);
