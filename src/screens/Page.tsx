@@ -276,7 +276,10 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
       const links = chosen.filter((r) => !here.includes(r));
       if (links.length) await transcribeLinks(links.map(linkOf));
       setSel(new Set());
-      if (here.length && !recording) { await startMeeting.run('video'); return; }
+      if (here.length) {
+        if (recording) onLive(); else await startMeeting.run('video');
+        return;
+      }
       onLibrary();
     } finally {
       setStarting(false);

@@ -18,7 +18,10 @@ import { BROWSER_ONLY } from '../lib/errors';
 import { askAgain, browserManifest, jobWay, linkWay, stalled } from '../lib/fallback';
 import { noteDone, noteFailed } from '../lib/rate';
 
-export interface VideoIds { transcriptionId: string }
+export interface VideoIds { transcriptionId: string; tabAt?: number }
+
+/** How long a link whose job this extension stopped for stalling stays the tab's before it is tried again. */
+const TAB_FOR_MS = 10 * 60_000;
 
 /** The link check refused the address: nothing was made from it. */
 export const LINK_REFUSED = 'link_refused';
@@ -115,6 +118,8 @@ function idsFor(vs: VocalStack, key: string, req: { url: string; title?: string 
   if (p) return p;
   p = (async () => {
     let ids = (await known(key)) ?? (await onServer(vs, req.url, true));
+    if (ids?.tabAt && Date.now() - ids.tabAt < TAB_FOR_MS) throw new RpcError(BROWSER_ONLY, LINK_REFUSED);
+    if (ids?.tabAt) ids = { transcriptionId: ids.transcriptionId };
     if (ids) {
       // Gone (404) is made again; blocked, or a server that couldn't say,
       // is never taken for gone (that would make a second one).
@@ -133,6 +138,7 @@ function idsFor(vs: VocalStack, key: string, req: { url: string; title?: string 
         // Retried and retried with nothing fetched: stopped, so it never
         // finishes later as a second copy beside the tab's.
         if (t.job.state !== 'stopped') await vs.transcriptions.stop(ids.transcriptionId).catch(() => {});
+        await remember(key, { transcriptionId: ids.transcriptionId, tabAt: Date.now() });
         throw new RpcError(BROWSER_ONLY, LINK_REFUSED);
       } else if (t.job && jobWay(t.job) === 'tab' && !askAgain(t.job)) {
         // The link plays only in the viewer's browser: run again, it fails again.
@@ -198,6 +204,7 @@ export async function transcribeVideo(vs: VocalStack, req: { url: string; title?
     if (stalled(job)) {
       inflight.delete(key);
       await vs.transcriptions.stop(ids.transcriptionId).catch(() => {});
+      await remember(key, { transcriptionId: ids.transcriptionId, tabAt: Date.now() });
       throw new RpcError(BROWSER_ONLY, LINK_REFUSED);
     }
     await onProgress({ progress: (job.progress?.pct ?? 0) / 100, ...ids });

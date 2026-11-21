@@ -25,7 +25,7 @@ const TAB_CODES = new Set(['link_refused', 'link_empty', 'link_live', 'link_not_
 
 /** An older server's words for the same failures (transcribe
  *  src/domain/public_error.rs, src/stream_source/sites.rs `refusal`). */
-const TAB_WORDS = /refused access|asks for a sign-in|needs a sign-in|(?:post|video) is private|only on the websites its owner chose|in the region our servers|returned nothing to transcribe|this is a live stream|link is live|could not be reached|did not answer in time|took too long to download|nothing is at this link|that's a web page|that’s a web page|isn't audio or video we can read|isn’t audio or video we can read|is refusing requests from our servers|is not serving this video to us|redirects in a way|answered with an error|server had a problem|limiting requests/i;
+const TAB_WORDS = /refused access|asks for a sign-in|needs a sign-in|(?:post|video) is private|only on the websites its owner chose|in the region our servers|returned nothing to transcribe|this is a live stream|link is live|could not be reached|did not answer in time|nothing is at this link|that's a web page|that’s a web page|isn't audio or video we can read|isn’t audio or video we can read|is refusing requests from our servers|is not serving this video to us|redirects in a way|answered with an error|server had a problem|limiting requests/i;
 
 /** The probe's reasons (`LinkProbe.reason`) the tab can do better on. */
 const TAB_REASONS = new Set<Reason>(['forbidden', 'empty', 'unreachable', 'not_found', 'web_page', 'copy_protected', 'site_not_fetched', 'unknown']);
