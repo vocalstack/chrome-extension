@@ -49,8 +49,7 @@ export default function PlayerView({ target, env, onBack }: { target: PlayTarget
   return (
     <>
       <div className="hd">
-        <button type="button" className="hd__back" aria-label="Back to Library" onClick={onBack}><HiBack /></button>
-        <div className="hd__title">Library</div>
+        <button type="button" className="hd__goback" aria-label="Back to Library" onClick={onBack}><span className="hd__back"><HiBack /></span><span className="hd__title">Library</span></button>
         <div className="hd__end">
           <a className="hd__link" href={new URL(target.path, env.app).toString()} target="_blank" rel="noopener" onClick={() => void noteUsed()} aria-label={`Open ${target.name} in Dashboard, in a new tab`}>Open in Dashboard<HiExternal /></a>
         </div>

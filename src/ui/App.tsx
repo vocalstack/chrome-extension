@@ -161,8 +161,8 @@ function Header({ view, env, rec, account, onView, onBack }: { view: View; env: 
       <div className="hd">
         {view === 'settings' ? (
           <>
-            <button type="button" className="hd__back" aria-label="Back" onClick={onBack}><HiBack /></button>
-            <div className="hd__title">Settings</div>
+            {/* One button: the arrow and the word beside it both go back. */}
+            <button type="button" className="hd__goback" aria-label="Back, from Settings" onClick={onBack}><span className="hd__back"><HiBack /></span><span className="hd__title">Settings</span></button>
           </>
         ) : (
           <>
