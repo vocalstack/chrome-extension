@@ -61,6 +61,11 @@ export default defineConfig({
   vite: () => ({
     plugins: [noRemoteScripts],
     define: { 'import.meta.env.VS_AHEAD_DEBUG': JSON.stringify(AHEAD_DEBUG) },
+    // The CSS is not minified: the minifier drops the standard
+    // backdrop-filter and keeps only -webkit-backdrop-filter, which Chrome
+    // ignores, so the player's bottom bar lost its blur and the transcript
+    // showed through it. Unminified is 5 KB more.
+    build: { cssMinify: false },
     resolve: {
       alias: {
         // The SDK imports 'ws' only under Node; a browser has WebSocket.
