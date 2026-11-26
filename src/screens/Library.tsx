@@ -3,17 +3,20 @@
  *  or on a line a search found, plays it here in the panel's player
  *  (lib/play.ts, screens/Player.tsx); each row's small arrow opens it in
  *  the Dashboard instead. A failed one can be tried again, one waiting to
- *  be trimmed opens in the dashboard. */
+ *  be trimmed opens in the dashboard. A row's other actions (rename, tag,
+ *  lock, broadcast, archive, delete) are in its menu: the folder button,
+ *  or a right-click (screens/library/RowMenu.tsx). */
 
-import { useEffect, useRef, useState } from 'react';
-import type { SearchHit, Transcription } from '@vocalstack/contract';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { Broadcast, SearchHit, Tag, Transcription } from '@vocalstack/contract';
 import type { PanelIntent } from '../background/panel';
 import type { Account } from '../lib/auth';
 import { client } from '../lib/client';
 import { isRefusedAccess } from '../lib/errors';
 import { tabOffered } from '../lib/fallback';
 import { Note, ago, clock, errorText, openApp, useAction, useLoad } from '../ui/kit';
-import { HiAudio, HiBroadcast, HiDoc, HiExternal, HiMic, HiSearch, HiVideo, HiX } from '../ui/icons';
+import { HiAudio, HiBroadcast, HiDoc, HiExternal, HiFolderCog, HiLock, HiMic, HiSearch, HiVideo, HiX } from '../ui/icons';
+import { RowAskDialog, RowMenu, tagColor, type MenuAt, type RowAsk } from './library/RowMenu';
 import { MEETING_HOSTS } from '../lib/live';
 import { hitPath, txPath } from '../background/page/paths';
 import { jobPct, jobText } from './page/tracker';
@@ -178,33 +181,114 @@ function Recent({ own, onPlay, onLive }: { own: boolean; onPlay: (t: PlayTarget)
     return () => clearInterval(t);
   }, [working, reload]);
 
+  /* Row actions. What a row was just made (renamed, locked, tagged) shows
+     at once, and is the list's again once the list is read anew. */
+  const [menu, setMenu] = useState<MenuAt | null>(null);
+  const [ask, setAsk] = useState<RowAsk | null>(null);
+  const [edits, setEdits] = useState<Record<string, Partial<Transcription>>>({});
+  const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
+  const [actError, setActError] = useState('');
+  const [tags, setTags] = useState<Tag[] | undefined>();
+  const [casts, setCasts] = useState<Broadcast[] | undefined>();
+  const rows = (data ?? []).filter((t) => !gone.has(t.id)).map((t) => (edits[t.id] ? { ...t, ...edits[t.id] } : t));
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const closeAsk = useCallback(() => setAsk(null), []);
+
+  const loadTags = async () => {
+    const list = await (await client()).tags.list();
+    setTags([...list].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })));
+    return list;
+  };
+  const openMenu = (at: MenuAt) => {
+    setMenu(at);
+    setActError('');
+    void loadTags().catch(() => setTags((was) => was ?? []));
+    void client().then((vs) => vs.broadcasts.list()).then(setCasts, () => setCasts((was) => was ?? []));
+  };
+  /** Shown at once; the list is read again once the call is done. */
+  const act = async (id: string, patch: Partial<Transcription> | 'gone', call: (vs: Awaited<ReturnType<typeof client>>) => Promise<unknown>) => {
+    if (patch === 'gone') setGone((was) => new Set(was).add(id));
+    else setEdits((was) => ({ ...was, [id]: { ...was[id], ...patch } }));
+    try {
+      await call(await client());
+    } catch (e) {
+      setActError(errorText(e));
+      if (patch === 'gone') setGone((was) => { const n = new Set(was); n.delete(id); return n; });
+    }
+    await reload();
+    if (patch !== 'gone') setEdits((was) => { const { [id]: _, ...rest } = was; return rest; });
+  };
+  const toggleTag = (t: Transcription, tag: Tag) => {
+    const had = !!t.tags?.some((x) => x.id === tag.id);
+    const next = had ? (t.tags ?? []).filter((x) => x.id !== tag.id) : [...(t.tags ?? []), { id: tag.id, name: tag.name, color: tag.color }];
+    void act(t.id, { tags: next }, (vs) => vs.tags.tagTranscriptions(tag.id, had ? { remove: [t.id] } : { add: [t.id] }));
+  };
+  /** A new tag, put on this transcription (one of that name: that one). */
+  const newTag = async (t: Transcription, name: string) => {
+    try {
+      const same = (tags ?? []).find((x) => x.name.toLowerCase() === name.toLowerCase());
+      if (same) { if (!t.tags?.some((x) => x.id === same.id)) toggleTag(t, same); return; }
+      const made = await (await client()).tags.create({ name });
+      await loadTags().catch(() => {});
+      toggleTag(t, made);
+    } catch (e) {
+      setActError(errorText(e));
+    }
+  };
+
   if (error) return <Note kind="bad">{error} <button type="button" className="pg-link" onClick={() => void reload()}>Try again</button></Note>;
   if (!data) return loading ? <div className="empty"><span className="spin" style={{ margin: '0 auto' }} /></div> : null;
-  if (!data.length) return (
+  if (!rows.length && !data.length) return (
     <div className="card2 empty2">
       <span className="round round--lg"><HiDoc /></span>
       <div className="empty2__text">No transcriptions yet. Transcribe something from the Page tab, upload a file, or record in Live.{own && <><br />This sign-in sees only what the extension made.</>}</div>
     </div>
   );
   const groups: { label: string; items: Transcription[] }[] = [];
-  for (const t of data) {
+  for (const t of rows) {
     const label = dayOf(t.startedAt ?? t.createdAt);
     const g = groups.find((x) => x.label === label);
     if (g) g.items.push(t); else groups.push({ label, items: [t] });
   }
+  const menuRow = menu ? rows.find((t) => t.id === menu.id) : undefined;
+  const askRow = ask ? rows.find((t) => t.id === ask.id) : undefined;
+  const menuPlay = menuRow ? playOf(menuRow).target : undefined;
   return (
     <>
+      {actError && <Note kind="bad">{actError} <button type="button" className="pg-link" onClick={() => setActError('')}>Dismiss</button></Note>}
+      {menu && menuRow && (
+        <RowMenu at={menu} t={menuRow} tags={tags} broadcasts={casts} onClose={closeMenu}
+          onPlay={menuPlay ? () => { setMenu(null); onPlay(menuPlay); } : undefined}
+          onDashboard={() => { setMenu(null); void openApp(txPath(menuRow)); }}
+          onLock={(on) => { setMenu(null); void act(menuRow.id, { locked: on }, (vs) => vs.transcriptions.update(menuRow.id, { locked: on })); }}
+          onArchive={() => { setMenu(null); void act(menuRow.id, 'gone', (vs) => vs.transcriptions.archive(menuRow.id)); }}
+          onAsk={(a) => { setMenu(null); setAsk(a); }}
+          onToggleTag={(tag) => toggleTag(menuRow, tag)}
+          onNewTag={(name) => void newTag(menuRow, name)} />
+      )}
+      {ask && askRow && (
+        <RowAskDialog ask={ask} t={askRow} onClose={closeAsk}
+          onRename={(name) => { setAsk(null); if (name && name !== askRow.name) void act(askRow.id, { name }, (vs) => vs.transcriptions.update(askRow.id, { name })); }}
+          // For good: archived, then purged, as the Dashboard's "Delete now…" does.
+          onDelete={() => { setAsk(null); void act(askRow.id, 'gone', async (vs) => { await vs.transcriptions.archive(askRow.id); await vs.transcriptions.purge(askRow.id); }); }}
+          onBroadcast={(to) => {
+            setAsk(null);
+            const from = askRow.broadcasts?.[0];
+            if (to) void act(askRow.id, {}, (vs) => vs.transcriptions.attachBroadcast(askRow.id, to));
+            else if (from) void act(askRow.id, {}, (vs) => vs.transcriptions.detachBroadcast(askRow.id, from.id));
+          }} />
+      )}
       {groups.map((g) => (
         <div key={g.label} className="card2" style={{ padding: '12px 14px 2px' }}>
           <div className="ey-row ey--line"><span className="ey">{g.label}</span>{g === groups[0] && own && <span className="ey">MADE BY THE EXTENSION</span>}</div>
-          <div style={{ marginTop: 4 }}>{g.items.map((t) => <LibRow key={t.id} t={t} today={g.label === 'TODAY'} onChanged={() => void reload()} onPlay={onPlay} onLive={onLive} />)}</div>
+          <div style={{ marginTop: 4 }}>{g.items.map((t) => <LibRow key={t.id} t={t} today={g.label === 'TODAY'} menuOpen={menu?.id === t.id} onMenu={openMenu} onChanged={() => void reload()} onPlay={onPlay} onLive={onLive} />)}</div>
         </div>
       ))}
     </>
   );
 }
 
-function LibRow({ t, today, onChanged, onPlay, onLive }: { t: Transcription; today: boolean; onChanged: () => void; onPlay: (t: PlayTarget) => void; onLive: () => void }) {
+function LibRow({ t, today, menuOpen, onMenu, onChanged, onPlay, onLive }: { t: Transcription; today: boolean; menuOpen: boolean; onMenu: (at: MenuAt) => void; onChanged: () => void; onPlay: (t: PlayTarget) => void; onLive: () => void }) {
   const retry = useAction();
   const { label, Icon } = sourceOf(t);
   // Known once the fetch has it; one that won't load, the source's icon.
@@ -234,12 +318,13 @@ function LibRow({ t, today, onChanged, onPlay, onLive }: { t: Transcription; tod
   const play = playOf(t);
   const start = play.target ? () => onPlay(play.target) : undefined;
   return (
-    <div className="lib-row">
+    <div className={`lib-row${menuOpen ? ' lib-row--menu' : ''}`} onContextMenu={(e) => { e.preventDefault(); onMenu({ id: t.id, x: e.clientX, y: e.clientY, above: e.clientY }); }}>
       <div className={`lrow${start ? ' lrow--click' : ''}`} {...(start ? { role: 'button', tabIndex: 0, 'aria-label': `Play ${t.name}`, onClick: start, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' && e.target === e.currentTarget) start(); } } : { title: NO_PLAY_TEXT[play.why!] })}>
         <span className={`round${pic ? ' round--pic' : ''}`}>{pic ? <img src={pic} alt="" referrerPolicy="no-referrer" onError={() => setBadPic(pic)} /> : <Icon />}</span>
         <div className="lrow__main">
-          <div className="lrow__title" title={t.name}>{t.name}</div>
+          <div className="lrow__title" title={t.name}>{t.locked && <HiLock className="lib-lock" width={12} height={12} aria-label="Locked" />}{t.name}</div>
           <div className="lrow__meta" style={failed ? { color: 'var(--bad)' } : undefined} title={meta}>{meta}</div>
+          {!!t.tags?.length && <div className="lib-tags">{t.tags.map((x) => <span key={x.id} className="lib-tag"><i style={{ background: tagColor(x.color) }} />{x.name}</span>)}</div>}
           {working && <div className="lrow__bar"><i style={{ width: `${pct ?? 0}%` }} /></div>}
           {(failed || job?.state === 'cropping') && (
             <div className="lrow__acts" onClick={(e) => e.stopPropagation()}>
@@ -251,6 +336,8 @@ function LibRow({ t, today, onChanged, onPlay, onLive }: { t: Transcription; tod
           )}
         </div>
         {chip}
+        <button type="button" className="file__x lib-dash lib-more" title="More actions" aria-label={`More actions for ${t.name}`} aria-haspopup="menu" aria-expanded={menuOpen}
+          onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); onMenu({ id: t.id, x: r.right - 232, y: r.bottom + 4, above: r.top - 4 }); }}><HiFolderCog width={16} height={16} /></button>
         <DashButton name={t.name} onClick={open} />
       </div>
     </div>

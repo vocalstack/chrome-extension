@@ -17,6 +17,7 @@ export function TipRow({ children }: { children: ReactNode }) {
   const [tip, setTip] = useState<Tip | null>(null);
   /** The bubble's left edge, kept inside the row once it is measured. */
   const [left, setLeft] = useState<number | null>(null);
+  const [bubbleW, setBubbleW] = useState(0);
   const show: Show = (el, head, sub, right, up) => {
     const r = row.current?.getBoundingClientRect();
     if (!r) return;
@@ -29,18 +30,23 @@ export function TipRow({ children }: { children: ReactNode }) {
     if (!tip || !bubble.current || !row.current) return;
     const w = bubble.current.offsetWidth;
     const rowW = row.current.offsetWidth;
-    // Aligned with the control's left (or right) edge, then kept in the row.
-    const want = tip.right ? tip.left + tip.width - w : tip.left;
+    // Centred on the control, then kept in the row.
+    const want = tip.left + tip.width / 2 - w / 2;
     setLeft(Math.max(EDGE, Math.min(want, rowW - EDGE - w)));
+    setBubbleW(w);
   }, [tip]);
   const arrow = tip && left !== null ? Math.round(tip.left + tip.width / 2 - left - 5.5) : 0;
+  // The words lean to the side the arrow is on: by where the bubble ended
+  // up beside its control, not by which control it is (the tabs move).
+  const at = bubbleW ? (arrow + 5.5) / bubbleW : 0.5;
+  const align = at < 0.34 ? 'left' : at > 0.66 ? 'right' : 'center';
   return (
     <Ctx.Provider value={{ show, hide }}>
       <div className="tiprow" ref={row} onMouseLeave={hide}>
         {children}
         {tip && (
           <div ref={bubble} role="tooltip" className={`tip${tip.up ? ' tip--up' : ''}`}
-            style={{ top: Math.round(tip.up ? tip.top - 7 : tip.bottom + 7), left: left ?? 0, visibility: left === null ? 'hidden' : undefined, textAlign: tip.right ? 'right' : 'left' }}>
+            style={{ top: Math.round(tip.up ? tip.top - 7 : tip.bottom + 7), left: left ?? 0, visibility: left === null ? 'hidden' : undefined, textAlign: align }}>
             <span className="tip__arrow" style={{ left: arrow }} />
             <span className="tip__head">{tip.head}</span>
             {tip.sub && <><br /><span className="tip__sub">{tip.sub}</span></>}
@@ -52,8 +58,9 @@ export function TipRow({ children }: { children: ReactNode }) {
 }
 
 /** Hover and keyboard-focus handlers that show `head` (and `sub`) for a
- *  control: under it, or over it with `up`; text aligned right with
- *  `right`. A press hides it. */
+ *  control: under it, or over it with `up`. Where it sits and how its
+ *  words are aligned follow where the control is in the row (`right` is
+ *  no longer needed). A press hides it. */
 export function useTip() {
   const c = useContext(Ctx);
   return (head: string, sub?: string, opts: { right?: boolean; up?: boolean } = {}) => {

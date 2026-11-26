@@ -369,6 +369,13 @@ label.item--click{cursor:pointer}
 .cta svg{width:17px;height:17px}
 .cta--soft{background:var(--fill-06);color:var(--ink-96)}
 .cta--soft:hover:not(:disabled){background:var(--fill-10);filter:none}
+/* Sign in → More ways to sign in: the ways, one row each. */
+.signin-more{display:flex;flex-direction:column;border-radius:12px;background:var(--fill-06);overflow:hidden}
+.signin-more__row{display:flex;align-items:center;gap:11px;min-height:44px;padding:8px 14px;border:0;background:none;color:var(--ink-96);font:inherit;font-size:13.5px;font-weight:500;text-align:left;cursor:pointer}
+.signin-more__row+.signin-more__row{border-top:1px solid var(--hair)}
+.signin-more__row:hover:not(:disabled){background:var(--fill-06)}
+.signin-more__row:disabled{opacity:.5;cursor:default}
+.signin-more__row svg{flex:none;width:17px;height:17px;color:var(--ink-62)}
 .cta--live{height:48px;background:var(--live);color:#1b0f0e}
 .cta--stop{height:48px;background:var(--conf-low);color:var(--conf-low-ink)}
 .cta--signout{background:var(--fill-06);color:var(--conf-low)}
@@ -680,19 +687,75 @@ label.item--click{cursor:pointer}
 .search2 input::-webkit-search-cancel-button{display:none}
 .search2:focus-within{box-shadow:0 0 0 1.5px var(--brand)}
 .lib-row .lrow{border-bottom:1px solid var(--hair)}
+/* The last row of a card has no line under it. */
+.lib-row:last-child .lrow{border-bottom:0}
+/* A hovered Library row is lit to the card's edges (the card pads 14px at
+   the sides, 2px under its last row), not only behind its own text. */
+.lib-row .lrow--click,.lib-hit{position:relative}
+.lib-row .lrow--click:hover,.lib-hit:hover{background:none}
+.lib-row .lrow--click:hover::before,.lib-hit:hover::before{content:"";position:absolute;inset:0 -14px;background:var(--fill-04);pointer-events:none}
+.lib-row:last-child .lrow--click:hover::before,.lib-hit:last-child:hover::before{bottom:-2px;border-radius:0 0 14px 14px}
+.lib-row .lrow>*,.lib-hit>*{position:relative}
 /* A list card's eyebrow (Library, Your Speakers) sits on a full text line
    in the design: 8px above the 10px label, 2px below. */
 .ey--line{padding:8px 0 2px;line-height:10px}
-/* The design's lists keep the hairline under their last row too. */
-[data-screen-label="Library"] .lrow:last-child,[data-screen-label="Broadcasts"] .lrow:last-child,[data-screen-label="Speakers"] .lrow:last-child,[data-screen-label="Settings"] .pref:last-child{border-bottom:1px solid var(--hair)}
+/* No list keeps a hairline under its last row (Alex, 2026-11-26; the
+   design had one). */
 
 /* A Library item in the panel's player (screens/Player.tsx): the player
    fills what is left under the bar, and scrolls inside itself. */
 .pv{flex:1;min-height:0;position:relative;overflow:hidden;display:flex;flex-direction:column;line-height:normal}
 .pv>.vsp{flex:1;min-height:0}
+/* The player's bottom bar is 56px tall, and so is Read / Listen; the
+   language button beside it stayed at its own 44px, and sat off-line.
+   (A fix for the player itself; here until it has it.) */
+.pv .vsp .gbottom__bar .vs-lang-chip{min-height:56px;box-sizing:border-box}
 /* A row's way to the Dashboard. */
 .lib-dash{align-self:center;margin-right:-4px;color:var(--ink-35,var(--ink-45))}
 .lib-dash:hover{color:var(--ink-96)}
+/* A row's actions (screens/library/RowMenu.tsx): the folder button shows
+   and the Dashboard arrow show on hover or focus, and where there is no
+   hover (touch) always. */
+.lib-more{margin-right:0}
+.lib-row .lib-dash{opacity:0}
+.lib-row:hover .lib-dash,.lib-row--menu .lib-dash,.lib-row:focus-within .lib-dash{opacity:1}
+@media (hover:none){.lib-row .lib-dash{opacity:1}}
+.lib-lock{display:inline-block;vertical-align:-1px;margin-right:5px;color:var(--ink-45)}
+.lib-tags{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:4px}
+.lib-tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--ink-62);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lib-tag i,.rmenu__dot{flex:none;width:8px;height:8px;border-radius:50%}
+.rmenu-scrim{position:fixed;inset:0;z-index:97}
+.rmenu{position:fixed;width:232px;max-width:calc(100vw - 16px);padding:6px;border-radius:14px;background:var(--vs-surface-raised);border:1px solid var(--line);box-shadow:0 8px 28px rgba(0,0,0,.45)}
+.rmenu__item{width:100%;height:34px;display:flex;align-items:center;gap:11px;padding:0 10px;border:0;border-radius:8px;background:none;color:var(--ink-96);font:inherit;font-size:13.5px;text-align:left;cursor:pointer}
+.rmenu__item:hover:not(:disabled),.rmenu__item:focus-visible{background:var(--fill-08);outline:0}
+.rmenu__item:disabled{opacity:.4;cursor:default}
+.rmenu__icon{flex:none;width:17px;height:17px;display:grid;place-items:center;color:var(--ink-62)}
+.rmenu__icon svg{width:17px;height:17px}
+.rmenu__label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rmenu__item--danger,.rmenu__item--danger .rmenu__icon{color:var(--bad)}
+.rmenu__note{flex:none;font:500 9.5px var(--vs-font-mono);letter-spacing:.08em;color:var(--ink-45)}
+.rmenu__more{flex:none;color:var(--ink-45)}
+.rmenu__check{flex:none;color:var(--brand)}
+.rmenu__sep{height:1px;margin:4px;background:var(--hair)}
+.rmenu__list{max-height:238px;overflow-y:auto;scrollbar-width:none}
+.rmenu__new{height:34px;display:flex;align-items:center;gap:11px;padding:0 10px}
+.rmenu__new input{flex:1;min-width:0;border:0;outline:0;background:none;color:var(--ink-96);font:inherit;font-size:13.5px}
+.rmenu__new input::placeholder{color:var(--ink-45)}
+.rmenu__empty{padding:8px 10px;font-size:12px;color:var(--ink-45)}
+.rask-scrim{position:fixed;inset:0;z-index:98;background:rgba(5,6,21,.7);display:flex;align-items:center;justify-content:center;padding:12px}
+.rask{width:340px;max-width:100%;padding:18px;border-radius:16px;background:var(--vs-surface-raised);border:1px solid var(--line);box-shadow:0 10px 36px rgba(0,0,0,.45);display:flex;flex-direction:column;gap:10px}
+.rask__title{font-size:15px;font-weight:600;overflow-wrap:anywhere}
+.rask__body{font-size:12.5px;line-height:1.45;color:var(--ink-62)}
+.rask__input{height:38px;padding:0 12px;border:1px solid transparent;border-radius:10px;background:var(--fill-06);color:var(--ink-96);font:inherit;font-size:13.5px;outline:0}
+.rask__input:focus{border-color:var(--brand)}
+.rask__acts{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}
+.rask__btn{height:32px;padding:0 14px;border:0;border-radius:9px;background:var(--fill-08);color:var(--ink-96);font:inherit;font-size:13px;font-weight:500;cursor:pointer}
+.rask__btn:hover{background:var(--fill-14)}
+.rask__btn--go{background:var(--btn);color:var(--btn-fg);font-weight:600}
+.rask__btn--go:hover{background:var(--btn-hover)}
+.rask__btn--danger{background:var(--conf-low);color:var(--conf-low-ink);font-weight:600}
+.rask__btn--danger:hover{background:color-mix(in oklab,var(--conf-low) 88%,white)}
+.rask__btn:disabled{opacity:.5;cursor:default}
 
 /* A YouTube link's picture is YouTube's own embed, and YouTube refuses to
    play in a page that sends no http Referer, which an extension page

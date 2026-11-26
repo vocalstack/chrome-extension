@@ -1,5 +1,7 @@
 /** Signed out (design 3): the logo, Sign in with VocalStack (One-click
- *  Connect), or Use an API Key (a field, then Connect). The environment
+ *  Connect), or More ways to sign in, as the iPhone app's: with your
+ *  company (the same Connect, whose sign-in page has SSO) or with an API
+ *  key (a field, then Connect). The environment
  *  switch is not in the design: Shift-click the logo to show it (it shows
  *  by itself outside production, so the way back is always there). */
 
@@ -7,6 +9,7 @@ import { useState } from 'react';
 import { rpc } from '../lib/rpc';
 import { ENVS, type Env, type EnvName } from '../lib/env';
 import { Note, useAction } from '../ui/kit';
+import { HiBuilding, HiKey } from '../ui/icons';
 import logoUrl from '../styles/vocalstack-logo.svg';
 import logoDarkUrl from '../styles/vocalstack-logo-dark.svg';
 
@@ -14,6 +17,7 @@ export function SignIn({ env }: { env: Env | null }) {
   const connect = useAction();
   const key = useAction();
   const [showKey, setShowKey] = useState(false);
+  const [more, setMore] = useState(false);
   const [value, setValue] = useState('');
   const [bad, setBad] = useState(false);
   const [showEnv, setShowEnv] = useState(false);
@@ -34,7 +38,14 @@ export function SignIn({ env }: { env: Env | null }) {
       {!showKey ? (
         <div className="welcome2__acts">
           <button type="button" className="cta" aria-busy={connect.busy || undefined} disabled={connect.busy} onClick={() => connect.run(() => rpc('auth.connect'))}>{connect.busy && <span className="spin" />}Sign in with VocalStack</button>
-          <button type="button" className="cta cta--soft" onClick={() => { setShowKey(true); connect.setError(''); }}>Use an API Key</button>
+          {!more ? (
+            <button type="button" className="cta cta--soft" aria-expanded={false} onClick={() => setMore(true)}>More ways to sign in</button>
+          ) : (
+            <div className="signin-more" role="group" aria-label="More ways to sign in">
+              <button type="button" className="signin-more__row" disabled={connect.busy} onClick={() => connect.run(() => rpc('auth.connect'))}><HiBuilding />Sign in with your company (SSO)</button>
+              <button type="button" className="signin-more__row" onClick={() => { setShowKey(true); connect.setError(''); }}><HiKey />Sign in with an API key (developers)</button>
+            </div>
+          )}
           {connect.error && <Note kind={/cancel/i.test(connect.error) ? undefined : 'bad'}>{connect.error}</Note>}
         </div>
       ) : (
