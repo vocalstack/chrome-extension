@@ -1,6 +1,8 @@
 /** What a page plays or links to, found by the content script in every
  *  frame (`scanDocument`) and gathered by the background (`page.scan`). */
 
+import { placeholderTitle, readTitle } from './title.ts';
+
 export type MediaKind = 'video' | 'audio' | 'embed' | 'link' | 'page';
 
 export interface FoundMedia {
@@ -244,7 +246,8 @@ function abs(u: string | null | undefined, base: string): string | null {
 
 function labelFor(el: Element): string | undefined {
   const t = el.getAttribute('title') || el.getAttribute('aria-label') || (el as HTMLElement).dataset?.title;
-  if (t) return t.trim().slice(0, 140);
+  // Not a player's stand-in label ("Video Player"): that names nothing.
+  if (t && !placeholderTitle(t)) return t.trim().slice(0, 140);
   const fig = el.closest('figure');
   const cap = fig?.querySelector('figcaption')?.textContent?.trim();
   return cap ? cap.slice(0, 140) : undefined;
@@ -269,7 +272,7 @@ export function scanDocument(doc: Document = document): FoundMedia[] {
   // embed's own page, one row with the page's iframe row, not a second,
   // stream-only one for its <video>.
   const self = top ? null : embedOf(location.href);
-  if (self) add({ url: self.url, kind: 'embed', title: doc.title || `${self.name} player`, evidence: 'embed' });
+  if (self) add({ url: self.url, kind: 'embed', title: readTitle(doc) || `${self.name} player`, evidence: 'embed' });
 
   doc.querySelectorAll<HTMLMediaElement>('video, audio').forEach((el) => {
     if (self) return;
@@ -283,7 +286,7 @@ export function scanDocument(doc: Document = document): FoundMedia[] {
     if (direct) {
       add({ url: direct, kind, title: labelFor(el), durationS: duration, playing: !el.paused, evidence: 'element' });
     } else if (sources.length || el.readyState > 0) {
-      add({ url: location.href, kind, title: labelFor(el) ?? doc.title, durationS: duration, playing: !el.paused, streamOnly: true, evidence: 'element' });
+      add({ url: location.href, kind, title: labelFor(el) ?? readTitle(doc), durationS: duration, playing: !el.paused, streamOnly: true, evidence: 'element' });
     }
   });
 
@@ -318,7 +321,7 @@ export function scanDocument(doc: Document = document): FoundMedia[] {
     const loaded = loadedMedia(performance.getEntriesByType('resource').map((e) => e.name));
     for (const m of loaded) {
       const duration = Number.isFinite(player.duration) && player.duration > 0 ? player.duration : undefined;
-      add({ url: m.url, kind: m.kind, title: labelFor(player) ?? doc.title, durationS: duration, playing: !player.paused, evidence: 'network' });
+      add({ url: m.url, kind: m.kind, title: labelFor(player) ?? readTitle(doc), durationS: duration, playing: !player.paused, evidence: 'network' });
     }
   }
 

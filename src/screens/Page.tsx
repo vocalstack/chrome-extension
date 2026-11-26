@@ -317,7 +317,7 @@ export function PageScreen({ account, live, intent, onIntentDone, onSettings, on
               <i className={`site__dot${recording ? ' site__dot--rec' : ''}`} style={recording ? undefined : { background: videoPage ? 'var(--live)' : 'var(--ink-45)' }} />
               <span className="site__app">{recording ? 'Recording' : meeting ? meeting.name : isYouTube(scan.url) ? 'YouTube' : own || ownOther ? 'VocalStack' : siteName ?? 'Web page'}</span>
               <span className="site__sep">·</span>
-              <span className="site__host">{recording ? 'Go to Live' : meeting ? (inMeeting(scan.url, scan.title) ? 'Meeting in progress' : host(scan.url)) : host(scan.url)}</span>
+              <span className="site__host">{recording ? 'Go to Live' : meeting ? (inMeeting(scan.url, scan.tabTitle) ? 'Meeting in progress' : host(scan.url)) : host(scan.url)}</span>
             </div>
           ) : (
             // Always two lines, so the card keeps its height from tab to tab.

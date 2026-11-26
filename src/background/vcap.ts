@@ -24,6 +24,7 @@ import { captionPlan, playedOf, siteOf, type PlayedMsg } from '../lib/sites';
 import { listLive, videoFrame } from './live';
 import { LINK_REFUSED, sleep, tabStore, transcribeVideo, vsClient } from './video';
 import { autoTab, tellPage } from './tabCaptions';
+import { videoTitle } from './title';
 
 const AUTO_SEEN = 'vcap.autoSeen';
 interface TabCap { status: VcapStatus; frameId: number; run: number }
@@ -176,5 +177,5 @@ async function auto(tab: chrome.tabs.Tab, played: PlayedMsg) {
   const seen = ((await chrome.storage.session.get(AUTO_SEEN))[AUTO_SEEN] as string[] | undefined) ?? [];
   if (seen.includes(plan.url)) return;
   await chrome.storage.session.set({ [AUTO_SEEN]: [...seen.slice(-200), plan.url] });
-  await start({ tabId: tab.id, url: plan.url, title: tab.title, lang: (g.readLang as string) || null, auto: true });
+  await start({ tabId: tab.id, url: plan.url, title: await videoTitle(tab), lang: (g.readLang as string) || null, auto: true });
 }

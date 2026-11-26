@@ -2,6 +2,7 @@
  *  the captions overlay and drives a dub (src/content/*). */
 
 import { scanDocument } from '../lib/media';
+import { readTitle } from '../lib/title';
 import { startOverlay } from '../content/overlay';
 import { startDubSync } from '../content/dub';
 import { startPlayerPrompt } from '../content/playerPrompt';
@@ -25,7 +26,12 @@ export default defineContentScript({
         return false;
       }
       if (msg?.scan === true) {
-        send({ url: location.href, title: document.title, top: window.top === window, media: scanDocument() });
+        send({ url: location.href, title: document.title, name: readTitle(), top: window.top === window, media: scanDocument() });
+        return false;
+      }
+      // The video's own title, for a name (background/title.ts): the page's frame answers.
+      if (msg?.videoTitle === true) {
+        if (window.top === window) send({ name: readTitle() });
         return false;
       }
       return false;

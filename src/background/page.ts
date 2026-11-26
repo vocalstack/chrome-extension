@@ -4,6 +4,8 @@
 import { VocalStack, type SearchHit } from '@vocalstack/js-sdk';
 import { RpcError, type Handlers } from '../lib/rpc';
 import type { FoundMedia } from '../lib/media';
+import { betterTitle, cleanTitle } from '../lib/title';
+import { meetingHost } from '../lib/live';
 import { accessToken } from '../lib/auth';
 import { currentEnv } from '../lib/env';
 import { showInPanel } from './panel';
@@ -12,7 +14,7 @@ import { hitPath } from './page/paths';
 
 /* ── page.scan ─────────────────────────────────────────────────────── */
 
-interface FrameAnswer { url: string; title: string; top: boolean; media: FoundMedia[] }
+interface FrameAnswer { url: string; title: string; name?: string; top: boolean; media: FoundMedia[] }
 
 /** Worded already: an RpcError, so its sentence reaches the panel as it is. */
 class ScanError extends RpcError {
@@ -64,7 +66,8 @@ export function mergeMedia(pageUrl: string, pageTitle: string, found: FoundMedia
     keep.durationS = Math.max(was.durationS ?? 0, m.durationS ?? 0) || undefined;
     // An element with an address of its own beats one that only streams.
     keep.streamOnly = ([was, m].some((x) => x.streamOnly) && ![was, m].some((x) => (x.kind === 'video' || x.kind === 'audio') && !x.streamOnly)) || undefined;
-    keep.title ??= was.title ?? m.title;
+    // A real title over a player's stand-in ("YouTube video player").
+    keep.title = betterTitle(keep.title, keep === was ? m.title : was.title);
     byUrl.set(m.url, keep);
   }
   // The page itself is always there: what plays without an address of its
@@ -96,9 +99,12 @@ export async function scan(tabId?: number) {
   }
   const top = answers.find((a) => a.top);
   const pageUrl = top?.url ?? url;
-  const pageTitle = top?.title || title;
+  const tabTitle = top?.title || title;
+  // The video's own title where the page gives one. A meeting keeps the
+  // tab's: its title says whether a call is on.
+  const pageTitle = meetingHost(pageUrl) ? tabTitle : top?.name || cleanTitle(tabTitle, pageUrl) || tabTitle;
   const icon = /^(?:https:|data:image\/)/.test(tab.favIconUrl ?? '') ? tab.favIconUrl : undefined;
-  return { tabId: tab.id, url: pageUrl, title: pageTitle, icon, media: mergeMedia(pageUrl, pageTitle, answers.flatMap((a) => a.media)) };
+  return { tabId: tab.id, url: pageUrl, title: pageTitle, tabTitle, icon, media: mergeMedia(pageUrl, pageTitle, answers.flatMap((a) => a.media)) };
 }
 
 /* ── Context menus ─────────────────────────────────────────────────── */
@@ -108,7 +114,7 @@ const MENU = { link: 'vs.page.link', media: 'vs.page.media', page: 'vs.page.page
 function onMenu(info: chrome.contextMenus.OnClickData, tab?: chrome.tabs.Tab) {
   const pageUrl = info.pageUrl ?? tab?.url ?? '';
   let url = pageUrl;
-  let title = tab?.title;
+  let title = cleanTitle(tab?.title, pageUrl) || tab?.title;
   if (info.menuItemId === MENU.link && info.linkUrl) { url = info.linkUrl; title = info.selectionText || undefined; }
   else if (info.menuItemId === MENU.media) {
     const src = info.srcUrl ?? '';

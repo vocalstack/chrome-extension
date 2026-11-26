@@ -6,6 +6,7 @@
 
 import markSvg from '../styles/vocalstack-mark.svg?raw';
 import { videoIdOf } from '../lib/ahead';
+import { readTitle } from '../lib/title';
 import type { PlayerState } from '../lib/shared';
 
 const CLOSED = 'vocalstack.player.closed';
@@ -76,7 +77,7 @@ export function startPlayerPrompt() {
     const go = card.querySelector<HTMLButtonElement>('.go')!;
     go.onclick = () => {
       go.disabled = true;
-      void ask('video.player', { url: location.href, title: document.title.replace(/ - YouTube$/, '').slice(0, 120), here: true })
+      void ask('video.player', { url: location.href, title: readTitle().slice(0, 120), here: true })
         .finally(() => { go.disabled = false; });
     };
     document.documentElement.appendChild(host);

@@ -14,6 +14,7 @@ import { capturable, isRunning, meetingHost, meetingOf, tabHolder, RECORDING_MOD
 import type { OffAnswer, OffCmd } from '../lib/offscreen';
 import { showInPanel } from './panel';
 import { vsClient } from './video';
+import { videoTitle } from './title';
 
 const OFFSCREEN = 'offscreen.html';
 let creating: Promise<void> | null = null;
@@ -182,11 +183,11 @@ const langLists: Partial<Record<'transcription' | 'translation', Promise<{ code:
 function wait(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 const hostOf = (url: string) => { try { return new URL(url).host; } catch { return undefined; } };
 
-function defaultName(start: LiveStart, tab: chrome.tabs.Tab | null): string {
+function defaultName(start: LiveStart, tab: chrome.tabs.Tab | null, title?: string): string {
   const when = new Date().toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   if (start.name?.trim()) return start.name.trim();
   if (start.mode === 'meeting') return `${meetingOf(tab?.url) ?? 'Meeting'} · ${when}`;
-  if (start.input.tab && tab?.title) return tab.title.slice(0, 120);
+  if (start.input.tab && (title || tab?.title)) return (title || tab!.title!).slice(0, 120);
   return `Microphone · ${when}`;
 }
 
@@ -244,7 +245,7 @@ export async function startLive(start: LiveStart, invokedTab?: chrome.tabs.Tab):
     setTarget(id, { tabId: tab.id, frameId: await videoFrame(tab.id), hide: start.mode !== 'captions' });
   }
   const where = tab?.url ? { meeting: meetingHost(tab.url)?.key, host: hostOf(tab.url) } : {};
-  const cmd: OffCmd = { off: 'live.start', id, api: env.api, start: { ...start, ...where, tabId: tab?.id ?? start.tabId }, name: defaultName(start, tab), streamId, tabTitle: tab?.title, tabUrl: tab?.url };
+  const cmd: OffCmd = { off: 'live.start', id, api: env.api, start: { ...start, ...where, tabId: tab?.id ?? start.tabId }, name: defaultName(start, tab, start.name?.trim() || start.mode === 'meeting' || !start.input.tab || !tab ? undefined : await videoTitle(tab)), streamId, tabTitle: tab?.title, tabUrl: tab?.url };
   try {
     const status = (await off<LiveStatus>(cmd)).value!;
     if (feeder !== null) await chrome.tabs.sendMessage(tab!.id!, { ahead: 'start', id }, { frameId: feeder }).catch(() => {});
