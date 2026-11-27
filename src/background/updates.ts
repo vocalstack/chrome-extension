@@ -7,11 +7,20 @@
  *  starts the download, which installs when the extension reloads, never
  *  on its own: the listener on onUpdateAvailable keeps Chrome from
  *  reloading under a recording. An unpacked install has no store:
- *  GitHub's Latest release (PUBLISHING.md), and the zip again. */
+ *  GitHub's Latest release (PUBLISHING.md), and the zip again.
+ *
+ *  Automatic updates (a store install, with Install updates automatically
+ *  on, or signed out, when there is nothing to lose): each hour the store
+ *  is asked, a newer version is downloaded through the browser (the
+ *  store's own, as Chrome's updater does), and once downloaded it is
+ *  installed by reloading, but only when nothing would be lost: no
+ *  recording or captions running and no panel open (a reload closes it).
+ *  Otherwise the next hour tries again; a browser restart installs it too. */
 
 import { push, RpcError, type Handlers } from '../lib/rpc';
 import { versionState, type UpdateState } from '../lib/version';
 import { anyRunning } from './live';
+import * as auth from '../lib/auth';
 
 const RELEASES = 'https://api.github.com/repos/vocalstack/chrome-extension/releases/latest';
 const ZIP = `https://github.com/vocalstack/chrome-extension/releases/download/latest/vocalstack-${import.meta.env.BROWSER === 'edge' ? 'edge' : 'chrome'}.zip`;
@@ -23,6 +32,7 @@ const LATEST_KEY = 'vs.update.latest';
 const STORE_KEY = 'vs.update.served';
 const READY_KEY = 'vs.update.ready';
 export const AUTO_UPDATE = 'vs.update.auto';
+const AUTO_ALARM = 'vs.update.auto';
 
 let step: UpdateState['step'] = 'idle';
 let store: Promise<boolean> | null = null;
@@ -121,12 +131,41 @@ const check = async (force: boolean): Promise<UpdateState> => {
   return s;
 };
 
+const autoOn = async () => (await chrome.storage.local.get(AUTO_UPDATE))[AUTO_UPDATE] === true || !(await auth.account());
+
+/** A side panel open in any window. Not knowing counts as open. */
+const panelOpen = () => chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.SIDE_PANEL] }).then((c) => c.length > 0, () => true);
+
+/** Automatic updates: install a downloaded version when nothing would be
+ *  lost, else download a newer one the store serves. Quietly: the panel's
+ *  step is left alone, the state is told only once one is ready. */
+async function autoUpdate() {
+  if (import.meta.env.DEV || !(await isStore()) || !(await autoOn())) return;
+  const ready = (await chrome.storage.local.get(READY_KEY))[READY_KEY];
+  if (typeof ready === 'string' && versionState(current(), ready) !== 'current') {
+    if (!(await anyRunning()) && !(await panelOpen())) chrome.runtime.reload();
+    return;
+  }
+  const v = await fromStore(false);
+  if (!v || versionState(current(), v) === 'current') return;
+  const r = await chrome.runtime.requestUpdateCheck().catch(() => null);
+  // Downloaded already; otherwise onUpdateAvailable says when it is.
+  if (r?.status === 'update_available' && r.version) {
+    await chrome.storage.local.set({ [READY_KEY]: r.version });
+    step = 'ready';
+    await tell();
+    return autoUpdate();
+  }
+}
+
 export function registerUpdates(): Handlers {
   // Registered once, at the worker's start: Chrome then waits for a reload.
   chrome.runtime.onUpdateAvailable.addListener(({ version }) => {
     step = 'ready';
-    void chrome.storage.local.set({ [READY_KEY]: version }).then(tell);
+    void chrome.storage.local.set({ [READY_KEY]: version }).then(tell).then(autoUpdate);
   });
+  void chrome.alarms.create(AUTO_ALARM, { delayInMinutes: 1, periodInMinutes: 60 });
+  chrome.alarms.onAlarm.addListener((a) => { if (a.name === AUTO_ALARM) void autoUpdate(); });
   chrome.runtime.onInstalled.addListener(({ reason }) => {
     if (reason === 'update') { step = 'idle'; void chrome.storage.local.remove(READY_KEY); }
   });
@@ -144,6 +183,7 @@ export function registerUpdates(): Handlers {
     },
     'update.auto': async ({ on }) => {
       await chrome.storage.local.set({ [AUTO_UPDATE]: on });
+      if (on) void autoUpdate();
       return check(false);
     },
   };

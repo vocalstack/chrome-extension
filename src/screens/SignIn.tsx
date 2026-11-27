@@ -15,7 +15,9 @@ import { HiBuilding, HiChevronDown, HiKey, HiLock, HiSpeaker, IconCaptions, Icon
 import logoUrl from '../styles/vocalstack-logo.svg';
 import logoDarkUrl from '../styles/vocalstack-logo-dark.svg';
 
-export function SignIn({ env }: { env: Env | null }) {
+/** `update`: the same banner as signed in (a newer version out, or this
+ *  one deprecated), here over the sign-in button. */
+export function SignIn({ env, update }: { env: Env | null; update?: React.ReactNode }) {
   const connect = useAction();
   const key = useAction();
   const [showKey, setShowKey] = useState(false);
@@ -56,6 +58,7 @@ export function SignIn({ env }: { env: Env | null }) {
       </div>
       {!showKey ? (
         <div className="welcome2__acts">
+          {update}
           <button type="button" className="cta" aria-busy={connect.busy || undefined} disabled={connect.busy} onClick={() => connect.run(() => rpc('auth.connect'))}>{connect.busy && <span className="spin" />}Sign in with VocalStack</button>
           <button type="button" className="cta cta--text signin-more__toggle" aria-expanded={more} aria-controls="signin-more" onClick={() => setMore((v) => !v)}>More ways to sign in<HiChevronDown /></button>
           {more && (

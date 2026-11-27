@@ -48,7 +48,7 @@ export default defineConfig({
     description: 'Transcribe what a page plays, caption and dub any video, record tabs and meetings, run broadcasts and save speakers.',
     ...(STORE ? {} : { key: KEY }),
     minimum_chrome_version: '116',
-    permissions: ['storage', 'identity', 'sidePanel', 'tabCapture', 'offscreen', 'contextMenus', 'activeTab', 'scripting', 'tabs', 'notifications', 'webNavigation'],
+    permissions: ['storage', 'identity', 'sidePanel', 'tabCapture', 'offscreen', 'contextMenus', 'activeTab', 'scripting', 'tabs', 'notifications', 'webNavigation', 'alarms'],
     host_permissions: ['<all_urls>'],
     action: { default_title: 'VocalStack' },
     side_panel: { default_path: 'sidepanel.html' },

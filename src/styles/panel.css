@@ -625,7 +625,8 @@ label.item--click{cursor:pointer}
 .welcome2__head{margin:20px 0 0;font-size:25px;font-weight:600;letter-spacing:-.7px;line-height:1.12;text-wrap:balance}
 .welcome2__text{margin:8px 0 0;max-width:320px;font-size:13px;font-weight:300;line-height:1.5;color:var(--ink-62);text-wrap:pretty}
 .welcome2__acts{width:100%;display:flex;flex-direction:column;gap:4px}
-.welcome2__acts>.cta:first-child{height:48px;border-radius:14px;font-size:15px;margin-bottom:2px}
+.welcome2__acts>.upd{margin:0 0 8px}
+.welcome2__acts>button.cta:first-of-type{height:48px;border-radius:14px;font-size:15px;margin-bottom:2px}
 .welcome2__acts--key{gap:10px}
 /* The key form is short: logo, words and field sit together, centred. */
 .welcome2--key{justify-content:center}
@@ -756,7 +757,7 @@ label.item--click{cursor:pointer}
 .welcome2__top:hover .feats__timer{animation-play-state:paused}
 @keyframes feats-timer{to{transform:scaleX(1)}}
 @media (prefers-reduced-motion:reduce){.feats__timer{display:none}}
-@media (max-height:760px){.welcome2--more .feats{display:none}}
+@media (max-height:760px){.welcome2--more .feats,.welcome2:has(.welcome2__acts>.upd) .feats{display:none}}
 @media (max-height:600px){.feats{display:none}.vcap__tr{display:none}.welcome2__head{font-size:22px;margin-top:16px}}
 .welcome2__env{width:100%;margin-top:12px;display:flex;flex-direction:column;gap:8px}
 .keybox{display:flex;flex-direction:column;gap:7px;margin-bottom:2px}

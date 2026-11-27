@@ -94,7 +94,7 @@ export function App() {
   if (account === undefined) return null;
   // An unsupported version: nothing works until it's updated (lib/version.ts).
   const block = update && <UpdateBlock s={update} app={(env ?? ENVS.production).app} />;
-  if (!account) return <div className="shell"><SignIn env={env} />{block}</div>;
+  if (!account) return <div className="shell"><SignIn env={env} update={update && <UpdateBanner s={update} />} />{block}</div>;
 
   /** A session running: the Live tab shows it. */
   const rec = live.some((s) => on(s) && isRunning(s));

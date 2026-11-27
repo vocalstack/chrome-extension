@@ -144,7 +144,7 @@ export function UpdatesCard({ s }: { s: UpdateState }) {
         <div className="pref">
           <div className="lrow__main">
             <div className="pref__label">Install updates automatically</div>
-            <div className="pref__sub">{s.auto ? 'New versions download in the background and install the next time the extension reloads.' : 'You’ll be told when a new version is available, and choose when to install it.'}</div>
+            <div className="pref__sub">{s.auto ? 'New versions download in the background and install when VocalStack isn’t in use: never while you’re recording or the panel is open.' : 'You’ll be told when a new version is available, and choose when to install it.'}</div>
           </div>
           <Toggle label="Install updates automatically" checked={s.auto || ask} onChange={setAuto} />
         </div>
@@ -152,7 +152,7 @@ export function UpdatesCard({ s }: { s: UpdateState }) {
       {ask && (
         <div className="upd-ask" data-screen-label="Auto update consent">
           <div className="upd__title upd__title--strong">Allow automatic updates?</div>
-          <div className="upd__text">VocalStack will download new versions in the background and install them the next time the extension reloads. It never reloads on its own, and never while you’re recording.</div>
+          <div className="upd__text">VocalStack will download new versions from the store in the background and install them when it isn’t in use: never while you’re recording, captioning or have the panel open.</div>
           <div className="row" style={{ gap: 8 }}>
             <button type="button" className="upd-ask__btn" onClick={() => { setAsk(false); void rpc('update.auto', { on: true }).catch(() => {}); }}>Allow</button>
             <button type="button" className="upd-ask__btn upd-ask__btn--plain" onClick={() => setAsk(false)}>Not Now</button>
