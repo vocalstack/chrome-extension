@@ -759,6 +759,8 @@ label.item--click{cursor:pointer}
 @media (prefers-reduced-motion:reduce){.feats__timer{display:none}}
 @media (max-height:760px){.welcome2--more .feats,.welcome2:has(.welcome2__acts>.upd) .feats{display:none}}
 @media (max-height:600px){.feats{display:none}.vcap__tr{display:none}.welcome2__head{font-size:22px;margin-top:16px}}
+/* A wide panel or a tab: the screen keeps a phone-like column, centred. */
+.welcome2__top,.welcome2__acts,.welcome2__env{max-width:420px;margin-inline:auto}
 .welcome2__env{width:100%;margin-top:12px;display:flex;flex-direction:column;gap:8px}
 .keybox{display:flex;flex-direction:column;gap:7px;margin-bottom:2px}
 .keybox__label{font-size:12.5px;font-weight:500;color:var(--ink-80)}
